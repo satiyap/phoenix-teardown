@@ -5,6 +5,14 @@ The scope decision the study exists to support. Three lists: **in v0.1**,
 **deferred with intent**, and **never**. Every line cites the evidence that put it
 there.
 
+> **This document is the v0.1 *shipment*, not the target architecture.** The two
+> differ — agent revocation, the live conformance-bench layer, `Recall` and `Task` are
+> all target-architecture items deferred out of v0.1. The difference is tabulated in
+> [`scope-reconciliation.md`](scope-reconciliation.md) §1.
+>
+> **`Task` is not in v0.1.** Runs are created directly with their own intent fields;
+> `Task` becomes a nullable FK later, which is an additive migration (§2).
+
 The governing rule comes from Cloudflare's `channels.md`, which deleted its own
 durable messaging host because it "never delivered exactly-once ingress… so the
 guarantee it appeared to offer was not one it could keep":
@@ -43,7 +51,7 @@ Ordered by dependency: each item is buildable once the ones above it exist.
 
 | # | Capability | Decision | Evidence |
 |---|---|---|---|
-| 13 | **Agent-to-agent messaging** | **INTEGRATE `ag2.network`** — do not write an envelope schema. Replace its file WAL with our log. | ADR-0003; AG2 is the only precedent in 13 projects |
+| 13 | **Agent-to-agent messaging** | **CONTINGENT — INTEGRATE `ag2.network` if the storage spike passes**, otherwise port the `Envelope` schema and build the hub on our log. The spike has not been run. | ADR-0003; AG2 is the only precedent in 13 projects; gate defined in `scope-reconciliation.md` §4 |
 | 14 | **Cost measurement** | INTEGRATE `genai-prices`, with Omnigent's fail-closed-on-unpriced rule | Omnigent, Pydantic AI |
 
 ---

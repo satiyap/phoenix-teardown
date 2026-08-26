@@ -117,22 +117,33 @@ Four ADRs did not exist before the evidence (0011 pinning, 0012 capabilities,
 
 ### What the evidence decided
 
-**BUILD — four things nobody does:**
-1. **Content-derived pinning on the agent definition.** MAF proves the mechanism on
+> **Scope note.** "Target architecture" is what the platform is when finished;
+> **v0.1 shipment** is what we build first. They differ, and
+> [`synthesis/scope-reconciliation.md`](synthesis/scope-reconciliation.md) tabulates
+> the difference. Two of the four items below are in v0.1; two are deferred with
+> named triggers.
+
+**Target architecture — four things nobody does:**
+1. **Content-derived pinning on the agent definition.** *(in v0.1)* MAF proves the mechanism on
    *workflows* (a bytecode digest enforced on restore); nobody applies it to agents.
    13 projects: AX pins adapter identity without versions, Omnigent versions agents
    without pinning, ADK versions storage and telemetry schemas but not agents.
-2. **A platform-owned effect ledger.** Cloudflare and AG2 each solve half with
+2. **A platform-owned effect ledger.** *(in v0.1)* Cloudflare and AG2 each solve half with
    different keys; ADK states the requirement precisely and delegates it to tool
    authors.
 3. **Unified `Capability` + `Extension` with a two-layer conformance bench.**
+   *(v0.1 ships the offline layer only)*
    Five projects use one word for two different concepts.
-4. **Agent-level revocation and an approver identity on approvals.** HumanLayer has
+4. **Agent-level revocation and an approver identity on approvals.** *(approver
+   identity in v0.1; revocation deferred)* HumanLayer has
    the only real `Approval` resource and records *why*, never *who*.
 
-**INTEGRATE:** AG2's `ag2.network` envelope and hub (the only durable agent
-messaging in 13 projects), Cedar for policy, Agent Control's control plane,
-`genai-prices` for cost data.
+**INTEGRATE — three, down from four:** AG2's `ag2.network` envelope and hub (the only
+durable agent messaging in 13 projects, and **contingent on a storage spike**), Cedar
+for policy, `genai-prices` for cost data. *Agent Control was reclassified from
+integrate to port: it has no `Principal` model, so running it would mean a second
+policy store that cannot reference the principal ADR-0007 requires on every
+decision.*
 
 **NEVER:** compensation/saga engine (zero positive answers in 13 projects), workflow
 engine, model gateway, agent-authoring framework, or any bespoke policy DSL, trace
@@ -169,6 +180,7 @@ the evidence behind it.
 
 | Document | What it answers |
 |---|---|
+| [`synthesis/scope-reconciliation.md`](synthesis/scope-reconciliation.md) | **Read first if anything below seems to contradict:** six ambiguities adjudicated |
 | [`synthesis/v01-boundary.md`](synthesis/v01-boundary.md) | What ships, what waits, what we never build |
 | [`synthesis/reference-architecture.md`](synthesis/reference-architecture.md) | The component shape and why each piece exists |
 | [`synthesis/domain-model.md`](synthesis/domain-model.md) | The canonical model, its invariants, and the strawman nodes deleted |

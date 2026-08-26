@@ -12,15 +12,21 @@ what we **reject** (patterns we deliberately do not copy).
 
 ## 1. INTEGRATE — run someone else's code
 
-Four, and only four, survive the test "Apache-2.0 or MIT, in our language or
-language-agnostic, independently useful, and solves a subsystem we would otherwise
-invent."
+**Three** survive the test "Apache-2.0 or MIT, in our language or language-agnostic,
+independently useful, and solves a subsystem we would otherwise invent."
+
+> **Corrected 2026-08-26.** Agent Control was listed here and simultaneously in the
+> PORT section below — two incompatible architectures in one table. It is now PORT
+> only: it carries its own PostgreSQL persistence and its own `namespace_key`
+> tenancy, and **has no `Principal` model**, so running it as a dependency would mean
+> a second policy store structurally unable to name the principal ADR-0007 requires
+> on every decision. See
+> [`scope-reconciliation.md`](scope-reconciliation.md) §3.
 
 | What | From | Why it wins | Risk |
 |---|---|---|---|
-| **`ag2.network`** — envelope schema, hub contract, channel protocols | AG2 (Apache-2.0, Python) | The only durable agent-to-agent messaging in 13 projects. Opt-in package, 49 test files, verified 39 passing. Adopting it removes the single largest BUILD with no prior art. | Its WAL is file-based with in-memory indexes, and terminal-channel pruning clears the causation index — so its dedupe guarantee has a retention horizon we must replace. |
+| **`ag2.network`** — envelope schema, hub contract, channel protocols **(CONTINGENT: gated on a storage spike, §4 of scope-reconciliation)** | AG2 (Apache-2.0, Python) | The only durable agent-to-agent messaging in 13 projects. Opt-in package, 49 test files, verified 39 passing. Adopting it removes the single largest BUILD with no prior art. | Its WAL is file-based with in-memory indexes, and terminal-channel pruning clears the causation index — so its dedupe guarantee has a retention horizon we must replace. |
 | **Cedar** — the policy language | via AWS AgentCore | Formal semantics + existing analysis toolchain. Makes "is policy set B more permissive than A" decidable, which is the only path to ADR-0013's static shadow comparison. `principal`/`action`/`resource` align with our ADR-0007 split. | Cedar is a language, not a service; we own the evaluation and the integration. |
-| **Agent Control** — the policy control plane | Agent Control (Apache-2.0, Python) | `observe` and `steer` shipped; recursive condition trees; separate agent/admin credentials; composite FKs for tenancy. **The only project built on the assumption that it is not the whole platform** (adapters for four runtimes it does not own). | Its `deny_found` short-circuit biases observe-mode data; we must exempt observe evaluations. No principals. |
 | **`genai-prices`** — cost data | via Pydantic AI | Externally maintained pricing dataset rather than a table we keep current. | Pair with Omnigent's fail-closed-on-unpriced rule; verify maintenance cadence before depending on it for *enforcement* (OQ-028). |
 
 **Deliberately not integrated** despite being technically eligible: LangGraph's

@@ -9,6 +9,13 @@ This document is the handoff. It states what we are building, why each piece is
 shaped the way it is, and — equally important — what we are deliberately not
 building.
 
+> **Two scopes, named separately.** This document describes the **target
+> architecture**. The **v0.1 shipment** is a subset — `Task`, agent revocation, the
+> live conformance-bench layer and `Recall` are all deferred, and messaging is
+> contingent on a spike that has not been run. See
+> [`synthesis/scope-reconciliation.md`](synthesis/scope-reconciliation.md), which
+> adjudicates six ambiguities found in external review.
+
 ---
 
 ## 1. The thesis
@@ -322,7 +329,9 @@ one ACP adapter → version-and-pin on resume → effect ledger.
 `decided_by` → three-boundary sandbox → capability declarations with the offline bench
 → knowledge and four state scopes → OTel with an asserted propagation test.
 
-**Tier 3 — integrate.** `ag2.network` for messaging, `genai-prices` for cost.
+**Tier 3 — integrate.** `genai-prices` for cost. `ag2.network` for messaging **only
+if the storage spike passes** — otherwise port its `Envelope` schema and build the hub
+on our own log.
 
 ## 9. The riskiest decisions
 

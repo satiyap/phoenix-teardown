@@ -273,6 +273,52 @@ halves precedented and a third outcome category I had not conceived of**. Cedar
 supplies the language and the static analysis; Agent Control supplies the empirical
 mode, the aggregation, and `steer`.
 
+## Amendment 3 — 2026-08-26 (verification): Cedar's static analysis is a Rust-boundary dependency
+
+Amendment 1 adopted Cedar partly on the claim that it makes "is policy set B more
+permissive than A" decidable. **I tested that claim and it is only half right.**
+
+Installed `cedarpy` and ran real policies. What works:
+
+```
+risk      A(baseline)   B(tighter)   C(typo'd attr)
+low          Allow        Allow        Allow
+medium       Allow         Deny        Allow
+high          Deny         Deny        Allow    ← silently permits a high-risk call
+```
+
+Policy C forbids on `resource.riskLevel` instead of `resource.risk` — a one-word typo
+that silently disables the guard. Cedar's validator catches it **statically, with no
+traffic**:
+
+```
+correct attr  -> validation_passed=True,  num_errors=0
+typo'd attr   -> validation_passed=False, num_errors=1
+```
+
+In a hand-rolled predicate that typo is a missing attribute and the high-risk guard
+evaporates. **That is the strongest argument for Cedar, and it is a better one than
+the argument I originally made.**
+
+What does **not** work: `cedarpy` exposes `validate_policies` (schema conformance) and
+`is_authorized_partial` (evaluation with unknowns). It does **not** expose equivalence,
+implication or permissiveness comparison. Those live in Cedar's Rust/Lean analysis
+tooling.
+
+**Amended decision.** Cedar stays, for schema-validated policies and the typo class of
+bug it catches. But the two shadow halves are now scoped honestly:
+
+- **Empirical shadow — v0.1.** `observe` mode (Agent Control's mechanism): run the
+  candidate on live traffic, record what it would have done, aggregate. Available
+  immediately in Python.
+- **Static shadow — deferred, and a Rust-boundary dependency.** Permissiveness
+  comparison requires calling Cedar's analysis crate across an FFI or service
+  boundary. Not a v0.1 commitment.
+
+Amendment 1 said this ADR's hardest requirement had become "a tooling question rather
+than a research one". That is still true, but the tooling is in another language, which
+is a materially different cost than I implied.
+
 ## Evidence log
 
 | Project | Effect | Evidence | Note |
