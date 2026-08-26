@@ -14,935 +14,1073 @@ project:
   evidence_class: A
   read_on: 2026-08-26
   repo: "https://github.com/humanlayer/humanlayer"
-  commit:                  # SHA the claims were read against
+  commit: 99abe673498cf8bdcd5f989aebe9406a27185b3b
   docs: "https://humanlayer.dev/docs"
-  version:
+  version: "hld @ 2026-06-18 (older commit than other projects read)"
   license: Apache-2.0
   license_verdict: INTEGRATE
-  runtime_class: unknown
+  runtime_class: attached_harness
   one_line: Approval and human-oversight layer for autonomous agents.
-  thesis:                  # the core architectural bet
+  thesis: "An approval is a durable resource with its own lifecycle, not a blocked function call - so a pending decision outlives the process that requested it, and the tool call carries its approval state inline."
 
 probes:
 
   # --- A. Core abstraction and object model ---
   # A1: What does this system think an agent *is*? State it in one sentence, in their vocabulary.
   A1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent resource. The agent is Claude Code, wrapped via claudecode-go; sessions and runs are the modelled units."
+    evidence: "claudecode-go/ @ 99abe67"
   # A2: What is the root resource — the thing everything else hangs off?
   A2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Session is the durable unit with nine states, cost_usd, permission settings and an ordered conversation event stream, persisted in SQLite."
+    evidence: "hld/store/sqlite.go:95-130 @ 99abe67"
   # A3: Is `Agent` persistent or ephemeral? Can it exist while not executing?
   A3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Sessions and approvals persist in SQLite independently of the daemon process; an ApprovalReconciler re-syncs on restart."
+    evidence: "hld/session/types.go:11-13 @ 99abe67"
   # A4: Is `Task` a separate resource from `Run`? If not, which concept is missing and what fills the...
   A4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Sessions carry both an id and a run_id, and approvals reference run_id - so run identity is distinct from session identity, but there is no Task resource holding intent across attempts."
+    evidence: "hld/store/sqlite.go:201-204 @ 99abe67"
   # A5: What is a `Session` attached to: user, agent, task, or execution?
   A5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Session is the session, with draft/discarded states so it can exist before running and be abandoned without running."
+    evidence: "hld/store/store.go:274-284 @ 99abe67"
   # A6: Are messages first-class durable resources, or transient function arguments?
   A6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "ConversationEvent is a sequence-ordered durable row carrying role, content, tool call fields, tool result fields, completion flag and approval correlation."
+    evidence: "hld/store/sqlite.go:132-161 @ 99abe67"
   # A7: Are artifacts (files, outputs, deliverables) first-class?
   A7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No artifact resource; there is result storage for session output but not a modelled artifact."
+    evidence: "hld/store/result_storage_test.go @ 99abe67"
   # A8: Can multiple agents participate in one task? How is that represented?
   A8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "parent_tool_use_id (migration 6, 'for sub-task tracking') gives a sub-task tree within a session, but there is no multi-agent participation model."
+    evidence: "hld/store/sqlite.go:373-405 @ 99abe67"
   # A9: Draw the object model as a tree. Only nodes that exist in their code or API.
   A9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Session(status x9, cost_usd, dangerously_skip_permissions[+expires_at]) > ConversationEvent(tool fields, is_completed, approval_status, approval_id, parent_tool_use_id); Approval(id, run_id, session_id, status CHECK, created_at, responded_at, tool_name, tool_input, comment). See teardown section 3."
+    evidence: "hld/store/sqlite.go:95-220 @ 99abe67"
 
   # --- B. Runtime model ---
   # B1: Does the platform launch agents, host them, or attach to external ones?
   B1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A long-lived Go daemon (hld) launches and supervises Claude Code sessions via claudecode-go, over a Unix domain socket."
+    evidence: "hld/PROTOCOL.md @ 99abe67"
   # B2: Execution substrate: process, container, microVM, serverless, in-process library, remote HTTP?
   B2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Local subprocess execution of Claude Code; no container or isolate boundary."
+    evidence: "claudecode-go/ @ 99abe67"
   # B3: Who owns the event loop — platform or agent?
   B3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Claude Code owns its own loop; the daemon supervises the session, intercepts tool approvals and records the transcript."
+    evidence: "hld/session/manager.go @ 99abe67"
   # B4: Who decides when an agent wakes?
   B4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "The daemon launches locally on request; there is no placement or scheduling layer."
+    evidence: "hld/session/manager.go @ 99abe67"
   # B5: Can an agent run indefinitely? What is the actual ceiling?
   B5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Sessions are long-lived with last_activity_at, waiting_input for human blocks, and interrupted sessions explicitly resumable."
+    evidence: "hld/store/store.go:274-284 @ 99abe67"
   # B6: Are there background or unattended agents?
   B6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No scheduled or background execution."
+    evidence: "hld/session/manager.go @ 99abe67"
   # B7: Is execution synchronous or asynchronous from the caller's view?
   B7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A typed event bus publishes new_approval, approval_resolved, session_status_changed, conversation_updated and session_settings_changed to filtered subscribers over channels."
+    evidence: "hld/bus/types.go:9-60 @ 99abe67"
   # B8: Can in-flight work migrate between workers?
   B8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "Local single-daemon; work does not move."
+    evidence: "hld/PROTOCOL.md @ 99abe67"
   # B9: Can an agent survive a machine restart? Automatically, or with operator action?
   B9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Interrupted sessions 'can be resumed', and ApprovalReconciler re-syncs approvals after session restart, keyed by run_id, non-fatally."
+    evidence: "hld/store/store.go:283 @ 99abe67; hld/session/manager.go:512-528"
   # B10: Classify: worker/queue, durable actor, attached harness, or in-process library.
   B10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "attached_harness: a local daemon supervising an external agent process (Claude Code) it did not author, owning durability on its behalf."
+    evidence: "claudecode-go/ @ 99abe67; hld/store/sqlite.go"
 
   # --- C. Durability and failure semantics ---
   # C1: What state is durable, and what is lost on crash?
   C1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "SQLite with numbered migrations, each guarded by a column-existence check before ALTER TABLE so migrations are idempotent and re-runnable."
+    evidence: "hld/store/sqlite.go:373-411 @ 99abe67"
   # C2: *When* is state persisted — every step, every tool call, on checkpoint, never?
   C2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Conversation events are appended with a sequence number as they occur; approvals are inserted at request time with status pending."
+    evidence: "hld/store/sqlite.go:132-161,201-220 @ 99abe67"
   # C3: Checkpointing or event sourcing? Can state be rebuilt from a log?
   C3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Append-only conversation events with sequence ordering, but session and approval rows are updated in place (status, responded_at)."
+    evidence: "hld/store/sqlite.go:132-136 @ 99abe67"
   # C4: Retry semantics, and at what granularity: run, step, tool call?
   C4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No retry or backoff policy."
+    evidence: "hld/session/manager.go @ 99abe67"
   # C5: At-least-once or exactly-once? What do the docs claim versus what the code does?
   C5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Approval reconciliation on restart is retried implicitly (it logs and leaves the pending row for the next attempt), but there is no stated delivery guarantee."
+    evidence: "hld/session/manager.go:522-528 @ 99abe67"
   # C6: Is there an idempotency model for tool side effects?
   C6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Not a tool-effect ledger, but the DECISION is idempotent: ErrAlreadyDecided with an AlreadyDecidedError{ID, Status} whose message names the existing status, verified by test. Generalises ADR-0014 - anything a human or UI can retry needs the same guard."
+    evidence: "hld/store/errors.go:13-42 @ 99abe67; test TestApprovalErrors/UpdateApprovalResponse_AlreadyDecided; verified locally 2026-08-26: GOWORK=off go build ./... OK; make mocks then go test ./approval/... ./bus/... ./store/... -run Approval all pass"
   # C7: Process crash recovery: what resumes, and from where?
   C7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "State is read from SQLite; ApprovalReconciler re-syncs approvals for a session on (re)start, keyed by run_id, waiting 2s for the session then logging rather than failing on error."
+    evidence: "hld/session/manager.go:512-528 @ 99abe67"
   # C8: Node loss: is work re-dispatched, and how is it detected?
   C8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "last_activity_at plus session status transitions give staleness signals, but there is no hung-session detection or reaping."
+    evidence: "hld/store/sqlite.go:105 @ 99abe67"
   # C9: Context-window overflow: truncation, summarisation, or failure?
   C9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No context-window management; that is Claude Code's concern."
+    evidence: "hld/session/manager.go @ 99abe67"
   # C10: Timers, scheduled execution, long sleeps — durable across restart?
   C10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "dangerously_skip_permissions_expires_at is a real durable timer: the bypass expires and emits session_settings_changed with reason='expired' and expired_at."
+    evidence: "hld/store/sqlite.go:117-118 @ 99abe67; hld/bus/types.go:20-32"
   # C11: Human-in-the-loop pause and resume: durable, or in-memory only?
   C11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "THE ONLY REAL APPROVAL RESOURCE IN THE STUDY. A durable approvals table with status CHECK (pending|approved|denied), created_at/responded_at, tool_name and tool_input, a comment for denial reasons or approval notes, a PARTIAL INDEX on pending rows only, correlation onto the conversation event via approval_id/approval_status, and ErrAlreadyDecided guarding double-resolution. Reconciled on session restart. Verified by running the tests."
+    evidence: "hld/store/sqlite.go:201-220 @ 99abe67; hld/approval/types.go; verified locally 2026-08-26: GOWORK=off go build ./... OK; make mocks then go test ./approval/... ./bus/... ./store/... -run Approval all pass"
   # C12: Can a definition be upgraded while runs are in flight? What happens to them?
   C12:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No version pinning of any kind."
+    evidence: "hld/store/sqlite.go @ 99abe67"
 
   # --- D. Agent identity and lifecycle ---
   # D1: Is an agent globally addressable? By what identifier?
   D1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent identity; sessions and runs have ids, the agent does not."
+    evidence: "hld/store/sqlite.go:95-100 @ 99abe67"
   # D2: Does identity survive process restart?
   D2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No persisted agent identity."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # D3: Is identity distinct from runtime instance?
   D3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent definition resource."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # D4: Are agents versioned? Immutable or mutable definitions?
   D4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent versioning."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # D5: Is there a registry or catalog?
   D5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent registry."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # D6: Can agents discover each other at runtime?
   D6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No discovery."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # D7: Can agents advertise capabilities? In what format?
   D7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No capability model."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # D8: Is there an owner, team, or tenant on the agent record?
   D8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No owner or tenant field; the daemon is single-user by construction."
+    evidence: "hld/PROTOCOL.md @ 99abe67"
   # D9: Can an agent be suspended, revoked, or deprecated?
   D9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No revocation lifecycle for agents. ELEVEN PROJECTS absent."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # D10: Is there anything resembling a declarative agent manifest?
   D10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent manifest."
+    evidence: "hld/store/sqlite.go @ 99abe67"
 
   # --- E. Harness and runtime interoperability ---
   # E1: What is the minimum interface an agent implementation must satisfy?
   E1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "claudecode-go wraps the Claude Code process, and session/claudecode_wrapper.go defines a ClaudeSession interface - a real adapter seam, but for one vendor rather than a general contract."
+    evidence: "hld/session/claudecode_wrapper.go @ 99abe67"
   # E2: Transport: stdin/stdout, HTTP, gRPC, WebSocket, in-process, ACP, A2A?
   E2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "JSON-RPC 2.0 over a Unix domain socket, line-delimited JSON, at ~/.humanlayer/daemon.sock with 0600 permissions - documented in PROTOCOL.md."
+    evidence: "hld/PROTOCOL.md @ 99abe67"
   # E3: Can it host a foreign agent (Claude Code, Codex, OpenHands, LangGraph, ADK)?
   E3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "One harness: Claude Code. No pluggable agent adapters."
+    evidence: "claudecode-go/ @ 99abe67"
   # E4: Is there an event stream out of a running agent? What granularity?
   E4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Sequence-ordered conversation events plus five typed bus events with filters on type, session and run."
+    evidence: "hld/bus/types.go:9-46 @ 99abe67"
   # E5: Are tool calls externally observable, or internal to the agent?
   E5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Tool calls are recorded with tool_id, tool_name and tool_input_json, results with tool_result_for_id, plus is_completed and approval correlation on the same row."
+    evidence: "hld/store/sqlite.go:146-158 @ 99abe67"
   # E6: How is context injected at start?
   E6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Session settings (permission mode, expiry) are stored columns rather than opaque adapter config."
+    evidence: "hld/store/sqlite.go:117-118 @ 99abe67"
   # E7: Is cancellation supported? Cooperative or forced? Does it propagate to subagents?
   E7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Interrupt is first-class with a TRANSITIONAL state: interrupting ('received interrupt signal and is shutting down') then interrupted ('can be resumed'). The only project with a transitional cancel state."
+    evidence: "hld/store/store.go:282-283 @ 99abe67"
   # E8: Can a run be checkpointed and restored by the platform, or only by the agent?
   E8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "The daemon owns durability (transcript, approvals) on the agent's behalf, and interrupted sessions are resumable, but there is no checkpoint/restore API."
+    evidence: "hld/store/store.go:283 @ 99abe67"
   # E9: Which of these would be hard to adapt, and why?
   E9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "PROTOCOL.md documents transport, socket path, permissions, framing, and the JSON-RPC request/response/error formats - enough for a third-party client."
+    evidence: "hld/PROTOCOL.md:1-40 @ 99abe67"
 
   # --- F. Agent-to-agent communication ---
   # F1: Direct messages between agents?
   F1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent-to-agent messaging. AG2 remains the sole answer."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # F2: Channels, topics, or pub/sub?
   F2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "The event bus is daemon-to-UI, not agent-to-agent."
+    evidence: "hld/bus/types.go @ 99abe67"
   # F3: Task delegation as a distinct mechanism from messaging?
   F3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "parent_tool_use_id tracks sub-tasks within a session; there is no delegation primitive between agents."
+    evidence: "hld/store/sqlite.go:373-405 @ 99abe67"
   # F4: Synchronous RPC between agents?
   F4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No inter-agent RPC."
+    evidence: "hld/rpc/ @ 99abe67"
   # F5: Asynchronous inbox or mailbox?
   F5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No mailbox."
+    evidence: "hld/bus/types.go @ 99abe67"
   # F6: Is delivery durable? Survives restart of sender and receiver?
   F6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No inter-agent delivery layer."
+    evidence: "hld/bus/types.go @ 99abe67"
   # F7: Is message ordering guaranteed? Per what scope?
   F7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Conversation events carry an explicit sequence, indexed on (claude_session_id, sequence) and (session_id, sequence)."
+    evidence: "hld/store/sqlite.go:136,162-163 @ 99abe67"
   # F8: Acknowledgement or delivery receipts?
   F8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No acknowledgement between agents."
+    evidence: "hld/bus/types.go @ 99abe67"
   # F9: Correlation ids for request/response pairing?
   F9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "STRONG CORRELATION: approval_id and approval_status denormalised onto the tool-call event, tool_result_for_id linking results to calls, run_id on approvals, and parent_tool_use_id for sub-task trees."
+    evidence: "hld/store/sqlite.go:146-158 @ 99abe67"
   # F10: Conversation threading?
   F10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No forking or branching of a session."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # F11: Capability-based routing — address by what an agent *can do* rather than who it is?
   F11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No capability routing."
+    evidence: "hld/store/sqlite.go @ 99abe67"
 
   # --- G. Human-agent collaboration ---
   # G1: Is a human modelled as a special kind of agent, a distinct principal type, or not modelled?
   G1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "The human is the daemon's owner, established by 0600 filesystem permissions on the socket - so there is an implied single principal but no principal RESOURCE, and crucially no record of WHICH human approved."
+    evidence: "hld/PROTOCOL.md:7-13 @ 99abe67"
   # G2: Shared rooms, channels, or workspaces?
   G2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No shared workspace or room; single-user by design."
+    evidence: "hld/PROTOCOL.md @ 99abe67"
   # G3: Task threads humans can read and post into?
   G3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Multiple surfaces attach to one daemon over the socket - hlyr CLI, humanlayer-wui desktop app, MCP server - and receive filtered push events, so a human can drive and observe live from any of them."
+    evidence: "hld/bus/types.go:41-60 @ 99abe67; humanlayer-wui/"
   # G4: Mentions or directed addressing?
   G4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No addressing of participants."
+    evidence: "hld/bus/types.go @ 99abe67"
   # G5: Approval gates. Blocking or advisory? Durable while pending?
   G5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "BEST APPROVAL MECHANISM IN THE STUDY: approval.Manager with CreateApprovalWithToolUseID, GetPendingApprovals, ApproveToolCall(id, comment) and DenyToolCall(id, reason) over a durable approvals table, with new_approval and approval_resolved bus events."
+    evidence: "hld/approval/types.go:10-25 @ 99abe67"
   # G6: Mid-run intervention: can a human redirect without restarting?
   G6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Approve with a comment, deny with a reason, interrupt a running session (with a transitional interrupting state), discard a draft, and set a time-limited permission bypass."
+    evidence: "hld/approval/types.go:22-24 @ 99abe67; hld/store/store.go:282-284"
   # G7: Agent status and presence visible to humans?
   G7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "waiting_input is a FIRST-CLASS SESSION STATUS, so 'blocked on a human' is an indexed query rather than an inference. Plus session_status_changed events and a partial index on pending approvals."
+    evidence: "hld/store/store.go:281 @ 99abe67; hld/store/sqlite.go:218"
   # G8: Notifications or escalation when an agent is blocked?
   G8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "The bus pushes new_approval events to any attached surface, which is notification; there is no escalation policy or on-call routing."
+    evidence: "hld/bus/types.go:11-12 @ 99abe67"
   # G9: Shared scratchpad or working surface?
   G9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "The conversation transcript is the shared context between human and agent; there is no separate scratchpad."
+    evidence: "hld/store/sqlite.go:132-161 @ 99abe67"
   # G10: Can a human see the context an agent is operating on?
   G10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Full sequence-ordered transcript with tool inputs, results, completion state and approval correlation, viewable from CLI or desktop UI."
+    evidence: "hld/store/sqlite.go:132-161 @ 99abe67"
 
   # --- H. Context and memory ---
   # H1: Which of these exist as *separate* concepts: prompt context, working state, session history, ...
   H1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No memory subsystem; context is Claude Code's and the transcript is stored for display and correlation, not recall."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # H2: Who owns memory: agent, human, workspace, task, or tenant?
   H2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No knowledge ownership model."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # H3: Can memory be shared between agents? At what granularity?
   H3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No shared knowledge."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # H4: Are there permissions on memory?
   H4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No memory permissions."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # H5: Is provenance tracked — where a memory came from?
   H5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No knowledge provenance."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # H6: Expiry, TTL, or forgetting?
   H6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No knowledge TTL (though the permission bypass has one)."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # H7: Summarisation or compaction. Automatic or explicit?
   H7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No summarisation or compaction."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # H8: Retrieval mechanism: vector, keyword, structured, agent-driven?
   H8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No retrieval subsystem."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # H9: Can an agent mutate its own memory mid-run?
   H9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent-writable memory."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # H10: Conflict resolution on concurrent writes?
   H10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No shared mutable memory."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # H11: Is memory in the same store as execution state, or separate?
   H11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Execution state (sessions, events, approvals) is stored; there is no knowledge store to separate it from."
+    evidence: "hld/store/sqlite.go @ 99abe67"
 
   # --- I. Tools and capabilities ---
   # I1: Are tools bound to agents statically, or resolved dynamically?
   I1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "Tools belong to Claude Code; the daemon intercepts them for approval rather than defining them."
+    evidence: "hld/approval/types.go @ 99abe67"
   # I2: Is there a capability abstraction distinct from tool implementation?
   I2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No capability model."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # I3: Is there a registry of available tools?
   I3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No tool registry."
+    evidence: "hld/approval/types.go @ 99abe67"
   # I4: Tool scoping — can an agent be restricted to a subset?
   I4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Scoping is by approval: a tool call is gated per invocation, or globally bypassed for a bounded period via the expiring permission flag."
+    evidence: "hld/store/sqlite.go:117-118 @ 99abe67"
   # I5: Are tools versioned?
   I5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No tool versioning."
+    evidence: "hld/approval/types.go @ 99abe67"
   # I6: How are credentials supplied to a tool?
   I6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No credential handling; Claude Code owns its own auth."
+    evidence: "hld/config/ @ 99abe67"
   # I7: OAuth or delegated user credentials?
   I7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No OAuth or delegated credentials."
+    evidence: "hld/config/ @ 99abe67"
   # I8: Can policy intercept a tool call before execution?
   I8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "The interception point is explicit (every tool call can require an approval, recorded on the event), but there is no rule engine deciding WHICH calls need approval - that is the harness's permission mode."
+    evidence: "hld/approval/manager.go @ 99abe67"
   # I9: Approval gates on specific tools?
   I9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Per-tool-call approval is the product: CreateApprovalWithToolUseID correlates the request to a specific tool_use_id, and the decision is durable and idempotent."
+    evidence: "hld/approval/types.go:17 @ 99abe67"
   # I10: Do tools execute inside or outside the agent's sandbox?
   I10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No sandbox; tools run with daemon privileges."
+    evidence: "hld/session/manager.go @ 99abe67"
 
   # --- J. Security and identity ---
   # J1: What identity does an agent authenticate as?
   J1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent identity or agent authentication."
+    evidence: "hld/PROTOCOL.md @ 99abe67"
   # J2: Authentication mechanism for agent-to-platform?
   J2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Authentication IS the filesystem: a 0600 Unix domain socket at ~/.humanlayer/daemon.sock. Correct and honest for a single-user local daemon, and explicitly documented - but it does not generalise to multi-user."
+    evidence: "hld/PROTOCOL.md:7-13 @ 99abe67"
   # J3: Authorisation model: RBAC, ABAC, capability tokens, none?
   J3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No authorization model beyond socket ownership."
+    evidence: "hld/PROTOCOL.md @ 99abe67"
   # J4: Secret storage and injection?
   J4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No secret management."
+    evidence: "hld/config/ @ 99abe67"
   # J5: Per-agent credentials, or shared platform credentials?
   J5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No per-agent credentials."
+    evidence: "hld/config/ @ 99abe67"
   # J6: Can an agent act as a user? Is that impersonation or delegation?
   J6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No impersonation or delegation."
+    evidence: "hld/PROTOCOL.md @ 99abe67"
   # J7: Tenant isolation: logical, or enforced at runtime?
   J7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No tenancy; single-user by construction."
+    evidence: "hld/PROTOCOL.md @ 99abe67"
   # J8: Network and filesystem isolation?
   J8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No isolation of the agent process."
+    evidence: "hld/session/manager.go @ 99abe67"
   # J9: Is there an audit log? Is it tamper-evident?
   J9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A strong DECISION record - which tool, what input, what status, when responded, and a free-text rationale - but NO APPROVER IDENTITY, so the audit trail cannot answer 'which human approved this'."
+    evidence: "hld/store/sqlite.go:201-217 @ 99abe67"
   # J10: Where are policy decisions enforced — control plane, runtime, or tool gateway?
   J10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Approval enforcement is a real, explicit interception point recorded on the transcript, but no policy decision object exists."
+    evidence: "hld/approval/manager.go @ 99abe67"
 
   # --- K. Sandbox and isolation ---
   # K1: Is there a workspace or sandbox concept? What is its lifecycle?
   K1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No sandbox."
+    evidence: "hld/session/manager.go @ 99abe67"
   # K2: Persistent filesystem across runs?
   K2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No sandbox workspace lifecycle."
+    evidence: "hld/session/manager.go @ 99abe67"
   # K3: Snapshot and restore?
   K3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No sandbox suspend/resume."
+    evidence: "hld/session/manager.go @ 99abe67"
   # K4: Network egress rules?
   K4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No egress control."
+    evidence: "hld/session/manager.go @ 99abe67"
   # K5: Container, microVM, or none?
   K5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No isolation technology."
+    evidence: "hld/session/manager.go @ 99abe67"
   # K6: Resource quotas: CPU, memory, disk, wall clock?
   K6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No resource quotas."
+    evidence: "hld/session/manager.go @ 99abe67"
   # K7: How are secrets injected without landing in the image or logs?
   K7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No secret injection."
+    evidence: "hld/session/manager.go @ 99abe67"
   # K8: Arbitrary code execution? Browser execution?
   K8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Claude Code executes arbitrary code with the daemon's privileges - unsandboxed by design, with approval as the control instead."
+    evidence: "hld/approval/types.go @ 99abe67"
   # K9: Is the sandbox pluggable, or a fixed implementation?
   K9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No sandbox abstraction."
+    evidence: "hld/session/manager.go @ 99abe67"
 
   # --- L. Orchestration and scheduling ---
   # L1: Does it distinguish agent coordination from workflow orchestration?
   L1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Clean by scope: the daemon owns sessions, approvals and events; Claude Code owns the agent loop; UIs own presentation. No orchestration ambitions."
+    evidence: "hld/PROTOCOL.md @ 99abe67"
   # L2: Topology: DAG, cyclic graph, supervisor, planner, event-driven, queue?
   L2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No workflow or graph model."
+    evidence: "hld/session/manager.go @ 99abe67"
   # L3: Cron or scheduled triggers?
   L3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No scheduled triggers."
+    evidence: "hld/session/manager.go @ 99abe67"
   # L4: Dynamic task spawning at runtime?
   L4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Sub-tasks are tracked via parent_tool_use_id but not spawned by the daemon."
+    evidence: "hld/store/sqlite.go:373-405 @ 99abe67"
   # L5: Fan-out / fan-in?
   L5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No fan-out or join."
+    evidence: "hld/session/manager.go @ 99abe67"
   # L6: Subagents. Are they first-class, or just nested calls?
   L6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Sub-task trees are recorded (parent_tool_use_id) but sub-agents are not first-class resources."
+    evidence: "hld/store/sqlite.go:373-405 @ 99abe67"
   # L7: Retry and backoff policy — declarative or hand-rolled?
   L7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No retry policy."
+    evidence: "hld/session/manager.go @ 99abe67"
   # L8: Compensation or rollback on failure?
   L8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No compensation or rollback. TEN FOR TEN absent."
+    evidence: "hld/session/manager.go @ 99abe67"
   # L9: Does cancellation propagate through the whole tree?
   L9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Interrupt with a transitional state: interrupting then interrupted, the latter explicitly resumable. No tree to propagate through."
+    evidence: "hld/store/store.go:282-283 @ 99abe67"
   # L10: Could this be replaced by Temporal or Restate, or is orchestration inseparable from the agent...
   L10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "No workflow engine embedded; the daemon deliberately does one thing - supervise sessions and gate tool calls on human decisions."
+    evidence: "hld/PROTOCOL.md @ 99abe67"
 
   # --- M. Observability ---
   # M1: Which of these are modelled as telemetry objects: trace, run, step, LLM call, tool call, mess...
   M1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Sequence-ordered conversation events with tool inputs, results and completion state; five typed bus events; cost_usd per session; session status transitions."
+    evidence: "hld/store/sqlite.go:132-161 @ 99abe67"
   # M2: Is telemetry keyed to agent, run, model, task, user, or tenant?
   M2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Keyed to session_id, run_id, claude_session_id, tool_id and approval_id - dense correlation for a small model."
+    evidence: "hld/store/sqlite.go:132-158 @ 99abe67"
   # M3: OpenTelemetry, proprietary, or none?
   M3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "NO OPENTELEMETRY, where four of nine deep projects have it. The typed event bus serves UIs, not tracing - an event bus and a trace are not substitutes. (Note this commit predates several of the OTel adopters.)"
+    evidence: "hld/bus/types.go @ 99abe67"
   # M4: Is there a documented, stable event schema?
   M4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Typed event constants with documented data payloads (including reason='expired' and expired_at for permission expiry), and an EventFilter type."
+    evidence: "hld/bus/types.go:9-32 @ 99abe67"
   # M5: Cost and token accounting. Per what unit?
   M5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "cost_usd is a stored session column - third project in the study with cost tracking, after Omnigent and Pydantic AI."
+    evidence: "hld/store/sqlite.go:109 @ 99abe67"
   # M6: Latency breakdown by phase?
   M6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "created_at, last_activity_at, completed_at on sessions; created_at and responded_at on approvals, so approval latency is directly measurable."
+    evidence: "hld/store/sqlite.go:104-106,206-207 @ 99abe67"
   # M7: Error taxonomy?
   M7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Typed errors: ErrNotFound, ErrAlreadyDecided, ErrInvalidStatus, with NotFoundError{Type, ID} and AlreadyDecidedError{ID, Status} wrapping them for context."
+    evidence: "hld/store/errors.go:10-42 @ 99abe67"
   # M8: Can the event stream reconstruct a run after the fact — replay or audit?
   M8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The sequence-ordered transcript plus the approval record reconstruct exactly what happened, including what was asked of a human and what they decided."
+    evidence: "hld/store/sqlite.go:132-161,201-217 @ 99abe67"
 
   # --- N. Multi-tenancy and enterprise ---
   # N1: Resource hierarchy: org, workspace, project, environment?
   N1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No org, project or environment hierarchy."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # N2: RBAC model and its granularity?
   N2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No RBAC."
+    evidence: "hld/PROTOCOL.md @ 99abe67"
   # N3: Quotas and cost limits. Enforced or advisory?
   N3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "cost_usd is recorded per session and the permission bypass is time-bounded, which limits unattended autonomy - but there is no budget enforcement."
+    evidence: "hld/store/sqlite.go:109,117-118 @ 99abe67"
   # N4: dev / staging / prod separation?
   N4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No environment separation."
+    evidence: "hld/config/ @ 99abe67"
   # N5: Deployment promotion path?
   N5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No promotion path."
+    evidence: "hld/config/ @ 99abe67"
   # N6: Agent catalog scoped to a tenant?
   N6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent catalog."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # N7: Audit retention controls?
   N7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No audit retention policy."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # N8: Is multi-tenancy in the OSS core, or reserved for a commercial tier?
   N8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "Multi-tenancy is not modelled; the commercial product is a hosted approval service, and the OSS daemon is the local single-user half."
+    evidence: "hld/PROTOCOL.md @ 99abe67"
 
   # --- O. API and protocol surface ---
   # O1: List the actual primary endpoints or SDK entry points. Verbatim.
   O1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "JSON-RPC 2.0 over a Unix socket (documented in PROTOCOL.md), a generated OpenAPI server surface, an MCP server, a Go SDK and TypeScript packages."
+    evidence: "hld/PROTOCOL.md @ 99abe67; hld/api/server.gen.go"
   # O2: Is the API resource-oriented or RPC-flavoured?
   O2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Method-oriented JSON-RPC over sessions and approvals rather than a REST resource model, though the generated OpenAPI surface is more resource-shaped."
+    evidence: "hld/PROTOCOL.md:17-40 @ 99abe67"
   # O3: Streaming: SSE, WebSocket, long-poll, gRPC stream?
   O3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Event subscription over the socket with filters, delivering push updates to any attached surface."
+    evidence: "hld/bus/types.go:41-60 @ 99abe67"
   # O4: Webhooks or outbound callbacks?
   O4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No webhooks in the OSS daemon."
+    evidence: "hld/api/ @ 99abe67"
   # O5: Which standards are implemented: MCP, A2A, ACP, OTel, OpenAI-compatible?
   O5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "JSON-RPC 2.0 and MCP - and notably MCP is used as a SURFACE FOR APPROVALS, so another agent can answer a human-in-the-loop request. An inversion worth noting."
+    evidence: "hld/mcp/ @ 99abe67"
   # O6: Is the API versioned? Stability commitment?
   O6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Numbered store migrations version the schema; there is no API version namespace."
+    evidence: "hld/store/sqlite.go:373-411 @ 99abe67"
   # O7: Is there a separate northbound (client) and southbound (runtime) API?
   O7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Northbound is the JSON-RPC/OpenAPI/MCP surface for UIs; southbound is the claudecode-go wrapper. Real but not framed as a two-API split."
+    evidence: "hld/PROTOCOL.md @ 99abe67"
 
   # --- P. Storage ---
   # P1: What datastores are required to run it?
   P1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A single SQLite file with numbered, idempotent migrations that check for column existence before ALTER TABLE."
+    evidence: "hld/store/sqlite.go:373-411 @ 99abe67"
   # P2: What is treated as authoritative, strongly consistent state?
   P2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The SQLite store is authoritative for sessions, conversation events and approvals."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # P3: What is event-stream or append-only?
   P3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Conversation events are append-only with a sequence; sessions and approvals are updated in place."
+    evidence: "hld/store/sqlite.go:132-136 @ 99abe67"
   # P4: Where do large artifacts go?
   P4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Result storage exists for session output, but there is no blob store abstraction."
+    evidence: "hld/store/result_storage_test.go @ 99abe67"
   # P5: Is there a vector store? Required or optional?
   P5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No vector store."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # P6: Is storage pluggable, or hardcoded?
   P6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A ConversationStore interface with a SQLite implementation and generated mocks, so the store is swappable and the daemon is testable without one."
+    evidence: "hld/store/store.go @ 99abe67; verified locally 2026-08-26: GOWORK=off go build ./... OK; make mocks then go test ./approval/... ./bus/... ./store/... -run Approval all pass"
 
   # --- Q. Licensing and commercial ---
   # Q1: Exact license, including any per-directory variation.
   Q1:
     verdict: first_class
-    note: "Apache-2.0."
-    evidence: "https://github.com/humanlayer/humanlayer (GitHub API, read 2026-08-26; 11337★, pushed 2026-06-19)"
+    note: "Apache-2.0, VERIFIED BY READING THE FILE ('Apache Software License 2.0, Copyright (c) 2024, humanlayer Authors') because GitHub's API reports NOASSERTION. Licence metadata is not licence evidence."
+    evidence: "LICENSE @ 99abe67"
   # Q2: Are there enterprise-only components missing from the OSS repo?
   Q2:
-    verdict: first_class
-    note: "HumanLayer Cloud is commercial."
-    evidence: "https://github.com/humanlayer/humanlayer (GitHub API, read 2026-08-26; 11337★, pushed 2026-06-19)"
+    verdict: implicit
+    note: "The OSS daemon is the local half; the commercial product is a hosted approval service. Nothing in the local flow appears withheld, but the hosted service is the multi-user answer."
+    evidence: "README.md @ 99abe67"
   # Q3: SaaS or hosted-service restrictions?
   Q3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No SaaS restriction under Apache-2.0."
+    evidence: "LICENSE @ 99abe67"
   # Q4: Trademark constraints on derived works?
   Q4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "HumanLayer naming; Apache-2.0 grants no trademark rights."
+    evidence: "LICENSE @ 99abe67"
   # Q5: Network copyleft (AGPL, SSPL) implications for a hosted product?
   Q5:
     verdict: absent
-    note: "No network copyleft. Apache-2.0/MIT only across the whole study."
-    evidence: "https://github.com/humanlayer/humanlayer (GitHub API, read 2026-08-26; 11337★, pushed 2026-06-19)"
+    note: "No network copyleft."
+    evidence: "LICENSE @ 99abe67"
   # Q6: Verdict: `USE` / `INTEGRATE` / `REFERENCE_ONLY` / `AVOID`, with reasoning.
   Q6:
     verdict: first_class
-    note: "INTEGRATE — Apache-2.0. GitHub reports NOASSERTION; LICENSE file is verbatim Apache-2.0 with a non-standard title line. Verified manually."
-    evidence: "https://github.com/humanlayer/humanlayer (GitHub API, read 2026-08-26; 11337★, pushed 2026-06-19)"
+    note: "REUSE (targeted). Apache-2.0. The Approval table schema, the session state machine (waiting_input, interrupting/interrupted, draft/discarded), and the expiring permission bypass all port directly. The code does not - Go, single-user, Claude-Code-specific."
+    evidence: "LICENSE @ 99abe67"
 
   # --- R. Developer experience ---
   # R1: Time from clone to a running agent. Actual elapsed minutes.
   R1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "GOWORK=off go build ./... succeeds, but a fresh clone FAILS go test ./approval/... until you run make mocks to generate the gomock doubles - discoverable only from the Makefile."
+    evidence: "verified locally 2026-08-26: GOWORK=off go build ./... OK; make mocks then go test ./approval/... ./bus/... ./store/... -run Approval all pass"
   # R2: How many concepts before "hello world"?
   R2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Few concepts: session, conversation event, approval. The whole model is three tables."
+    evidence: "hld/store/sqlite.go:95-220 @ 99abe67"
   # R3: Is there a local dev loop? Hot reload?
   R3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Local by design: one daemon, one SQLite file, a Unix socket, a CLI and a desktop app. Nothing to provision."
+    evidence: "hld/PROTOCOL.md @ 99abe67"
   # R4: How do you debug a stuck run?
   R4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Full transcript with approval correlation, typed events, run-with-logging script, and a documented protocol for attaching your own client."
+    evidence: "hld/run-with-logging.sh @ 99abe67"
   # R5: Can an agent be unit tested? Is there a test harness?
   R5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Interface-plus-generated-mocks throughout (store, bus, approval, session, client), an integration_test.go, e2e/ and TESTING.md. Approval and store tests pass once mocks are generated."
+    evidence: "hld/TESTING.md @ 99abe67; verified locally 2026-08-26: GOWORK=off go build ./... OK; make mocks then go test ./approval/... ./bus/... ./store/... -run Approval all pass"
   # R6: Deployment story?
   R6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A local daemon plus docker-compose for supporting services; no deployment story beyond the developer machine."
+    evidence: "docker-compose.yml @ 99abe67"
   # R7: CLI ergonomics — try the equivalent of `init`, `agent add`, `run`.
   R7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "hlyr is a real CLI, with a desktop UI and an MCP server as alternative surfaces onto the same daemon."
+    evidence: "hlyr/ @ 99abe67"
 
   # --- S. Hard scenarios ---
   # S1: Delegated authority
   S1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No principals; filesystem permissions are the entire authority model."
+    evidence: "hld/PROTOCOL.md:7-13 @ 99abe67"
   # S2: Torn side effect
   S2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "Not a tool-effect ledger, but the DECISION is idempotent: attempting to re-decide returns AlreadyDecidedError with the existing status rather than overwriting. Verified by test. Generalises ADR-0014 to anything a human or UI can retry."
+    evidence: "hld/store/errors.go:34-42 @ 99abe67; verified locally 2026-08-26: GOWORK=off go build ./... OK; make mocks then go test ./approval/... ./bus/... ./store/... -run Approval all pass"
   # S3: Upgrade mid-flight
   S3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No version pinning."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # S4: Concurrent memory write
   S4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No memory store."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # S5: Cancellation tree
   S5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class_answer
+    note: "ONLY PROJECT WITH A TRANSITIONAL CANCEL STATE. interrupting is 'received interrupt signal and is shutting down'; interrupted is 'was interrupted but can be resumed'. Cancellation takes time, and a state machine that pretends otherwise reports a lie during the gap - this is the CANCELLING state my revised domain model proposed, and the only precedent for it."
+    evidence: "hld/store/store.go:282-283 @ 99abe67"
   # S6: Silent context loss
   S6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No compaction or context management."
+    evidence: "hld/store/sqlite.go @ 99abe67"
   # S7: Poison message
   S7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No queue, retry or dead-letter path."
+    evidence: "hld/session/manager.go @ 99abe67"
   # S8: Tenant leak
   S8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "Single-user by design."
+    evidence: "hld/PROTOCOL.md @ 99abe67"
   # S9: Runaway spend
   S9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "cost_usd is recorded per session, and the EXPIRING permission bypass bounds how long an agent can act unattended - a time-based rather than money-based limit. Measured and time-bounded, not budget-enforced."
+    evidence: "hld/store/sqlite.go:109,117-118 @ 99abe67"
   # S10: Zombie sandbox
   S10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No sandbox."
+    evidence: "hld/session/manager.go @ 99abe67"
 
 object_model: |
-  # ASCII tree of resources that actually exist
+  Session                      (hld/store/sqlite.go:95-130)
+   |-- status                  draft | starting | running | completed | failed
+   |                           | waiting_input | interrupting | interrupted
+   |                           | discarded
+   |-- cost_usd                per-session spend
+   |-- dangerously_skip_permissions            bool
+   |-- dangerously_skip_permissions_expires_at TIMESTAMP  <- bypass EXPIRES
+   `-- ConversationEvent[]     (sequence-ordered)
+        |-- tool_id, tool_name, tool_input_json
+        |-- tool_result_for_id, tool_result_content
+        |-- is_completed        TRUE when tool result received
+        |-- approval_status     NULL | pending | approved | denied
+        |-- approval_id         correlated approval
+        `-- parent_tool_use_id  sub-task tracking (migration 6)
 
-strongest_ideas: []
+  Approval                     (hld/store/sqlite.go:201-220)
+    id PRIMARY KEY
+    run_id, session_id
+    status       CHECK (status IN ('pending','approved','denied'))
+    created_at, responded_at
+    tool_name, tool_input       (JSON)
+    comment                     denial reason OR approval note
 
-weakest_choices: []
+strongest_ideas:
+  - "An Approval TABLE with a status CHECK constraint - the only durable approval resource in the study."
+  - "A partial index on pending approvals only (WHERE status = 'pending'), so 'what needs a human now' stays cheap regardless of history size."
+  - "ErrAlreadyDecided carrying an AlreadyDecidedError{ID, Status}, so a retried decision reports what it already was instead of failing opaquely or overwriting."
+  - "approval_id and approval_status denormalised onto the transcript event, so approval state reads inline with the tool call it governs rather than through a join."
+  - "waiting_input as a first-class session status, making 'blocked on a human' an indexed query rather than an inference."
+  - "interrupting distinct from interrupted - 'received interrupt signal and is shutting down' versus 'was interrupted but can be resumed'. A transitional cancel state; the only one in the study."
+  - "draft and discarded states, so a session can be composed before it runs and abandoned without ever running."
+  - "An EXPIRING permission bypass: dangerously_skip_permissions_expires_at, emitting session_settings_changed with reason='expired' and expired_at. Converts a permanent hole into a temporary one."
+  - "Naming the dangerous flag dangerously_, the same instinct as ADK's unsafe_local_code_executor."
+  - "Approve-with-comment and deny-with-reason, both durable in one comment column documented as 'for denial reasons or approval notes'."
+  - "A typed event bus with filters on type, session and run, so many UI surfaces attach without the daemon knowing about them."
+  - "ApprovalReconciler as an explicit abstraction for re-syncing approvals after session restart - keyed on run_id, triggered by restart, non-fatal on failure so a failed reconcile leaves the pending row for next time."
+  - "The wire protocol documented in-repo, including socket path, 0600 permissions and line-delimited framing - enough to write a third-party client."
+  - "Idempotent numbered migrations that check for column existence before ALTER TABLE."
+  - "A 0600 Unix domain socket as the authentication model - correct and honest for a single-user daemon, and documented as such."
+  - "MCP used as a SURFACE FOR APPROVALS, so another agent can answer a human-in-the-loop request. An inversion of the usual direction."
 
-reusable_components: []
-  # - component: 
-  #   decision: INTEGRATE   # BUILD|INTEGRATE|ADOPT_AS_STANDARD|REUSE|DEFER
-  #   note: 
+weakest_choices:
+  - "NO RECORD OF WHICH HUMAN APPROVED. The comment captures a rationale but not an identity, so the audit trail cannot answer 'who decided this'."
+  - "Single-user by construction; filesystem permissions do not generalise to multi-user."
+  - "No OpenTelemetry, where four of nine deep projects have it. A typed event bus serves UIs, not tracing."
+  - "No agent identity, versioning or revocation."
+  - "No sandboxing - Claude Code runs with daemon privileges, with approval as the only control."
+  - "Tightly coupled to one harness (Claude Code) via claudecode-go."
+  - "A fresh clone fails go test ./approval/... until make mocks is run, which is discoverable only from the Makefile."
+  - "No policy layer deciding WHICH calls need approval - that is delegated to the harness's permission mode."
 
-lessons: []
+reusable_components:
+  - component: "Approval table schema + status CHECK constraint"
+    decision: REUSE
+    note: "The only durable approval resource found; port nearly verbatim."
+  - component: "Partial index on pending approvals"
+    decision: ADOPT_AS_STANDARD
+    note: "The hot query stays cheap as history grows."
+  - component: "ErrAlreadyDecided carrying the current status"
+    decision: ADOPT_AS_STANDARD
+    note: "Retried decisions must be idempotent AND informative."
+  - component: "approval_id / approval_status on the transcript event"
+    decision: ADOPT_AS_STANDARD
+    note: "Approval state reads inline with what it governs."
+  - component: "waiting_input session status"
+    decision: ADOPT_AS_STANDARD
+    note: "Blocked-on-human becomes an indexed query."
+  - component: "interrupting -> interrupted transitional state"
+    decision: ADOPT_AS_STANDARD
+    note: "Confirms the CANCELLING state in our domain model; only precedent."
+  - component: "draft / discarded states"
+    decision: REUSE
+    note: "Pre-run composition and abandonment without execution."
+  - component: "Expiring permission bypass + expiry event"
+    decision: ADOPT_AS_STANDARD
+    note: "A safety bypass that cannot become permanent by neglect."
+  - component: "dangerously_ naming"
+    decision: ADOPT_AS_STANDARD
+    note: "Make the unsafe path visible at the call site."
+  - component: "Approve-with-comment / deny-with-reason"
+    decision: ADOPT_AS_STANDARD
+    note: "Rationale is as durable as the decision itself."
+  - component: "ApprovalReconciler on restart, keyed by run, non-fatal"
+    decision: REUSE
+    note: "Correct shape for post-restart reconciliation."
+  - component: "Typed event bus with filters"
+    decision: REUSE
+    note: "Many surfaces, one daemon, no coupling."
+  - component: "Protocol documented in-repo"
+    decision: REUSE
+    note: "Enables third-party clients."
+  - component: "Idempotent column-checked migrations"
+    decision: REUSE
+    note: "Re-runnable schema evolution."
+  - component: "Filesystem-permission authentication"
+    decision: BUILD
+    note: "Reject; we are multi-user."
+  - component: "Approval without an approver identity"
+    decision: BUILD
+    note: "Reject; audit requires the principal who decided."
 
-adr_impact: []
-  # - adr: ADR-0001
-  #   effect: confirms      # confirms|amends|challenges|neutral
-  #   note: 
+lessons:
+  - "APPROVAL MUST BE A RESOURCE, not a state on a Run. My strawman had it as a status; HumanLayer shows it needs its own table with id, run reference, correlated tool-call id, a constrained status, created_at/responded_at, the request payload, and a decision rationale. (amends the domain model)"
+  - "The Run state machine needs four more states: DRAFT (composed, not started), WAITING_INPUT (blocked on a human, indexed), CANCELLING (interrupt received, still shutting down), DISCARDED. The interrupting/interrupted split is the important one - cancellation takes time, and a state machine that pretends otherwise reports a lie during the gap. This is the ONLY precedent for the CANCELLING state my revised domain model proposed. (confirms ADR-0002)"
+  - "SHARPENS THE ADR-0007 SPLIT that ADK prompted. HumanLayer has an excellent approval RECORD and NO APPROVER IDENTITY - the comment says why, never who. So a system can have durable, idempotent, well-indexed human decisions and still fail an audit. Our Approval must reference a Principal, not just carry a note. (challenges ADR-0007)"
+  - "DANGEROUS OVERRIDES SHOULD EXPIRE. dangerously_skip_permissions_expires_at plus a session_settings_changed event with reason='expired' converts a permanent hole into a temporary one and tells the operator when it closed. Every other project treats 'skip approvals' as a mode, and modes get switched on under pressure and never switched off. Adopt as a general rule: any control that disables a safety check carries a TTL and announces its lapse."
+  - "Idempotency applied to the APPROVAL DECISION rather than the tool effect: ErrAlreadyDecided returns the existing status instead of re-deciding. Generalises ADR-0014 - anything a human or UI can retry needs the same guard, not only agent side effects. (confirms ADR-0014 in a new place)"
+  - "An attached_harness where the DAEMON owns durability on the agent's behalf - the same split AX established (control plane owns the log, adapter streams events). (confirms ADR-0004)"
+  - "The decision record is real traceability (which tool, what input, what status, when responded, why) but it does not record the RULE that required approval - so it traces the decision without the policy. That is exactly the half AG2 and Omnigent supply, and both halves are needed. (confirms ADR-0013)"
+  - "No OTel at all, where four of nine deep projects have it. The typed event bus is good for UIs and useless for tracing, which confirms ADR-0010 by contrast: an event bus and a trace are not substitutes. (challenges ADR-0010 weakly)"
+  - "PROCESS NOTE: GitHub's API reports this repo NOASSERTION; the LICENSE file says Apache-2.0 plainly. Phase 1 flagged and manually verified, which was correct. Licence metadata is not licence evidence - an automated scan would have excluded a project whose patterns we are now porting."
+
+adr_impact:
+  - adr: ADR-0001
+    effect: neutral
+    note: "No agent identity; sessions and runs only."
+  - adr: ADR-0002
+    effect: confirms
+    note: "Nine-state session machine including draft, waiting_input, interrupting/interrupted and discarded. Only precedent for a transitional cancel state."
+  - adr: ADR-0003
+    effect: confirms
+    note: "No agent-to-agent messaging; parent_tool_use_id gives a sub-task tree only."
+  - adr: ADR-0004
+    effect: confirms
+    note: "attached_harness wrapping Claude Code, with the daemon owning durability - the same split as AX."
+  - adr: ADR-0005
+    effect: neutral
+    note: "MCP exposed as a surface for answering approvals - an inversion of the usual direction."
+  - adr: ADR-0006
+    effect: neutral
+    note: "No A2A."
+  - adr: ADR-0007
+    effect: challenges
+    note: "Excellent approval record with NO approver identity. Durable human decisions that still fail an audit."
+  - adr: ADR-0008
+    effect: neutral
+    note: "No memory or knowledge subsystem."
+  - adr: ADR-0009
+    effect: neutral
+    note: "No sandbox; approval is the control instead of isolation."
+  - adr: ADR-0010
+    effect: challenges
+    note: "No OTel at all. Confirms by contrast that an event bus and a trace are not substitutes."
+  - adr: ADR-0011
+    effect: neutral
+    note: "No version pinning."
+  - adr: ADR-0012
+    effect: neutral
+    note: "No capability model."
+  - adr: ADR-0013
+    effect: confirms
+    note: "Traces the decision (tool, input, status, timing, rationale) but not the rule that required it."
+  - adr: ADR-0014
+    effect: confirms
+    note: "Idempotency on the approval DECISION - ErrAlreadyDecided returns the existing status. Generalises the ADR to retryable human actions."

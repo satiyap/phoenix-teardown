@@ -53,6 +53,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | AG2 | amends | `ag2/network/identity.py:1-21,62-68 @ 90f490a` | **Best identity model in the study.** Three records back every agent: **`Passport`** — immutable, hub-stamped `agent_id`, where "mutating any field requires unregister + re-register, which yields a fresh `agent_id`"; **`Resume`** — mutable capability claims plus a hub-derived observed track record; and **`AgentRuntime`** — explicitly "cache-only" bookkeeping for the current connection. Our `Agent` should split into exactly these three: immutable identity, mutable declared+observed capability, disposable connection state. |
 | Pydantic AI | neutral | `pydantic_ai_slim/pydantic_ai/agent/ @ b48ee38` | No agent identity — an `Agent` is a Python object. Appropriate for a library, uninformative for a platform. |
 | Google Agent Platform | neutral | `src/google/adk/agents/ @ 85b52f6` | Agents are Python objects with a `name`; no id, registry, persistence or lifecycle. Identity of *scope* is strong — everything keyed `(app_name, user_id, session_id)` — but that is tenancy, not agent identity. |
+| HumanLayer | neutral | `hld/store/sqlite.go:95-100 @ 99abe67` | No agent resource — the agent is Claude Code. Sessions and runs carry ids; the agent does not. |
 
 ## Open questions
 
