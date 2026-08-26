@@ -2,13 +2,14 @@
 import os, tempfile
 import pytest
 from pin import (AgentDefinition, ToolBinding, AdapterContract, Pin,
-                 IncompatibleCheckpoint, NonCanonical, canonical_digest)
+                 IncompatibleCheckpoint, ArtifactMissing, NonCanonical,
+                 canonical_digest)
 from runtime import Store, Runtime, TripwireAdapter, AdapterInvoked
 
 
 def _tool(name="bash", schema="sch1", ver="1.0",
-          binding="local:python", approval="never", cred=None):
-    return ToolBinding(name, schema, ver, binding, approval, cred)
+          binding="local:python", approval="never", cred=None, artifact="art-abc"):
+    return ToolBinding(name, schema, ver, artifact, binding, approval, cred)
 
 def _defn(instructions="review the diff", tools=None, exts=()):
     return AgentDefinition("reviewer", instructions,
@@ -143,7 +144,8 @@ def test_definition_resolved_from_registry_not_caller(store):
     rt.start("r", _defn(), a, {"x": 1})
     store.db.execute("DELETE FROM definitions")      # artifact lost
     store.db.commit()
-    with pytest.raises(IncompatibleCheckpoint, match="no longer in the registry"):
+    # a MISSING artifact is now distinct from an INCOMPATIBLE one: different remedy
+    with pytest.raises(ArtifactMissing, match="not in the registry"):
         rt.resume("r", _defn(), a)
 
 def test_registry_is_content_addressed(store):

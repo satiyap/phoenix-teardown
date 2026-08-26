@@ -1,6 +1,14 @@
 # Spike 02 — the definition pin, end to end
 
-**Verdict: PASS**, on the revised gate. **24/24 tests**, plus a cross-process proof.
+## Verdicts — two, recorded separately
+
+| Claim | Verdict |
+|---|---|
+| **Pin mechanism** (digest, compare, refuse) | **PASS** |
+| **Production resumption invariant** | **PASS** on the hardened gate — 35/35 with negative controls |
+
+Gate-2 was added after review noted that v2 validated the *mechanism* but not the
+*platform invariant*. Five gaps were real and all five are now closed with tests.
 **Date:** 2026-08-26 · **Revised** after review found v1 was a unit sketch with
 unsafe canonicalisation.
 
@@ -100,10 +108,93 @@ definition twice yields one row.
 5. **Extensions are digested.**
 6. **`mismatch()` returns the field name**, so the error names what moved.
 
+## Gate-2 — the platform invariant
+
+Five gaps the review identified, each closed with a test **and** a negative control
+proving the guard is load-bearing.
+
+### 1. The check/use gap
+
+`resume()` now resolves the definition **from the registry by pinned digest** and
+passes *that body* to the adapter, which records what it actually executed:
+
+```python
+assert a.executed_definition == store.get_definition_body(defn.digest)
+```
+
+**Negative control:** tamper with the stored artifact after the write and integrity
+verification fires (`ArtifactCorrupted`) with `adapter.calls == []`.
+
+### 2. Tool bindings must reference immutable artifacts
+
+`ToolBinding.artifact_digest` is now **required** — an empty value raises. A version
+string pointing at mutable code preserved the pin while changing behaviour, which is
+the exact failure the pin exists to prevent, one level down.
+
+`test_same_version_new_artifact_is_a_mismatch` swaps `artifact_digest` while leaving
+`version="1.0"` untouched → `definition_digest changed`.
+
+### 3. Adapter-owned checkpoint payload schema
+
+The pin gains `payload_schema_digest`, distinct from our `checkpoint_schema_version`:
+we version the *envelope*, the adapter versions its *payload*. Changing the adapter's
+payload format alone now fails with `payload_schema_digest changed`.
+
+### 4. Concurrent resume needs an atomic lease
+
+**Pin correctness does not prevent duplicate execution** — two workers can both hold a
+valid pin. The primitive is an atomic claim, same shape as the effect ledger:
+
+```sql
+CREATE TABLE resume_leases (run_id TEXT PRIMARY KEY, holder TEXT NOT NULL);
+INSERT OR IGNORE INTO resume_leases(run_id, holder) VALUES(?,?);  -- rowcount==1 wins
+```
+
+Six workers race → `(reached, refused) == (1, 5)` and `adapter.calls == ["start"]`.
+
+**Negative control:** stub the lease to always succeed and all four workers execute
+(`calls == ["start"]*4`), proving the test detects the guarantee's removal.
+
+### 5. Canonicalisation needs a version and a domain separator
+
+The digest is now over a **versioned, domain-separated envelope**:
+
+```json
+{"kind": "definition", "canonicalization": "nfc+jcs/v1", "payload": {...}}
+```
+
+Without `kind`, a tool digest could collide with a definition digest. Without the
+version, changing the canonicaliser silently invalidates every old pin with no way to
+distinguish "changed" from "recomputed differently".
+
+**On the spec wording:** RFC 8785 (JCS) does **not** normalise Unicode. The profile is
+therefore named explicitly — **NFC normalisation of every string and key, then
+JCS-style serialisation** — not "JCS".
+
+**Negative control:** bump `CANON_VERSION` and the digest visibly changes.
+
+### 6. Distinct outcomes for distinct remedies
+
+`ResumeRefused` splits into four, because the operator action differs:
+
+| Type | Remedy |
+|---|---|
+| `IncompatibleCheckpoint` | new run, or restore the prior definition |
+| `ArtifactMissing` | restore the artifact — *nothing changed, something is absent* |
+| `ArtifactCorrupted` | re-fetch; a storage-integrity incident, not a version mismatch |
+| `ConcurrentResume` | none — the guard is working |
+
 ## What is still not proven
 
-- **SQLite, not Postgres**; no concurrent-resume test. Two workers resuming one run
-  simultaneously is a control-plane single-writer question, deferred to the spec.
+- **SQLite, not Postgres.** The lease and claim both rely on `INSERT OR IGNORE`
+  rowcount semantics; Postgres equivalents (`ON CONFLICT DO NOTHING` + `RETURNING`)
+  are the same shape but untested here.
+- **In-process concurrency only.** The lease races are `asyncio`/sequential, not
+  multi-process. The primitive is a unique-index insert, which is where the guarantee
+  lives, but real contention is untested.
+- **Lease expiry is unimplemented.** A holder that dies keeps the run locked forever.
+  Production needs a fenced lease with a TTL — Cloudflare's `execution_started_at`
+  cutoff is the pattern.
 - **The checkpoint payload is a dict.** Real adapter state is opaque bytes whose own
   format is what `checkpoint_schema_version` versions.
 - **No escape hatch** (OQ-037). Accepted: a false incompatibility costs a restart, a
@@ -112,16 +203,17 @@ definition twice yields one row.
   computes a digest, the JSON canonicalisation rules must be written down in the spec
   (RFC 8785 / JCS is the obvious candidate).
 
-## Reproduce
+## Reproduce — every gate test, no exclusions
 
 ```bash
 cd spikes/02-definition-pin
 python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt
-./.venv/bin/python -m pytest test_gate.py -q      # 24 passed
+./.venv/bin/python -m pytest test_gate.py test_gate2.py -q     # 35 passed
 ```
 
 | File | What it is |
 |---|---|
 | `pin.py` | Canonical digest, `ToolBinding`, `AdapterContract`, `AgentDefinition`, `Pin` |
 | `runtime.py` | Durable `Store`, `Runtime`, `TripwireAdapter` |
-| `test_gate.py` | The eight-property gate |
+| `test_gate.py` | Gate-1: the eight mechanism properties (24) |
+| `test_gate2.py` | Gate-2: the platform invariant, with negative controls (11) |

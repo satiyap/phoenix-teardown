@@ -52,31 +52,60 @@ def _canon(v: Any, path: str = "$") -> Any:
     )
 
 
-def canonical_digest(obj: Any) -> str:
-    """Stable SHA-256 over a canonicalised structure.
+# The canonicalisation PROFILE, named and versioned.
+#
+# RFC 8785 (JCS) alone does NOT normalise Unicode, so "JCS" is an insufficient
+# spec. Ours is: NFC normalisation of every string and key, THEN JCS-style
+# serialisation (sorted keys, tight separators, no NaN/Inf, UTF-8).
+CANON_PROFILE = "nfc+jcs"
+CANON_VERSION = 1
 
-    Canonicalisation is load-bearing (MAF: sort_keys + tight separators). No
-    `default=` fallback: unsupported types raise.
+
+def canonical_digest(obj: Any, *, kind: str = "generic") -> str:
+    """Stable SHA-256 over a DOMAIN-SEPARATED, VERSIONED envelope.
+
+    Without `kind` a tool digest could collide with a definition digest that
+    happens to canonicalise identically. Without `canonicalization_version`,
+    changing the canonicaliser silently invalidates every old pin with no way to
+    tell "changed" from "recomputed differently".
     """
-    blob = json.dumps(_canon(obj), sort_keys=True, separators=(",", ":"),
+    envelope = {
+        "kind": kind,
+        "canonicalization": f"{CANON_PROFILE}/v{CANON_VERSION}",
+        "payload": _canon(obj),
+    }
+    blob = json.dumps(envelope, sort_keys=True, separators=(",", ":"),
                       ensure_ascii=False, allow_nan=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
 class ToolBinding:
-    """A tool is not a name. Everything here changes what the agent can DO,
-    so everything here is in the digest."""
+    """A tool is not a name, and a version string is not an artifact.
+
+    `artifact_digest` is REQUIRED: a version pointing at mutable code preserves
+    the pin while changing behaviour, which is the whole failure mode we are
+    trying to prevent one level up.
+    """
     name: str
     schema_digest: str          # digest of the JSON schema
-    version: str
-    execution_binding: str      # e.g. "mcp:learn@https://..." or "local:python"
+    version: str                # human-facing label
+    artifact_digest: str        # IMMUTABLE code/image identity — load-bearing
+    execution_binding: str      # e.g. "mcp:learn@https://..." | "local:python"
     approval_mode: str          # never | always | risk_based
     credential_ref: str | None = None
 
+    def __post_init__(self):
+        if not self.artifact_digest:
+            raise NonCanonical(
+                f"tool {self.name!r}: artifact_digest is required. A version "
+                f"string that points at mutable code preserves the pin while "
+                f"changing behaviour.")
+
     def as_canon(self) -> dict:
         return {"name": self.name, "schema_digest": self.schema_digest,
-                "version": self.version, "execution_binding": self.execution_binding,
+                "version": self.version, "artifact_digest": self.artifact_digest,
+                "execution_binding": self.execution_binding,
                 "approval_mode": self.approval_mode,
                 "credential_ref": self.credential_ref}
 
@@ -129,11 +158,13 @@ class Pin:
     definition_digest: str
     adapter_identity: str
     adapter_digest: str
-    checkpoint_schema_version: int
+    checkpoint_schema_version: int       # OUR envelope format
+    payload_schema_digest: str = ""      # the ADAPTER's own payload format
 
     def mismatch(self, other: "Pin") -> str | None:
         for f in ("definition_digest", "adapter_identity",
-                  "adapter_digest", "checkpoint_schema_version"):
+                  "adapter_digest", "checkpoint_schema_version",
+                  "payload_schema_digest"):
             if getattr(self, f) != getattr(other, f):
                 return f
         return None
@@ -142,13 +173,32 @@ class Pin:
         return {"definition_digest": self.definition_digest,
                 "adapter_identity": self.adapter_identity,
                 "adapter_digest": self.adapter_digest,
-                "checkpoint_schema_version": self.checkpoint_schema_version}
+                "checkpoint_schema_version": self.checkpoint_schema_version,
+                "payload_schema_digest": self.payload_schema_digest}
 
     @staticmethod
     def from_row(r: dict) -> "Pin":
         return Pin(r["definition_digest"], r["adapter_identity"],
-                   r["adapter_digest"], int(r["checkpoint_schema_version"]))
+                   r["adapter_digest"], int(r["checkpoint_schema_version"]),
+                   r.get("payload_schema_digest", ""))
 
 
-class IncompatibleCheckpoint(Exception):
-    pass
+class ResumeRefused(Exception):
+    """Base: resume cannot proceed. Subclasses carry DIFFERENT operator remedies."""
+
+
+class IncompatibleCheckpoint(ResumeRefused):
+    """The definition/adapter changed. Remedy: new run, or restore the prior version."""
+
+
+class ArtifactMissing(ResumeRefused):
+    """The pinned artifact is absent from the registry. Remedy: restore the artifact."""
+
+
+class ArtifactCorrupted(ResumeRefused):
+    """The artifact is present but does not hash to its own key. Remedy: re-fetch;
+    this is a storage-integrity incident, not a version mismatch."""
+
+
+class ConcurrentResume(ResumeRefused):
+    """Another worker holds the resume lease. Remedy: none — this is correct."""

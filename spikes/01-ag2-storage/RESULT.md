@@ -1,7 +1,18 @@
 # Spike 01 — AG2 storage swap
 
-**Verdict: CONDITIONAL PASS — integrate with a documented replacement of one
-method.** Not the unqualified PASS I first claimed.
+## Verdicts — two, recorded separately
+
+| Route | Verdict |
+|---|---|
+| **Clean `ag2.network` integration** (contract intact) | **FAIL** |
+| **AG2 behind an owned compatibility layer** | **PASS** — public composition, atomic claim proven |
+
+"Conditional PASS" obscured that the original gate *failed*. It did. The clean-integration
+route is dead: satisfying OQ-024 requires changing the public semantics of
+`find_envelope_by_causation`, which the gate forbade.
+
+The compatibility-layer route is now evidenced rather than asserted — see §Gate 01b
+(atomicity) and §Gate 01c (ownership boundary) below.
 **Date:** 2026-08-26 · **Revised** after external review found the first verdict
 unsupported.
 
@@ -71,23 +82,70 @@ dedupe path.
 Test 4 is instructive about my own reasoning: it passed, and for the wrong reason.
 Both hubs hydrated *before* the close. Test 5 exists because I did not trust that.
 
-## What this means for the integration decision
+## Gate 01b — atomicity: a three-valued lookup is NOT a dedupe primitive
 
-The gate required keeping the hub contract **intact**. Satisfying OQ-024 requires
-**changing the public semantics** of one method from `Envelope | None` to three
-valued. So the honest verdict is not "integrate unmodified":
+The review's sharpest point, and it is correct. `FOUND | NOT_FOUND | INDETERMINATE`
+is still a **read**. Two hubs can both read `NOT_FOUND`, both act, both append.
 
-**Integrate `ag2.network` for the `Envelope` schema, hub contract, channel protocols
-and delivery machinery — and replace `find_envelope_by_causation` with our own
-log-backed implementation returning `FOUND | NOT_FOUND | INDETERMINATE`.**
+Tested with a **negative control first** (`test_race.py`):
 
-That is a **maintained adapter**, not a clean dependency, and it carries an ongoing
-cost: AG2 may change the pruning behaviour or the index shape under us. Recorded as
-a risk rather than waved away.
+```
+read-then-act effects : ['w1', 'w2']     <- KNOWN-BAD, double execution
+atomic-claim effects  : ['w0']           <- exactly one winner (8 racers)
+claim survives channel close AND WAL deletion
+two-hub winners       : ['h1']
+```
 
-The alternative — port the `Envelope` schema and build the hub ourselves — remains
-open and is more expensive. The deciding factor is that 480 passing tests represent
-delivery, cursor, replay, expectation and adapter machinery we would otherwise write.
+The primitive is an **atomic claim**, not a lookup:
+
+```sql
+CREATE TABLE effect_ledger (
+  channel_id TEXT, sender_id TEXT, causation_id TEXT, status TEXT,
+  PRIMARY KEY (channel_id, sender_id, causation_id));
+
+INSERT OR IGNORE INTO effect_ledger(...) VALUES(...);   -- rowcount == 1 means WE won
+```
+
+`test_C_claim_is_independent_of_channel_lifetime` closes the channel **and deletes the
+WAL entirely**, then asserts the claim still holds. So the second review point is
+settled too: **the effect ledger does not depend on message-log retention.**
+`causation_id` *derives* the key; the ledger *is* the authority. Channel deletion,
+compaction or federation cannot change the safety guarantee for an unrelated external
+effect.
+
+## Gate 01c — ownership: adapter, not fork
+
+The question: can we own dedupe through public composition, or must we replace a hub
+method?
+
+`test_ownership.py` answers it from the source. There is exactly **one** internal
+self-call of `find_envelope_by_causation`, and it is in the **RPC dispatch table**
+(`op == "find_envelope_by_causation"`) — routing a *remote* request. Asserted
+directly:
+
+```python
+post_src = inspect.getsource(CoreHub.post_envelope)
+assert "find_envelope_by_causation" not in post_src
+```
+
+**`post_envelope` never consults it.** The hub does not make a dedupe decision while
+accepting an envelope, so dedupe is ours to own by wrapping. A `DedupingHub` that
+claims-then-delegates touches no privates.
+
+**Therefore: a compatibility layer over public API, not a maintained fork.** The
+upstream-drift risk is correspondingly smaller — it is `post_envelope`'s signature and
+the `Envelope` schema we depend on, not internal index behaviour.
+
+## The decision
+
+**Integrate `ag2.network`** for the `Envelope` schema, channel protocols, delivery,
+cursors, replay and expectations — 480 upstream tests' worth of machinery we would
+otherwise write.
+
+**Own dedupe entirely.** Do not use `find_envelope_by_causation` for correctness at
+all. Our effect ledger claims atomically before any effect, keyed on
+`(tenant, run, logical_step, request_digest)` with `causation_id` as one derivation
+path. AG2's lookup remains useful only as an optimisation hint.
 
 ## What is still untested (the review's point 4, which stands)
 
@@ -104,19 +162,22 @@ adapter folds, tasks, indexes and dispatch, all in process memory. **Not tested:
 That question is deferred to the implementation spec, which must decide whether one
 hub per channel is an invariant we enforce.
 
-## Reproduce
+## Reproduce — every gate test, no exclusions
 
 ```bash
 cd spikes/01-ag2-storage
 python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt
-./.venv/bin/python -m pytest test_gate_real.py -q --asyncio-mode=auto -s   # 5 passed
+./.venv/bin/python -m pytest test_gate_real.py test_race.py test_ownership.py \
+    -q --asyncio-mode=auto -s
+# 12 passed
 ```
 
-`requirements.txt` pins `ag2==1.0.2` and records the source commit
-(`90f490a1b72b27ab4c219dd3586e94d42383a016`). The 480-test upstream run additionally
-needs AG2's `test/` tree copied in, which is **not** reproducible from this checkout
-alone — a real weakness of that evidence, and the reason the 5-test public-API gate
-is the one that carries the verdict.
+`requirements.txt` pins `ag2==1.0.2` and records the AG2 source commit
+`90f490a1b72b27ab4c219dd3586e94d42383a016`.
+
+The 480-test upstream run is **supporting evidence only** and is not reproducible from
+this checkout — it needs AG2's `test/` tree copied in. The 12 public-API tests above
+carry the verdict.
 
 ## Files
 
