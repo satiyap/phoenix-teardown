@@ -1,5 +1,13 @@
 # Phase 3 findings — interim (after Google AX and Omnigent)
 
+> **SUPERSEDED IN PART, 2026-08-26.** Sections 2, 5 and 9 of this document were
+> written before Cloudflare Agents and AG2 were read, and two of their conclusions
+> were wrong. Cloudflare Agents closed `C6` (tool-call idempotency). **AG2 closed
+> the entire F-section**, reversing §5's verdict and invalidating §9's decision to
+> reduce AG2's budget. Corrections are inline below, marked **CORRECTION**. The
+> reasoning is left visible rather than rewritten, because the error is itself a
+> finding — see `synthesis/phase3-findings-final.md`.
+
 Written after the two front-loaded Phase 3 passes, before AG2, Cloudflare Agents,
 Pydantic AI, and Google Agent Platform. These two were read first because they
 addressed the largest gaps and because Omnigent is the closest analogue to the
@@ -116,6 +124,15 @@ also lacks it, the ADR should be rewritten to specify the shared-substrate patte
 instead. I expect AG2 to have *conversational* multi-agent patterns rather than a
 durable messaging primitive, which would not change this conclusion.
 
+> **CORRECTION.** This was wrong, and the prediction in the last sentence was
+> exactly wrong. AG2 1.0's `ag2.network` is "agent registry, durable messaging, and
+> protocol-driven channels": hub-stamped envelopes on per-channel append-only WALs,
+> `audience` addressing, at-least-once delivery with causation-based dedupe,
+> `depth`-capped delegation, per-envelope TTLs, priorities, inbox backpressure with
+> a high-water signal, and access rules enforced hub-side. Verified by running its
+> tests (39 pass). **ADR-0003 stands and is now the best-specified ADR in the set.**
+> Eight for eight became seven for eight, and the eighth is a design to copy.
+
 ## 6. New ideas worth stealing, ranked
 
 From two projects, in rough order of value to v0.1:
@@ -204,6 +221,12 @@ What is left to learn has narrowed considerably.
 - **AG2** was to be the decisive test for ADR-0003. After six absences the
   question is nearly settled; AG2 now serves to confirm rather than decide. Keep
   the pass, reduce the budget.
+
+  > **CORRECTION.** This is the worst judgement recorded in the study. AG2 was
+  > *architected to answer* the F-section, and I downgraded it on the strength of a
+  > tally plus a Phase 1 recon that predated AG2 1.0. It closed six probes no other
+  > project answered. **Budget a project by what it is architected to answer, not
+  > by how confident the running tally has made you.**
 - **Pydantic AI** and **Google Agent Platform** are in-process/SDK-shaped and
   unlikely to speak to durability, tenancy, or delegation. Keep at 1.0d each,
   focused on their type-safety and evaluation stories.

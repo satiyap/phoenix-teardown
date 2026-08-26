@@ -114,6 +114,7 @@ as stated and should be narrowed.
 | Google AX | neutral | `internal/server/server.go:82-83 @ b777313` | No policy engine at all, so nothing to trace. |
 | Omnigent | confirms | `omnigent/policies/types.py:244-252 @ ba9e371` | **First implementation of the traceability half.** `PolicyResult.deciding_policies` names every policy that drove a composed verdict — a single policy on DENY, all ASKing policies in YAML order on ASK. Policies also *transform* content in a chain, each seeing the previous one's output, which makes PII redaction a policy rather than a special case. No shadow-comparison mode exists, so that half of the ADR remains without precedent after six projects. |
 | Cloudflare Agents | neutral | `packages/agents/src/chat/tool-state.ts @ 2f957bc` | No policy engine. Tool approval exists as a protocol message type, but nothing evaluates rules, so there is no decision to trace. |
+| AG2 | confirms | `ag2/network/rule.py:12 @ 90f490a`; `ag2/network/hub/core.py:1861-1866,24-25` | Access and limits are "enforced at the **hub**, never the client", decisions route through a **replaceable `arbiter`** so "federation / custom permission protocols can replace the default rule-based behavior without forking the hub", and every refusal fires `on_envelope_rejected`. The trust boundary is architectural: the hub "never calls `Agent.ask`, executes tenant transforms, or imports tenant modules". Still **no shadow-comparison mode after eight projects** — that half of this ADR remains without precedent. |
 
 ## Open questions
 

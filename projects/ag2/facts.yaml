@@ -14,935 +14,1104 @@ project:
   evidence_class: A
   read_on: 2026-08-26
   repo: "https://github.com/ag2ai/ag2"
-  commit:                  # SHA the claims were read against
+  commit: 90f490a1b72b27ab4c219dd3586e94d42383a016
   docs: "https://docs.ag2.ai"
-  version:
+  version: "ag2 1.0.2"
   license: Apache-2.0
   license_verdict: REFERENCE_ONLY
-  runtime_class: unknown
+  runtime_class: hybrid
   one_line: Formerly AutoGen; self-described open-source AgentOS focused on multi-agent conversation patterns.
-  thesis:                  # the core architectural bet
+  thesis: "Agent-to-agent conversation is a protocol problem, and the protocol belongs in an addressable channel governed by a hub - never in the agents. The hub is the authority (rules enforced hub-side, tenant code never imported) and the whole network is opt-in, so a standalone agent pays nothing for it."
 
 probes:
 
   # --- A. Core abstraction and object model ---
   # A1: What does this system think an agent *is*? State it in one sentence, in their vocabulary.
   A1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Three records back every registered agent: Passport (IMMUTABLE id + billing; mutating any field requires unregister + re-register yielding a fresh agent_id), Resume (mutable capability claims + hub-observed track record), and SKILL.md. AgentRuntime is explicitly cache-only."
+    evidence: "ag2/network/identity.py:1-21,62-68 @ 90f490a"
   # A2: What is the root resource — the thing everything else hangs off?
   A2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Channel is the durable conversation unit with a manifest, participants, state, expectations and an append-only per-channel WAL of envelopes."
+    evidence: "ag2/network/channel.py @ 90f490a; ag2/network/envelope.py:6-11"
   # A3: Is `Agent` persistent or ephemeral? Can it exist while not executing?
   A3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Passport and Resume are hub-registered records independent of any running process; AgentRuntime (transport binding, heartbeat) is separate and cache-only."
+    evidence: "ag2/network/identity.py:17-20 @ 90f490a"
   # A4: Is `Task` a separate resource from `Run`? If not, which concept is missing and what fills the...
   A4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Task is a first-class framework primitive with its own lifecycle events (TaskStarted, TaskProgress, TaskCompleted, TaskFailed, TaskExpired, TaskCancelled), checkpoint() and resume_from. Agent-OWNED: 'the framework does not assign or schedule them'."
+    evidence: "ag2/task.py:5-27 @ 90f490a"
   # A5: What is a `Session` attached to: user, agent, task, or execution?
   A5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Channel is the session; ConversationContext carries channel-scoped context variables mutated via EV_CONTEXT_SET envelopes."
+    evidence: "ag2/network/envelope.py:71-76 @ 90f490a"
   # A6: Are messages first-class durable resources, or transient function arguments?
   A6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Envelope is THE durable message resource: hub-stamped envelope_id, persisted to the per-channel WAL, with audience addressing, causation_id, depth, priority, ttl_seconds and trace_id."
+    evidence: "ag2/network/envelope.py:94-131 @ 90f490a; verified live against ag2 1.0.2 (PyPI, 2026-08-26); pytest test/network/test_at_least_once.py test/network/test_hub_invariants.py -> 39 passed"
   # A7: Are artifacts (files, outputs, deliverables) first-class?
   A7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Files package and KnowledgeStore exist, and EV_PACKET captures an agent's full round atomically, but there is no first-class Artifact resource."
+    evidence: "ag2/files/ @ 90f490a; ag2/network/envelope.py:45-61"
   # A8: Can multiple agents participate in one task? How is that represented?
   A8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Participants in a channel, with Passport kind discriminating agent | human | remote_agent. Multi-agent participation is the core model."
+    evidence: "ag2/network/identity.py:38-39 @ 90f490a; ag2/network/channel.py"
   # A9: Draw the object model as a tree. Only nodes that exist in their code or API.
   A9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Hub > {Passport (immutable), Resume (claimed + observed), SKILL.md, Rule (access + limits), Channel > WAL, AuditLog}; plus Envelope as the wire shape and Task as the lifecycle primitive. See teardown section 3."
+    evidence: "ag2/network/ @ 90f490a"
 
   # --- B. Runtime model ---
   # B1: Does the platform launch agents, host them, or attach to external ones?
   B1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "In-process agents (Agent.ask) with an opt-in hub that may be in-process or remote. The hub NEVER calls Agent.ask or imports tenant modules - the trust boundary runs through HubClient."
+    evidence: "ag2/network/hub/core.py:24-25 @ 90f490a"
   # B2: Execution substrate: process, container, microVM, serverless, in-process library, remote HTTP?
   B2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "In-process by default; remote hubs via network/remote.py and transport/, with remote_agent passports for cross-hub federation ('the local hub holds the passport as a cache and dispatches via a registered RemoteAgentProxy')."
+    evidence: "ag2/network/identity.py:69-73 @ 90f490a"
   # B3: Who owns the event loop — platform or agent?
   B3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The agent owns its own loop (Agent.ask); the hub owns routing, access and limits but never executes agent code."
+    evidence: "ag2/network/hub/core.py:24-25 @ 90f490a"
   # B4: Who decides when an agent wakes?
   B4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Channel protocol adapters decide who speaks next (ExpectedTurn, ORDERING_ROUND_ROBIN, default_expected_next), enforced hub-side, with can_send() as a public probe."
+    evidence: "ag2/network/adapters/ @ 90f490a; ag2/network/client/handlers.py:214"
   # B5: Can an agent run indefinitely? What is the actual ceiling?
   B5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Channels have TTLs (channel_ttl_default 2h) and tasks have TTLs (task_ttl_default 15m); max_silence expectations detect idleness."
+    evidence: "ag2/network/rule.py:100-117 @ 90f490a; verified live against ag2 1.0.2 (PyPI, 2026-08-26); pytest test/network/test_at_least_once.py test/network/test_hub_invariants.py -> 39 passed"
   # B6: Are there background or unattended agents?
   B6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No scheduling or cron. Tasks are agent-owned and explicitly not framework-scheduled."
+    evidence: "ag2/task.py:16-17 @ 90f490a"
   # B7: Is execution synchronous or asynchronous from the caller's view?
   B7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Streams and live packages, plus TaskProgress events on a bound stream so any observer can follow along 'without participating in execution'."
+    evidence: "ag2/task.py:12-15 @ 90f490a; ag2/streams/"
   # B8: Can in-flight work migrate between workers?
   B8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Remote hubs and remote_agent passports allow work to live elsewhere, but there is no work-stealing or migration of in-flight execution."
+    evidence: "ag2/network/remote.py @ 90f490a"
   # B9: Can an agent survive a machine restart? Automatically, or with operator action?
   B9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Task.checkpoint() persists owner-defined state under task_id via a checkpoint_store (typically HubBackedCheckpointStore); resume_from=prior_task_id reads it back and exposes resumed_state 'so the owner can pick up mid-flow after a restart'."
+    evidence: "ag2/task.py:21-27 @ 90f490a"
   # B10: Classify: worker/queue, durable actor, attached harness, or in-process library.
   B10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "hybrid: in-process agents plus an OPT-IN durable messaging hub. 'Importing it is opt-in - bare Agent continues to work standalone with no behavioural change when this package is not imported.'"
+    evidence: "ag2/network/__init__.py:5-10 @ 90f490a"
 
   # --- C. Durability and failure semantics ---
   # C1: What state is durable, and what is lost on crash?
   C1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Append-only per-channel WAL of envelopes plus a hub-level audit.jsonl under a KnowledgeStore root, plus HubBackedCheckpointStore for task state."
+    evidence: "ag2/network/hub/audit.py:5-9 @ 90f490a; ag2/network/envelope.py:6-11"
   # C2: *When* is state persisted — every step, every tool call, on checkpoint, never?
   C2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "post_envelope is 'validate sender + adapter + WAL append + dispatch' - the envelope is durably appended before dispatch."
+    evidence: "ag2/network/hub/core.py:1853-1859 @ 90f490a"
   # C3: Checkpointing or event sourcing? Can state be rebuilt from a log?
   C3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Append-only WAL per channel plus an append-only audit log; context mutations are themselves EV_CONTEXT_SET envelopes in the same WAL, so shared-state changes are part of the log rather than a parallel store."
+    evidence: "ag2/network/envelope.py:71-76 @ 90f490a; ag2/network/hub/audit.py:5"
   # C4: Retry semantics, and at what granularity: run, step, tool call?
   C4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "At-least-once redelivery is expected and guarded, and channel/task TTLs bound retries, but there is no declarative backoff policy (contrast Cloudflare's tryN)."
+    evidence: "ag2/network/client/handlers.py:198-211 @ 90f490a"
   # C5: At-least-once or exactly-once? What do the docs claim versus what the code does?
   C5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "AT-LEAST-ONCE, stated plainly and handled: find_envelope_by_causation lets a handler 'skip the side effect' when the same sender re-posts with the same causation_id. Verified by a dedicated test file."
+    evidence: "ag2/network/hub/core.py:2626-2644 @ 90f490a; verified live against ag2 1.0.2 (PyPI, 2026-08-26); pytest test/network/test_at_least_once.py test/network/test_hub_invariants.py -> 39 passed"
   # C6: Is there an idempotency model for tool side effects?
   C6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "SECOND INDEPENDENT PRECEDENT, WITH A BETTER KEY. Envelope carries idempotency_key (reserved for cross-process transports), but the working mechanism is causation-based: find_envelope_by_causation(channel, sender, causation_id) returns the prior accepted reply so the handler skips the side effect. Checked BEFORE the turn-ownership probe 'so a redelivery is a no-op regardless of whose turn it now is'. The reply IS the idempotency record."
+    evidence: "ag2/network/hub/core.py:2626-2644 @ 90f490a; ag2/network/client/handlers.py:198-211; verified live against ag2 1.0.2 (PyPI, 2026-08-26); pytest test/network/test_at_least_once.py test/network/test_hub_invariants.py -> 39 passed"
   # C7: Process crash recovery: what resumes, and from where?
   C7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Task.resumed_state after resume_from, read back from the checkpoint store; channel state is recovered by folding the WAL."
+    evidence: "ag2/task.py:21-27 @ 90f490a"
   # C8: Node loss: is work re-dispatched, and how is it detected?
   C8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "max_silence expectations detect idle channels and TaskExpired handles timed-out work, plus AgentRuntime tracks last heartbeat - but there is no explicit lost-worker scan (contrast Cloudflare)."
+    evidence: "ag2/network/rule.py:107-108 @ 90f490a; ag2/network/identity.py:17-19"
   # C9: Context-window overflow: truncation, summarisation, or failure?
   C9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "BEST CONTEXT MANAGEMENT IN THE STUDY: CompactStrategy protocol plus policies for token_budget, sliding_window, episodic_memory and working_memory. Honest about limits - 'the budget is a target, not a guarantee'."
+    evidence: "ag2/compact.py:5-13 @ 90f490a; ag2/policies/token_budget.py:12-20"
   # C10: Timers, scheduled execution, long sleeps — durable across restart?
   C10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Per-envelope ttl_seconds, channel expires_at, channel_ttl_default 2h, task_ttl_default 15m, and max_silence expectations."
+    evidence: "ag2/network/envelope.py:110-112 @ 90f490a; ag2/network/rule.py:113-114"
   # C11: Human-in-the-loop pause and resume: durable, or in-memory only?
   C11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "hitl.py provides HumanInputRequest/HumanMessage with sync or async hooks and HumanInputNotProvidedError. More importantly, kind='human' is a PASSPORT KIND - a human is an addressable network participant with an identity, rule and inbox."
+    evidence: "ag2/hitl.py @ 90f490a; ag2/network/identity.py:38,69-71"
   # C12: Can a definition be upgraded while runs are in flight? What happens to them?
   C12:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "Passport is immutable but carries NO version, and Task.resumed_state is owner-defined and unversioned, so nothing detects a definition change across resume. Eight projects and still nobody has versioning AND pinning."
+    evidence: "ag2/network/identity.py:62-68 @ 90f490a; ag2/task.py:21-27"
 
   # --- D. Agent identity and lifecycle ---
   # D1: Is an agent globally addressable? By what identifier?
   D1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Passport.agent_id is hub-stamped at registration and IMMUTABLE: 'Mutating any field requires unregister + re-register, which yields a fresh agent_id'. Immutability by construction, not convention."
+    evidence: "ag2/network/identity.py:62-68 @ 90f490a"
   # D2: Does identity survive process restart?
   D2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Passport, Resume and SKILL.md are persisted identity files under the hub's store, independent of any connection."
+    evidence: "ag2/network/identity.py:1-20 @ 90f490a"
   # D3: Is identity distinct from runtime instance?
   D3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Three-way split: Passport (immutable identity), Resume (mutable capability), AgentRuntime (connection cache). Cleanest separation in the study."
+    evidence: "ag2/network/identity.py:5-20 @ 90f490a"
   # D4: Are agents versioned? Immutable or mutable definitions?
   D4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No version field on Passport. Immutability sidesteps part of the problem (a change yields a new agent_id) but there is no version lineage."
+    evidence: "ag2/network/identity.py:62-68 @ 90f490a"
   # D5: Is there a registry or catalog?
   D5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The hub IS an agent registry: register / unregister / set_resume / set_skill / set_rule, all audited, with a capability index for peers(action='find')."
+    evidence: "ag2/network/hub/audit.py:12-14 @ 90f490a; ag2/network/client/tools/peers.py"
   # D6: Can agents discover each other at runtime?
   D6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "peers(action='find') matches on query/capability/sort_by and returns claimed capabilities WITH observed success rate and cost; peers(action='describe') returns passport, resume and SKILL.md verbatim with a rendered fallback."
+    evidence: "ag2/network/client/tools/peers.py:5-13,29-40 @ 90f490a"
   # D7: Can agents advertise capabilities? In what format?
   D7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Resume.claimed_capabilities are the declaration; Resume.observed[cap] is a hub-derived ObservedStat{n, completed, failed, expired, p50_latency_ms} updated on every terminal task event. Declared AND verified, continuously."
+    evidence: "ag2/network/identity.py:132-160 @ 90f490a; ag2/network/hub/core.py:1337-1352"
   # D8: Is there an owner, team, or tenant on the agent record?
   D8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Passport carries billing facts and a CostProfile, and rules are per (hub, agent), but there is no owner or tenant field."
+    evidence: "ag2/network/identity.py:43-49 @ 90f490a"
   # D9: Can an agent be suspended, revoked, or deprecated?
   D9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "FIRST AGENT REVOCATION IN EIGHT PROJECTS: unregister exists and is audited alongside register and set_resume. It is a hard removal rather than a deprecation lifecycle, and re-registering yields a new agent_id."
+    evidence: "ag2/network/hub/audit.py:12-14 @ 90f490a; ag2/network/identity.py:67"
   # D10: Is there anything resembling a declarative agent manifest?
   D10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "SKILL.md is 'a Markdown document with Anthropic-style frontmatter' per agent, parsed by client/skill_render.py, plus ChannelManifest declaring channel type, participants and expectations."
+    evidence: "ag2/network/identity.py:15-16 @ 90f490a; ag2/network/channel.py"
 
   # --- E. Harness and runtime interoperability ---
   # E1: What is the minimum interface an agent implementation must satisfy?
   E1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "No harness adapter contract in the AX/Omnigent sense. ChannelAdapter is a PROTOCOL adapter (conversation/discussion/consulting/workflow), and acp/ drives external agents (Claude Code, Codex, KiloCode, OpenCode)."
+    evidence: "ag2/network/adapters/ @ 90f490a; ag2/acp/config.py"
   # E2: Transport: stdin/stdout, HTTP, gRPC, WebSocket, in-process, ACP, A2A?
   E2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "In-process, remote hub transports (network/transport/), and ACP for external agent CLIs; A2A over gRPC or HTTP as an optional edge adapter."
+    evidence: "ag2/network/transport/ @ 90f490a; ag2/a2a/transports/"
   # E3: Can it host a foreign agent (Claude Code, Codex, OpenHands, LangGraph, ADK)?
   E3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "ACP configs for Claude Code, Codex, KiloCode and OpenCode; remote_agent passports for agents on another hub."
+    evidence: "ag2/acp/config.py @ 90f490a"
   # E4: Is there an event stream out of a running agent? What granularity?
   E4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Typed event stream: Task* events on a bound stream, plus HubListener callbacks (on_envelope_posted, on_envelope_rejected, on_inbox_pressure) and EV_PACKET capturing a full agent round atomically."
+    evidence: "ag2/network/hub/core.py:1863-1866 @ 90f490a; ag2/network/envelope.py:45-61"
   # E5: Are tool calls externally observable, or internal to the agent?
   E5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "EV_PACKET records routing{kind: handoff|text, tool, reason, target} plus context_updates and body - the triggering tool, a human-readable reason and the resolved target."
+    evidence: "ag2/network/envelope.py:45-61 @ 90f490a"
   # E6: How is context injected at start?
   E6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Rule, ChannelManifest and Passport/Resume are typed declarative config; there is no opaque adapter config blob."
+    evidence: "ag2/network/rule.py:120-127 @ 90f490a"
   # E7: Is cancellation supported? Cooperative or forced? Does it propagate to subagents?
   E7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "BEST CANCELLATION MODEL IN THE STUDY: EV_TASK_CANCEL_REQUEST (a peer ASKS, and 'the owner is free to honour by calling Task.cancel or to ignore the request entirely') is distinct from EV_TASK_CANCELLED (the owner's terminal emission). Cooperative cancellation across a trust boundary."
+    evidence: "ag2/network/envelope.py:81-91 @ 90f490a"
   # E8: Can a run be checkpointed and restored by the platform, or only by the agent?
   E8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Task.checkpoint() and resume_from=prior_task_id with resumed_state exposed to the owner; HubBackedCheckpointStore persists under task_id."
+    evidence: "ag2/task.py:21-27 @ 90f490a"
   # E9: Which of these would be hard to adapt, and why?
   E9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Extensive module docstrings stating contracts and honest limits, a stable event-type naming rule ('new names are added in code, not at runtime'), and 49 network test files."
+    evidence: "ag2/network/envelope.py:41-44 @ 90f490a; test/network/"
 
   # --- F. Agent-to-agent communication ---
   # F1: Direct messages between agents?
   F1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "THE F-SECTION IS CLOSED. Envelope is 'the wire shape for every message between agents... hub-stamped at post_envelope, and persisted to the per-channel WAL'. Genuine durable agent-to-agent messaging - the first in eight projects."
+    evidence: "ag2/network/envelope.py:5-11 @ 90f490a; verified live against ag2 1.0.2 (PyPI, 2026-08-26); pytest test/network/test_at_least_once.py test/network/test_hub_invariants.py -> 39 passed"
   # F2: Channels, topics, or pub/sub?
   F2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Channels with typed protocols (ConversationAdapter, DiscussionAdapter, ConsultingAdapter, WorkflowAdapter), invite/ack/reject lifecycle, open/closed/expired states, and expectations enforced hub-side."
+    evidence: "ag2/network/adapters/ @ 90f490a; ag2/network/envelope.py:63-70"
   # F3: Task delegation as a distinct mechanism from messaging?
   F3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Delegation is bounded by the platform: Envelope.depth is 'delegation hop count. Hub auto-increments on the reply path; Rule.limits.delegation_depth caps it' (default 5). Plus handoff.py and transitions.py."
+    evidence: "ag2/network/envelope.py:108-110 @ 90f490a; ag2/network/rule.py:116"
   # F4: Synchronous RPC between agents?
   F4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Consulting and workflow channel protocols give request/response shapes over envelopes; A2A provides RPC-style interop at the edge."
+    evidence: "ag2/network/adapters/ @ 90f490a"
   # F5: Asynchronous inbox or mailbox?
   F5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "InboxBlock is a real mailbox policy: max_pending 1000, overflow 'reject', and a high_water soft threshold firing on_inbox_pressure for backpressure (defaults to 80% of max_pending). Honest that drop_oldest/drop_newest are 'recognised but treated as reject'."
+    evidence: "ag2/network/rule.py:80-96 @ 90f490a; verified live against ag2 1.0.2 (PyPI, 2026-08-26); pytest test/network/test_at_least_once.py test/network/test_hub_invariants.py -> 39 passed"
   # F6: Is delivery durable? Survives restart of sender and receiver?
   F6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "At-least-once delivery, stated explicitly, with causation-based dedupe so handlers skip duplicate side effects. Verified: test/network/test_at_least_once.py passes."
+    evidence: "ag2/network/hub/core.py:2626-2644 @ 90f490a; verified live against ag2 1.0.2 (PyPI, 2026-08-26); pytest test/network/test_at_least_once.py test/network/test_hub_invariants.py -> 39 passed"
   # F7: Is message ordering guaranteed? Per what scope?
   F7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Per-channel lock makes validate_send / fold / on_accepted 'see a consistent state', with dispatch outside the lock to avoid deadlock on EV_CHANNEL_CLOSED broadcast. Single-writer per channel."
+    evidence: "ag2/network/hub/core.py:1856-1859 @ 90f490a"
   # F8: Acknowledgement or delivery receipts?
   F8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "EV_CHANNEL_INVITE_ACK and EV_CHANNEL_INVITE_REJECT are explicit acknowledgement envelopes, and find_envelope_by_causation lets a sender confirm a prior reply exists."
+    evidence: "ag2/network/envelope.py:63-66 @ 90f490a"
   # F9: Correlation ids for request/response pairing?
   F9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "causation_id threads replies to prompts ('used by view policies to thread replies to their prompts'), task_id links envelopes to tasks, and trace_id is a first-class envelope field so trace context rides the message."
+    evidence: "ag2/network/envelope.py:104-107 @ 90f490a"
   # F10: Conversation threading?
   F10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Channels are created, invited to, closed and expired, with context forking via EV_CONTEXT_SET; no conversation fork primitive."
+    evidence: "ag2/network/envelope.py:63-70 @ 90f490a"
   # F11: Capability-based routing — address by what an agent *can do* rather than who it is?
   F11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "FIRST GENUINE CAPABILITY ROUTING: peers(action='find') matches on capability and returns a structured list including observed_success_rate and cost 'the LLM can rank'. Observation even EXPANDS the index - an agent appears under a capability 'even if it wasn't in their original claimed_capabilities'."
+    evidence: "ag2/network/client/tools/peers.py:29-40 @ 90f490a; ag2/network/hub/core.py:1341-1342"
 
   # --- G. Human-agent collaboration ---
   # G1: Is a human modelled as a special kind of agent, a distinct principal type, or not modelled?
   G1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "kind='human' is a Passport kind - 'an out-of-band non-LLM participant driven by an external UI' - so a human has an identity, a rule and an inbox, and is addressable in audience exactly like an agent. Cleanest expression of humans-as-principals in the study."
+    evidence: "ag2/network/identity.py:38,69-71 @ 90f490a; verified live against ag2 1.0.2 (PyPI, 2026-08-26); pytest test/network/test_at_least_once.py test/network/test_hub_invariants.py -> 39 passed"
   # G2: Shared rooms, channels, or workspaces?
   G2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Channel is the shared space, with a manifest, participants, invite lifecycle and declared protocol."
+    evidence: "ag2/network/channel.py @ 90f490a"
   # G3: Task threads humans can read and post into?
   G3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Humans participate as first-class channel members; ag_ui/, a2ui/, mcp_ui/ and textual.py provide UI surfaces, and Task events stream to observers 'without participating in execution'."
+    evidence: "ag2/task.py:12-15 @ 90f490a; ag2/ag_ui/"
   # G4: Mentions or directed addressing?
   G4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Envelope.audience IS addressing: None broadcasts within the channel, a list targets a subset - and humans are addressable the same way as agents."
+    evidence: "ag2/network/envelope.py:9-11 @ 90f490a"
   # G5: Approval gates. Blocking or advisory? Durable while pending?
   G5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "hitl.py with HumanInputRequest/HumanMessage, sync or async hooks, and HumanInputNotProvidedError when none is supplied."
+    evidence: "ag2/hitl.py:15-22 @ 90f490a"
   # G6: Mid-run intervention: can a human redirect without restarting?
   G6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A human can post envelopes, respond to input requests, and send EV_TASK_CANCEL_REQUEST - which the owner may honour or ignore."
+    evidence: "ag2/network/envelope.py:81-88 @ 90f490a"
   # G7: Agent status and presence visible to humans?
   G7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Task lifecycle events including TaskProgress and TaskExpired, HubListener callbacks for posted AND rejected envelopes, on_inbox_pressure for backpressure, and EV_EXPECTATION_VIOLATED."
+    evidence: "ag2/network/hub/core.py:1863-1866 @ 90f490a"
   # G8: Notifications or escalation when an agent is blocked?
   G8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "policies/alert.py and on_inbox_pressure provide signalling, and expectation violations fire events, but there is no escalation or on-call model."
+    evidence: "ag2/policies/alert.py @ 90f490a"
   # G9: Shared scratchpad or working surface?
   G9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Channel-scoped context variables shared across participants, mutated via EV_CONTEXT_SET envelopes so every change is in the WAL."
+    evidence: "ag2/network/envelope.py:71-76 @ 90f490a"
   # G10: Can a human see the context an agent is operating on?
   G10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Per-channel WAL is a complete replayable record, plus audit.jsonl for hub-cross-cutting events, plus observer streams. The WAL stores the FULL envelope regardless of addressing, so audit scope is deliberately wider than delivery scope."
+    evidence: "ag2/network/envelope.py:49-52 @ 90f490a"
 
   # --- H. Context and memory ---
   # H1: Which of these exist as *separate* concepts: prompt context, working state, session history, ...
   H1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "No memory service, but the richest context-management layer in the study: episodic_memory and working_memory policies, sliding_window, token_budget, CompactStrategy, plus a knowledge/ package and KnowledgeStore."
+    evidence: "ag2/policies/ @ 90f490a; ag2/knowledge/"
   # H2: Who owns memory: agent, human, workspace, task, or tenant?
   H2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "SKILL.md and Resume are per-agent records owned by that passport; KnowledgeStore is hub-rooted."
+    evidence: "ag2/network/identity.py:15-16 @ 90f490a"
   # H3: Can memory be shared between agents? At what granularity?
   H3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Channel-scoped context variables are shared across participants and mutated durably via EV_CONTEXT_SET."
+    evidence: "ag2/network/envelope.py:71-76 @ 90f490a"
   # H4: Are there permissions on memory?
   H4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Rule.access governs who may talk to whom and which channel types, which indirectly scopes what an agent can learn, but there are no per-item knowledge permissions."
+    evidence: "ag2/network/rule.py:1-13 @ 90f490a"
   # H5: Is provenance tracked — where a memory came from?
   H5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "ResumeExample records title, outcome, task_id, channel_id and when - provenance for a capability claim traceable back to the task and channel that produced it."
+    evidence: "ag2/network/identity.py:123-129 @ 90f490a"
   # H6: Expiry, TTL, or forgetting?
   H6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Per-envelope ttl_seconds, channel expires_at and TTL defaults, task TTLs, and terminal-channel pruning that clears indexes."
+    evidence: "ag2/network/envelope.py:110-112 @ 90f490a; ag2/network/hub/core.py:2637-2639"
   # H7: Summarisation or compaction. Automatic or explicit?
   H7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "CompactStrategy 'reduces stream history to respect system constraints... triggered when measurable limits (event count, token count) are approached', with the discipline stated: 'Compaction removes. Aggregation creates. They are separate concerns.'"
+    evidence: "ag2/compact.py:5-13 @ 90f490a"
   # H8: Retrieval mechanism: vector, keyword, structured, agent-driven?
   H8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Resume.summary is 'one-line, indexed for peers(action=find)' and there is a capability index, but retrieval is over agents rather than documents. No vector store."
+    evidence: "ag2/network/identity.py:155 @ 90f490a"
   # H9: Can an agent mutate its own memory mid-run?
   H9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Agents write context via EV_CONTEXT_SET and their Resume evolves; the hub also writes observed stats on their behalf."
+    evidence: "ag2/network/envelope.py:71-76 @ 90f490a"
   # H10: Conflict resolution on concurrent writes?
   H10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Channel context is shared mutable state, but mutations are ordered envelopes under the per-channel lock, so concurrent writes are serialised by the same mechanism as messages."
+    evidence: "ag2/network/hub/core.py:1856-1859 @ 90f490a"
   # H11: Is memory in the same store as execution state, or separate?
   H11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Execution state (WAL, checkpoints) is separate from knowledge (SKILL.md, KnowledgeStore, Resume) and from context (channel context variables)."
+    evidence: "ag2/network/hub/audit.py:5-9 @ 90f490a; ag2/network/identity.py:15-16"
 
   # --- I. Tools and capabilities ---
   # I1: Are tools bound to agents statically, or resolved dynamically?
   I1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "ag2/tools/ with a @tool decorator, mcp/ and mcp_ui/ packages, and an ACP tool_gateway with MCPCapabilityError."
+    evidence: "ag2/tools/ @ 90f490a; ag2/acp/tool_gateway.py"
   # I2: Is there a capability abstraction distinct from tool implementation?
   I2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Resume.claimed_capabilities plus hub-derived observed stats per capability - a capability model for AGENTS rather than runtimes, verified continuously in production rather than by a bench."
+    evidence: "ag2/network/identity.py:144-160 @ 90f490a"
   # I3: Is there a registry of available tools?
   I3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The hub is the registry, with a capability index; peers() is the discovery tool. default_tools_for provides per-adapter tool sets."
+    evidence: "ag2/network/adapters/ @ 90f490a; ag2/network/client/tools/peers.py"
   # I4: Tool scoping — can an agent be restricted to a subset?
   I4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Rule.access constrains which peers and channel types an agent may use, enforced hub-side; adapters expose only their protocol-appropriate tools."
+    evidence: "ag2/network/rule.py:1-13 @ 90f490a"
   # I5: Are tools versioned?
   I5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No tool versioning."
+    evidence: "ag2/tools/ @ 90f490a"
   # I6: How are credentials supplied to a tool?
   I6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "AuthBlock on the passport declares 'how the hub validates this identity at the connection handshake' with scheme, issuer, audience, key_fingerprint and claim; AuthRegistry with ApiKeyAuth and NoAuth. ACP has StaticTokenAuth and AuthProvider."
+    evidence: "ag2/network/identity.py:52-60 @ 90f490a; ag2/network/auth.py"
   # I7: OAuth or delegated user credentials?
   I7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "AuthBlock is JWT-shaped (issuer/audience/claim/key_fingerprint) and the arbiter is replaceable for custom permission protocols, but scheme is still 'none' | future schemes so no delegated-credential flow ships."
+    evidence: "ag2/network/identity.py:52-60 @ 90f490a"
   # I8: Can policy intercept a tool call before execution?
   I8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Rules are 'enforced at the hub, never the client', and access/limits decisions go through a REPLACEABLE arbiter 'so federation / custom permission protocols can replace the default rule-based behavior without forking the hub'."
+    evidence: "ag2/network/rule.py:12 @ 90f490a; ag2/network/hub/core.py:1861-1864"
   # I9: Approval gates on specific tools?
   I9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "hitl hooks gate on human input, and expectations plus can_send() gate whether an agent may act at all in a channel."
+    evidence: "ag2/hitl.py @ 90f490a; ag2/network/client/handlers.py:214"
   # I10: Do tools execute inside or outside the agent's sandbox?
   I10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No sandboxing; tool execution isolation is out of scope."
+    evidence: "ag2/tools/ @ 90f490a"
 
   # --- J. Security and identity ---
   # J1: What identity does an agent authenticate as?
   J1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Every participant has a Passport with an agent_id and an AuthBlock describing handshake validation; kind discriminates agent, human and remote_agent."
+    evidence: "ag2/network/identity.py:38,52-60 @ 90f490a"
   # J2: Authentication mechanism for agent-to-platform?
   J2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "AuthAdapter with ApiKeyAuth, NoAuth and an AuthRegistry, plus AuthBlock for handshake validation and network/security.py. But scheme is 'none' | future schemes, so real schemes are limited to API keys."
+    evidence: "ag2/network/auth.py @ 90f490a; ag2/network/identity.py:52-56"
   # J3: Authorisation model: RBAC, ABAC, capability tokens, none?
   J3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Rule.access (who may talk to whom, which channel types) and Rule.limits, both 'enforced at the hub, never the client', through a replaceable arbiter."
+    evidence: "ag2/network/rule.py:1-13 @ 90f490a"
   # J4: Secret storage and injection?
   J4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "AuthBlock carries a key_fingerprint rather than a key, and a2a/security.py exists, but there is no secret-management design."
+    evidence: "ag2/network/identity.py:52-60 @ 90f490a"
   # J5: Per-agent credentials, or shared platform credentials?
   J5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Per-agent AuthBlock on the passport, validated at the connection handshake."
+    evidence: "ag2/network/identity.py:52-60 @ 90f490a"
   # J6: Can an agent act as a user? Is that impersonation or delegation?
   J6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Envelope.depth caps delegation hops (default 5) and the arbiter can implement custom permission protocols, but there is no credential-delegation mechanism (contrast Omnigent's RFC 8628)."
+    evidence: "ag2/network/envelope.py:108-110 @ 90f490a"
   # J7: Tenant isolation: logical, or enforced at runtime?
   J7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "'Tenant' names the trust boundary for user code, not an isolation unit. No tenant_id on any record."
+    evidence: "ag2/network/hub/core.py:24-25 @ 90f490a"
   # J8: Network and filesystem isolation?
   J8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "ARCHITECTURAL trust boundary: 'The hub never calls Agent.ask, executes tenant transforms, or imports tenant modules - the trust boundary runs through HubClient.' A hub cannot be compromised by tenant code because it never runs tenant code."
+    evidence: "ag2/network/hub/core.py:24-25,128 @ 90f490a"
   # J9: Is there an audit log? Is it tamper-evident?
   J9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Append-only audit.jsonl recording identity changes (with a source field distinguishing tenant-driven from hub-observed), channel lifecycle, task terminations, expectation violations and notify-handler crashes 'so operators can correlate with channel WALs'. The kind set is deliberately open."
+    evidence: "ag2/network/hub/audit.py:5-31 @ 90f490a"
   # J10: Where are policy decisions enforced — control plane, runtime, or tool gateway?
   J10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Hub-side enforcement with a replaceable arbiter, and every decision observable: on_envelope_posted for success, on_envelope_rejected 'for every attempt' on any pre-WAL failure."
+    evidence: "ag2/network/hub/core.py:1861-1866 @ 90f490a"
 
   # --- K. Sandbox and isolation ---
   # K1: Is there a workspace or sandbox concept? What is its lifecycle?
   K1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No sandbox model."
+    evidence: "ag2/ @ 90f490a"
   # K2: Persistent filesystem across runs?
   K2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No sandbox, so no workspace persistence."
+    evidence: "ag2/ @ 90f490a"
   # K3: Snapshot and restore?
   K3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No sandbox suspend/resume."
+    evidence: "ag2/ @ 90f490a"
   # K4: Network egress rules?
   K4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No egress controls."
+    evidence: "ag2/ @ 90f490a"
   # K5: Container, microVM, or none?
   K5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No isolation technology."
+    evidence: "ag2/ @ 90f490a"
   # K6: Resource quotas: CPU, memory, disk, wall clock?
   K6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Rule.limits caps concurrent channels and tasks and delegation depth, and InboxBlock caps pending messages - real resource bounds, but not compute quotas."
+    evidence: "ag2/network/rule.py:100-117 @ 90f490a"
   # K7: How are secrets injected without landing in the image or logs?
   K7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No secret injection."
+    evidence: "ag2/ @ 90f490a"
   # K8: Arbitrary code execution? Browser execution?
   K8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "Code execution is a tool concern, not a framework one."
+    evidence: "ag2/tools/ @ 90f490a"
   # K9: Is the sandbox pluggable, or a fixed implementation?
   K9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No sandbox abstraction at all."
+    evidence: "ag2/ @ 90f490a"
 
   # --- L. Orchestration and scheduling ---
   # L1: Does it distinguish agent coordination from workflow orchestration?
   L1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Clean: agents own tasks ('the framework does not assign or schedule them'), the hub owns routing and enforcement, and channel adapters own turn-taking protocol."
+    evidence: "ag2/task.py:16-17 @ 90f490a; ag2/network/rule.py:12"
   # L2: Topology: DAG, cyclic graph, supervisor, planner, event-driven, queue?
   L2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "WorkflowAdapter with handoff.py and transitions.py; EV_PACKET records routing kind, triggering tool, reason and resolved target."
+    evidence: "ag2/network/envelope.py:45-61 @ 90f490a; ag2/network/handoff.py"
   # L3: Cron or scheduled triggers?
   L3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No scheduled triggers."
+    evidence: "ag2/task.py:16-17 @ 90f490a"
   # L4: Dynamic task spawning at runtime?
   L4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Agents create tasks dynamically and open channels to peers discovered via peers(action='find'), with depth-capped delegation."
+    evidence: "ag2/network/client/tools/peers.py @ 90f490a"
   # L5: Fan-out / fan-in?
   L5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "DiscussionAdapter and ConsultingAdapter give multi-party fan-out patterns with round ordering (ORDERING_ROUND_ROBIN, default_build_round_envelope), and aggregate.py plus response/ handle collection."
+    evidence: "ag2/network/adapters/ @ 90f490a; ag2/aggregate.py"
   # L6: Subagents. Are they first-class, or just nested calls?
   L6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Peer agents rather than subagents - any registered agent can be consulted or delegated to, bounded by delegation_depth. remote_agent passports extend this across hubs."
+    evidence: "ag2/network/identity.py:69-73 @ 90f490a"
   # L7: Retry and backoff policy — declarative or hand-rolled?
   L7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "At-least-once redelivery with causation dedupe is the retry story; TTLs and TaskExpired bound it. No declarative backoff policy."
+    evidence: "ag2/network/client/handlers.py:198-211 @ 90f490a"
   # L8: Compensation or rollback on failure?
   L8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No compensation or rollback. EIGHT FOR EIGHT absent."
+    evidence: "ag2/network/ @ 90f490a"
   # L9: Does cancellation propagate through the whole tree?
   L9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Cooperative: EV_TASK_CANCEL_REQUEST is a peer's request the owner may honour or ignore; EV_TASK_CANCELLED is the owner's terminal fact. Task.cancel is the owner-side action."
+    evidence: "ag2/network/envelope.py:81-91 @ 90f490a"
   # L10: Could this be replaced by Temporal or Restate, or is orchestration inseparable from the agent...
   L10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "No embedded workflow engine - WorkflowAdapter is a channel protocol, not a DAG runner. Scheduling is explicitly out of scope."
+    evidence: "ag2/network/adapters/ @ 90f490a; ag2/task.py:16-17"
 
   # --- M. Observability ---
   # M1: Which of these are modelled as telemetry objects: trace, run, step, LLM call, tool call, mess...
   M1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Task lifecycle events, HubListener callbacks (posted, rejected, inbox pressure, terminal tasks, expectation violations), EV_PACKET rounds, an append-only audit log, and optional OTel."
+    evidence: "ag2/network/hub/core.py:1861-1866 @ 90f490a"
   # M2: Is telemetry keyed to agent, run, model, task, user, or tenant?
   M2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Keyed to channel_id, sender_id, envelope_id, task_id, causation_id and trace_id - all first-class envelope fields."
+    evidence: "ag2/network/envelope.py:94-131 @ 90f490a; verified live against ag2 1.0.2 (PyPI, 2026-08-26); pytest test/network/test_at_least_once.py test/network/test_hub_invariants.py -> 39 passed"
   # M3: OpenTelemetry, proprietary, or none?
   M3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "FOURTH PROJECT WITH OTEL, but OPTIONAL: tracing = ['opentelemetry-sdk>=1.20'] exposed via ag2.opentelemetry / ag2.middleware, plus _telemetry_consts.py, hub/telemetry.py and hub/_envelope_tracing.py. envelope.trace_id is first-class so trace context rides the message. Weaker than AX or Cloudflare on convention adherence."
+    evidence: "pyproject.toml:107,196 @ 90f490a; ag2/network/hub/_envelope_tracing.py"
   # M4: Is there a documented, stable event schema?
   M4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Stable event-type name constants with an explicit rule ('new names are added in code, not at runtime'), documented event_data shapes, and an open audit kind set."
+    evidence: "ag2/network/envelope.py:41-44 @ 90f490a"
   # M5: Cost and token accounting. Per what unit?
   M5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "CostProfile carries input_per_mtok, output_per_mtok and latency_tier as routing hints, and usage.py tracks usage - but 'None of these fields are validated by V1'."
+    evidence: "ag2/network/identity.py:43-49 @ 90f490a; ag2/usage.py"
   # M6: Latency breakdown by phase?
   M6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "ObservedStat carries p50_latency_ms, though it is 'a single-sample stand-in for a future reservoir'; task events carry timing."
+    evidence: "ag2/network/hub/core.py:1346-1348 @ 90f490a"
   # M7: Error taxonomy?
   M7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "TaskFailed vs TaskExpired vs TaskCancelled as distinct terminal states, NetworkError hierarchy in errors.py, EV_EXPECTATION_VIOLATED, and notify-handler crashes audited as 'turn_failed'."
+    evidence: "ag2/task.py:8-13 @ 90f490a; ag2/network/hub/audit.py:22-23"
   # M8: Can the event stream reconstruct a run after the fact — replay or audit?
   M8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Per-channel WAL is a complete replayable envelope log, and the WAL stores the full envelope regardless of addressing precisely for 'audit + debug'."
+    evidence: "ag2/network/envelope.py:49-52 @ 90f490a"
 
   # --- N. Multi-tenancy and enterprise ---
   # N1: Resource hierarchy: org, workspace, project, environment?
   N1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No org/project/environment hierarchy. Rules are per (hub, agent)."
+    evidence: "ag2/network/rule.py:1-5 @ 90f490a"
   # N2: RBAC model and its granularity?
   N2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Rule.access is a per-agent access model enforced hub-side, with a replaceable arbiter for custom permission protocols - though not role-based."
+    evidence: "ag2/network/rule.py:1-13 @ 90f490a"
   # N3: Quotas and cost limits. Enforced or advisory?
   N3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "LimitsBlock caps max_concurrent_channels, max_concurrent_tasks and delegation_depth with TTL defaults - real resource limits. But RateBlock is 'stored on the rule but not enforced by the in-process hub' and CostProfile is unvalidated, so there is no money-denominated cap."
+    evidence: "ag2/network/rule.py:69-77,100-117 @ 90f490a"
   # N4: dev / staging / prod separation?
   N4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No environment separation."
+    evidence: "ag2/network/ @ 90f490a"
   # N5: Deployment promotion path?
   N5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No promotion path."
+    evidence: "ag2/network/ @ 90f490a"
   # N6: Agent catalog scoped to a tenant?
   N6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The hub registry with a capability index IS an agent catalog, queryable via peers(action='find') and describable via peers(action='describe')."
+    evidence: "ag2/network/client/tools/peers.py:5-13 @ 90f490a"
   # N7: Audit retention controls?
   N7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Terminal-channel pruning clears indexes and TTLs expire channels and tasks, but there is no configurable audit retention policy."
+    evidence: "ag2/network/hub/core.py:2637-2639 @ 90f490a"
   # N8: Is multi-tenancy in the OSS core, or reserved for a commercial tier?
   N8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "Multi-tenancy is not modelled anywhere; 'tenant' means user code."
+    evidence: "ag2/network/hub/core.py:24-25 @ 90f490a"
 
   # --- O. API and protocol surface ---
   # O1: List the actual primary endpoints or SDK entry points. Verbatim.
   O1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Library API (Agent, Task, hub client) plus optional A2A server (HTTP and gRPC), ACP, MCP, and UI surfaces (ag_ui, a2ui, mcp_ui, textual)."
+    evidence: "ag2/a2a/server.py @ 90f490a; ag2/acp/"
   # O2: Is the API resource-oriented or RPC-flavoured?
   O2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Message- and channel-oriented rather than resource-oriented: post_envelope, open_channel, register. A2A adds card-based discovery at the edge."
+    evidence: "ag2/a2a/card.py @ 90f490a"
   # O3: Streaming: SSE, WebSocket, long-poll, gRPC stream?
   O3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Streams and live packages, Task events on bound streams, A2A push.py for push notifications."
+    evidence: "ag2/streams/ @ 90f490a; ag2/a2a/push.py"
   # O4: Webhooks or outbound callbacks?
   O4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "a2a/push.py provides push notifications at the edge; HubListener is the in-process equivalent. No general webhook subscription model."
+    evidence: "ag2/a2a/push.py @ 90f490a"
   # O5: Which standards are implemented: MCP, A2A, ACP, OTel, OpenAI-compatible?
   O5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A2A (agent cards, gRPC, HTTP), ACP (Claude Code, Codex, KiloCode, OpenCode), MCP, AG-UI, and optional OpenTelemetry. All as OPTIONAL edge dependencies, degrading with missing_optional_dependency."
+    evidence: "ag2/a2a/__init__.py:5-22 @ 90f490a; ag2/acp/__init__.py:5-12"
   # O6: Is the API versioned? Stability commitment?
   O6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Rule.version and Resume.version fields, a stable event-type naming rule, and semantic package version 1.0.2."
+    evidence: "ag2/network/rule.py:122 @ 90f490a; ag2/network/identity.py:158"
   # O7: Is there a separate northbound (client) and southbound (runtime) API?
   O7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "CLEAR SPLIT: the internal model is the Envelope/Hub/Channel contract; A2A and ACP are optional-dependency EDGE adapters. Own model inside, standard protocols at the boundary."
+    evidence: "ag2/a2a/__init__.py:5-22 @ 90f490a"
 
   # --- P. Storage ---
   # P1: What datastores are required to run it?
   P1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Append-only per-channel WAL files plus audit.jsonl under a KnowledgeStore root, with layout.py defining on-disk structure, plus HubBackedCheckpointStore."
+    evidence: "ag2/network/hub/layout.py @ 90f490a; ag2/network/hub/audit.py:5-7"
   # P2: What is treated as authoritative, strongly consistent state?
   P2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The WAL is authoritative for channel state (folded to reconstruct), and the audit log for hub-cross-cutting events."
+    evidence: "ag2/network/envelope.py:6-11 @ 90f490a"
   # P3: What is event-stream or append-only?
   P3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Genuinely append-only: WAL append per envelope, one JSON object per line in audit.jsonl, context mutations as envelopes rather than in-place edits."
+    evidence: "ag2/network/hub/audit.py:24-26 @ 90f490a"
   # P4: Where do large artifacts go?
   P4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A files/ package exists and envelopes carry event_data, but there is no blob store abstraction."
+    evidence: "ag2/files/ @ 90f490a"
   # P5: Is there a vector store? Required or optional?
   P5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No vector store; the capability index is in-memory over resume summaries."
+    evidence: "ag2/network/identity.py:155 @ 90f490a"
   # P6: Is storage pluggable, or hardcoded?
   P6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "KnowledgeStore and checkpoint_store are injectable seams, but the WAL is file-based with no pluggable backend, and its indexes are in-memory (terminal-channel pruning clears them)."
+    evidence: "ag2/network/hub/core.py:2637-2639 @ 90f490a"
 
   # --- Q. Licensing and commercial ---
   # Q1: Exact license, including any per-directory variation.
   Q1:
     verdict: first_class
-    note: "Apache-2.0."
-    evidence: "https://github.com/ag2ai/ag2 (GitHub API, read 2026-08-26; 4890★, pushed 2026-08-25)"
+    note: "Apache-2.0, with NOTICE.md, a license_original recording AutoGen provenance, and a TRANSPARENCY_FAQS.md."
+    evidence: "LICENSE, NOTICE.md @ 90f490a"
   # Q2: Are there enterprise-only components missing from the OSS repo?
   Q2:
     verdict: absent
-    note: "None found."
-    evidence: "https://github.com/ag2ai/ag2 (GitHub API, read 2026-08-26; 4890★, pushed 2026-08-25)"
+    note: "No enterprise-only components; the network hub, rules, audit and WAL are all in the OSS package. Optional EXTRAS (a2a, acp, tracing) keep the base install small but withhold nothing."
+    evidence: "pyproject.toml:107 @ 90f490a"
   # Q3: SaaS or hosted-service restrictions?
   Q3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No SaaS restriction under Apache-2.0."
+    evidence: "LICENSE @ 90f490a"
   # Q4: Trademark constraints on derived works?
   Q4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "AG2 / AG2ai naming; Apache-2.0 grants no trademark rights."
+    evidence: "NOTICE.md @ 90f490a"
   # Q5: Network copyleft (AGPL, SSPL) implications for a hosted product?
   Q5:
     verdict: absent
-    note: "No network copyleft. Apache-2.0/MIT only across the whole study."
-    evidence: "https://github.com/ag2ai/ag2 (GitHub API, read 2026-08-26; 4890★, pushed 2026-08-25)"
+    note: "No network copyleft."
+    evidence: "LICENSE @ 90f490a"
   # Q6: Verdict: `USE` / `INTEGRATE` / `REFERENCE_ONLY` / `AVOID`, with reasoning.
   Q6:
     verdict: first_class
-    note: "REFERENCE_ONLY — Apache-2.0, but carries framework opinions we do not want internally."
-    evidence: "https://github.com/ag2ai/ag2 (GitHub API, read 2026-08-26; 4890★, pushed 2026-08-25)"
+    note: "THE ONLY INTEGRATE-CANDIDATE IN THE STUDY. Python, Apache-2.0, actively developed at 1.0.2, and ag2.network is a well-factored, tested, OPT-IN package solving the one subsystem we would otherwise build with no precedent. Adopting the envelope schema and hub contract is plausible even without the agent runtime - a materially different verdict from the six REFERENCE_ONLYs before it."
+    evidence: "LICENSE @ 90f490a; ag2/network/__init__.py:5-10"
 
   # --- R. Developer experience ---
   # R1: Time from clone to a running agent. Actual elapsed minutes.
   R1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "VERIFIED: python -m venv, pip install ag2, import and inspect the Envelope, Rule and Passport types - clean first try. The network hub needs no external services."
+    evidence: "verified live against ag2 1.0.2 (PyPI, 2026-08-26); pytest test/network/test_at_least_once.py test/network/test_hub_invariants.py -> 39 passed"
   # R2: How many concepts before "hello world"?
   R2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A bare Agent needs almost nothing (the network is opt-in). The full network model is large: passport, resume, rule, channel, manifest, adapter, envelope, expectation, task."
+    evidence: "ag2/network/__init__.py:5-10 @ 90f490a"
   # R3: Is there a local dev loop? Hot reload?
   R3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "In-process hub with file-based WAL, so a full multi-agent network runs locally with no infrastructure. testing.py and network/testing helpers ship in the package."
+    evidence: "ag2/testing.py @ 90f490a; ag2/network/testing.py"
   # R4: How do you debug a stuck run?
   R4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Replayable per-channel WAL, audit.jsonl, HubListener callbacks including rejections, watch.py, observers/, and EV_PACKET recording handoff reasons."
+    evidence: "ag2/watch.py @ 90f490a; ag2/observers/"
   # R5: Can an agent be unit tested? Is there a test harness?
   R5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "49 network test files including dedicated test_at_least_once.py, test_hub_invariants.py, test_expectations_boundary.py and test_channel_pruning.py. VERIFIED: 39 tests pass across at-least-once and hub invariants."
+    evidence: "test/network/ @ 90f490a; verified live against ag2 1.0.2 (PyPI, 2026-08-26); pytest test/network/test_at_least_once.py test/network/test_hub_invariants.py -> 39 passed"
   # R6: Deployment story?
   R6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Library-first with optional extras; no deployment manifests. Remote hub transports exist for distribution."
+    evidence: "pyproject.toml @ 90f490a"
   # R7: CLI ergonomics — try the equivalent of `init`, `agent add`, `run`.
   R7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "No agent-management CLI; there is a textual TUI and jog.yaml/justfile for development tasks."
+    evidence: "ag2/textual.py @ 90f490a"
 
   # --- S. Hard scenarios ---
   # S1: Delegated authority
   S1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "AuthBlock describes handshake validation (issuer, audience, key_fingerprint, claim), the arbiter is replaceable for custom permission protocols, and Envelope.depth caps delegation hops. But scheme is still 'none' | future schemes, so no working delegated-credential flow ships. Omnigent remains the only first_class answer."
+    evidence: "ag2/network/identity.py:52-60 @ 90f490a"
   # S2: Torn side effect
   S2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class_answer
+    note: "SECOND INDEPENDENT PRECEDENT, DIFFERENT KEY. find_envelope_by_causation returns the prior accepted reply so a handler can 'skip the side effect' after an at-least-once redelivery, and it is checked BEFORE the turn-ownership probe 'so a redelivery is a no-op regardless of whose turn it now is'. The reply IS the idempotency record - no key to generate or propagate. VERIFIED: 39 tests pass."
+    evidence: "ag2/network/hub/core.py:2626-2644 @ 90f490a; ag2/network/client/handlers.py:198-211; verified live against ag2 1.0.2 (PyPI, 2026-08-26); pytest test/network/test_at_least_once.py test/network/test_hub_invariants.py -> 39 passed"
   # S3: Upgrade mid-flight
   S3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "Passport is immutable but unversioned, and Task.resumed_state is owner-defined and unversioned, so nothing detects a definition change across resume."
+    evidence: "ag2/network/identity.py:62-68 @ 90f490a"
   # S4: Concurrent memory write
   S4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "Per-channel lock serialises validate_send / fold / on_accepted, and context mutations are EV_CONTEXT_SET envelopes in the WAL - so concurrent shared-state writes are ordered by the same mechanism as messages rather than by a separate lock."
+    evidence: "ag2/network/hub/core.py:1856-1859 @ 90f490a; ag2/network/envelope.py:71-76"
   # S5: Cancellation tree
   S5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class_answer
+    note: "BEST ANSWER IN THE STUDY. EV_TASK_CANCEL_REQUEST (a peer ASKS: 'the owner is free to honour by calling Task.cancel or to ignore the request entirely') is deliberately distinct from EV_TASK_CANCELLED (the owner's terminal emission). Cooperative cancellation across a trust boundary - the only correct model when the canceller does not own the work."
+    evidence: "ag2/network/envelope.py:81-91 @ 90f490a"
   # S6: Silent context loss
   S6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "CompactStrategy triggers on measurable limits (event count, token count) and TokenBudgetPolicy documents its own failure mode: 'the budget is a target, not a guarantee: events the cut orphaned are dropped from the span, and a span that would reduce to nothing widens past the budget instead.' Bounded and explained rather than silent, though not emitted as an event."
+    evidence: "ag2/compact.py:5-13 @ 90f490a; ag2/policies/token_budget.py:12-20"
   # S7: Poison message
   S7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "InboxBlock caps pending at 1000 with overflow 'reject' and an 80% high_water backpressure signal; TaskExpired and channel/task TTLs age work out; on_envelope_rejected makes every refusal observable. No dead-letter queue."
+    evidence: "ag2/network/rule.py:80-96 @ 90f490a"
   # S8: Tenant leak
   S8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No tenant resource - 'tenant' denotes user code, not an isolation unit."
+    evidence: "ag2/network/hub/core.py:24-25 @ 90f490a"
   # S9: Runaway spend
   S9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "LimitsBlock caps concurrent channels and tasks and delegation depth with TTL defaults (channel 2h, task 15m) - genuine resource bounds that stop runaway fan-out. But RateBlock is 'not enforced by the in-process hub' and CostProfile fields are 'not validated by V1', so there is no money-denominated limit."
+    evidence: "ag2/network/rule.py:69-77,100-117 @ 90f490a"
   # S10: Zombie sandbox
   S10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No sandbox or compute model; TTLs and max_silence bound logical work, not processes."
+    evidence: "ag2/network/rule.py:107-108 @ 90f490a"
 
 object_model: |
-  # ASCII tree of resources that actually exist
+  Hub                              the authority; owns WAL, audit, arbiter
+   |-- Passport                    IMMUTABLE identity + billing.
+   |                               kind: agent | human | remote_agent
+   |-- Resume                      MUTABLE capability claims + OBSERVED record
+   |    |-- claimed_capabilities   what the agent says it can do
+   |    `-- observed[cap]          ObservedStat{n, completed, failed,
+   |                               expired, p50_latency_ms} - hub-derived
+   |-- SKILL.md                    markdown + frontmatter, per agent
+   |-- Rule (per hub, per agent)   access + limits, enforced HUB-SIDE
+   |    |-- AccessBlock            who may talk to whom, channel types
+   |    `-- LimitsBlock            max_concurrent_channels / _tasks,
+   |                               channel_ttl 2h, task_ttl 15m,
+   |                               delegation_depth 5, RateBlock, InboxBlock
+   |-- Channel                     manifest, participants, state, expectations
+   |    `-- WAL                    append-only per-channel envelope log
+   `-- AuditLog                    append-only audit.jsonl, open kind set
 
-strongest_ideas: []
+  Envelope                         the wire shape for every A2A message
+  Task                             agent-owned lifecycle + checkpoint/resume
 
-weakest_choices: []
+strongest_ideas:
+  - "A durable envelope carrying causation_id, depth, priority, ttl_seconds, trace_id and audience - the complete agent-to-agent message shape, and richer than my strawman."
+  - "Dedupe by causation_id instead of a generated key: a reply caused by envelope X proves X was handled, so there is no key to generate or propagate."
+  - "Checking the redelivery guard BEFORE the turn-ownership probe, so a redelivery is a no-op regardless of whose turn it now is."
+  - "The WAL stores the full envelope regardless of addressing, so audit scope is deliberately WIDER than delivery scope - an audit trail that only recorded deliveries could not show what was withheld."
+  - "Envelope.depth auto-incremented by the hub and capped by Rule.limits.delegation_depth, so runaway delegation is bounded by the platform rather than by prompt discipline."
+  - "Immutable Passport, mutable Resume: 'mutating any field requires unregister + re-register, which yields a fresh agent_id'. Immutability by construction."
+  - "Hub-derived observed stats per capability (n, completed, failed, expired, p50_latency_ms), updated on every terminal task event - declared-vs-verified capability, continuous rather than a test run."
+  - "Capability routing that shows the LLM both the claim and the observed success rate, plus cost, as 'a structured list the LLM can rank'."
+  - "Observation EXPANDS the capability index: an agent appears under a capability 'even if it wasn't in their original claimed_capabilities'. Capabilities can be discovered, not only declared."
+  - "kind: agent | human | remote_agent - humans and remote agents are participant KINDS with a passport, rule and inbox, addressable in audience exactly like an agent."
+  - "Channel protocols as adapters (conversation, discussion, consulting, workflow) with ExpectedTurn enforcement and EV_EXPECTATION_VIOLATED, so who-speaks-next is declared and hub-enforced rather than emergent from prompts."
+  - "can_send() as a public probe so a handler never reaches into adapter internals."
+  - "Cancel REQUEST distinct from cancel FACT: a peer asks, and 'the owner is free to honour... or to ignore the request entirely'."
+  - "TaskExpired as a terminal state distinct from TaskFailed."
+  - "The hub never calls Agent.ask, executes tenant transforms, or imports tenant modules - a trust boundary enforced by architecture rather than by policy."
+  - "A replaceable arbiter so federation or custom permission protocols 'can replace the default rule-based behavior without forking the hub'."
+  - "Rejections are observable: on_envelope_rejected fires for EVERY attempt on any pre-WAL failure, not just successes."
+  - "An open audit kind set, with built-in constants as 'conveniences for the hub's own emissions, not a closed enum'."
+  - "The network package is OPT-IN: importing it changes nothing about a standalone agent, so the simple case pays nothing for the distributed machinery."
+  - "Context mutations are EV_CONTEXT_SET envelopes in the same WAL, unifying shared-state changes with messaging instead of running two parallel mechanisms."
+  - "Routing observability: EV_PACKET records the triggering tool, a human-readable reason, and the resolved target agent_id."
+  - "InboxBlock with a high_water backpressure signal defaulting to 80% of max_pending - pressure signalled before overflow."
+  - "Honest self-documentation throughout: 'only reject is enforced today', 'the budget is a target, not a guarantee', RateBlock 'not enforced by the in-process hub', CostProfile 'not validated by V1', p50_latency_ms 'a single-sample stand-in for a future reservoir'."
+  - "'Compaction removes. Aggregation creates. They are separate concerns.' A conceptual separation I had conflated."
+  - "AgentRuntime explicitly marked cache-only, separating durable identity from connection state."
+  - "task_id dedupe on observation so 'a single task contributing twice (e.g. cascade EXPIRED + owner-emitted COMPLETED) is recorded only once'."
 
-reusable_components: []
-  # - component: 
-  #   decision: INTEGRATE   # BUILD|INTEGRATE|ADOPT_AS_STANDARD|REUSE|DEFER
-  #   note: 
+weakest_choices:
+  - "No tenancy: 'tenant' names the trust boundary for user code, but there is no tenant resource or row-level isolation."
+  - "RateBlock is declared but not enforced by the in-process hub - config that does not do what it says."
+  - "AuthBlock.scheme is 'none' | future schemes, so the shape of auth exists without a working scheme beyond API keys."
+  - "No passport versioning, so no mid-flight upgrade detection."
+  - "No sandboxing or isolation model at all."
+  - "File-based WAL with in-memory indexes, and terminal-channel pruning clears the causation index - so the dedupe guarantee has a retention horizon."
+  - "CostProfile fields are unvalidated, so there is no real cost control."
+  - "OTel is an optional extra rather than default, without Cloudflare's semantic-convention discipline."
+  - "InboxBlock overflow modes are partially implemented: drop_oldest and drop_newest silently behave as reject."
+  - "ObservedStat is a lifetime counter with no decay, and p50_latency_ms is really the last sample - so an early failure is never forgotten and the percentile is not a percentile."
+  - "No compensation or rollback."
 
-lessons: []
+reusable_components:
+  - component: "Envelope schema (causation_id, depth, priority, ttl, trace_id, audience)"
+    decision: INTEGRATE
+    note: "The complete A2A message shape; adopt nearly verbatim."
+  - component: "Dedupe by causation_id"
+    decision: ADOPT_AS_STANDARD
+    note: "Cheaper than a generated key; refines ADR-0014."
+  - component: "Redelivery guard checked before turn ownership"
+    decision: ADOPT_AS_STANDARD
+    note: "Redelivery must be a no-op unconditionally."
+  - component: "WAL records full envelope regardless of audience"
+    decision: ADOPT_AS_STANDARD
+    note: "Audit scope must exceed delivery scope."
+  - component: "Hub-incremented depth capped by rule"
+    decision: ADOPT_AS_STANDARD
+    note: "Platform-bounded delegation, not prompt-bounded."
+  - component: "Immutable Passport + mutable Resume + cache-only runtime"
+    decision: ADOPT_AS_STANDARD
+    note: "Resolves the identity-mutability question our model left open."
+  - component: "Hub-derived observed stats per capability"
+    decision: ADOPT_AS_STANDARD
+    note: "Continuous declared-vs-verified; complements a bench."
+  - component: "Capability routing exposing claim + observed rate + cost"
+    decision: ADOPT_AS_STANDARD
+    note: "First real F11 answer in the study."
+  - component: "kind: agent | human | remote_agent"
+    decision: ADOPT_AS_STANDARD
+    note: "Cleanest expression of ADR-0007 found anywhere."
+  - component: "Channel protocol adapters with expectations"
+    decision: INTEGRATE
+    note: "Turn-taking as declared protocol, enforced hub-side."
+  - component: "Cancel request vs cancel fact"
+    decision: ADOPT_AS_STANDARD
+    note: "Correct model when the canceller does not own the work."
+  - component: "TaskExpired distinct from TaskFailed"
+    decision: ADOPT_AS_STANDARD
+    note: "Different causes need different terminal states."
+  - component: "Hub never imports tenant code"
+    decision: ADOPT_AS_STANDARD
+    note: "Trust boundary by architecture, not by policy."
+  - component: "Replaceable arbiter"
+    decision: REUSE
+    note: "Custom permission protocols without forking."
+  - component: "on_envelope_rejected for every attempt"
+    decision: ADOPT_AS_STANDARD
+    note: "Refusals must be as observable as successes."
+  - component: "Open audit kind set"
+    decision: REUSE
+    note: "Extensible without a schema change."
+  - component: "Opt-in network package"
+    decision: ADOPT_AS_STANDARD
+    note: "The distributed path must be additive, not mandatory."
+  - component: "Context mutations as WAL envelopes"
+    decision: REUSE
+    note: "Unifies shared state with messaging."
+  - component: "high_water backpressure signal"
+    decision: REUSE
+    note: "Signal pressure before overflow."
+  - component: "File WAL with in-memory indexes"
+    decision: BUILD
+    note: "Reject; a dedupe guarantee must not have a retention horizon."
+  - component: "Declared-but-unenforced rate limits"
+    decision: BUILD
+    note: "Reject; unenforced config is worse than absent config."
+  - component: "Lifetime observed counters with no decay"
+    decision: BUILD
+    note: "Reject; routing on reputation needs a window or reservoir."
 
-adr_impact: []
-  # - adr: ADR-0001
-  #   effect: confirms      # confirms|amends|challenges|neutral
-  #   note: 
+lessons:
+  - "Best identity model in the study: immutable Passport (mutation requires unregister + re-register, yielding a fresh agent_id), mutable Resume (claims + observed), and AgentRuntime marked explicitly cache-only. Our Agent should split into exactly these three. (amends ADR-0001)"
+  - "Task is a first-class primitive with TaskExpired distinct from TaskFailed, plus checkpoint() and resume_from - and it is AGENT-OWNED: 'the framework does not assign or schedule them'. (confirms ADR-0002)"
+  - "REVERSES THE PHASE 3 CONCLUSION. After seven absent verdicts I had drafted a rewrite of ADR-0003 around shared state and was going to drop messaging from v0.1. AG2 has the whole thing: hub-stamped envelopes on per-channel append-only WALs, audience addressing, at-least-once delivery with causation dedupe, depth-capped delegation, TTLs, priorities, inbox backpressure and hub-enforced access rules. The ADR stands and the design should follow AG2's envelope closely. (confirms ADR-0003 strongly)"
+  - "A2A and ACP are OPTIONAL-DEPENDENCY EDGE ADAPTERS (agent cards, gRPC server) sitting outside a richer internal envelope model. The clearest independent confirmation that interop belongs at the boundary and the internal model should be your own. (confirms ADR-0006 strongly)"
+  - "kind: agent | human | remote_agent makes humans and agents the same kind of thing with a discriminator - each with a passport, a rule and an inbox, addressable in audience. This is what 'humans and agents are both principals' should mean in a schema, and no other project does it. (confirms ADR-0007 strongly)"
+  - "SKILL.md with Anthropic-style frontmatter per agent, plus a knowledge/ package. SIXTH CONSECUTIVE PROJECT with filesystem/markdown skills and no memory service. Beyond settled. (confirms ADR-0008)"
+  - "OTel is only an optional extra, which is weaker than AX or Cloudflare. But HubListener contributes what they lack: on_envelope_rejected fires for EVERY attempt, so refusals are observable, and envelope.trace_id is first-class so trace context rides the message. Amend ADR-0010 to require that rejected operations are as observable as successful ones. (amends ADR-0010)"
+  - "Immutable passports sidestep part of the upgrade problem, but there is no passport version and Task.resumed_state is unversioned. EIGHT PROJECTS, still nobody has versioning AND pinning. (confirms ADR-0011 negatively)"
+  - "Extends the capability ADR from harnesses to AGENTS, and from a test-run to a continuous signal: claimed_capabilities versus hub-maintained observed{n, completed, failed, expired, p50_latency_ms} updated on every terminal task event. Omnigent verifies claims in a bench; AG2 verifies them in production. BOTH belong - bench for correctness, observation for reliability. (confirms and extends ADR-0012)"
+  - "Rules 'enforced at the hub, never the client', with a replaceable arbiter so custom permission protocols need no fork, and on_envelope_rejected making every refusal observable. Still no shadow-comparison mode after eight projects. (confirms ADR-0013)"
+  - "SECOND INDEPENDENT PRECEDENT for the effect ledger, with a better key for reply-shaped work: rather than generating and propagating an idempotency_key, look up whether this sender already posted an envelope whose causation_id is the triggering envelope. The reply IS the idempotency record. Our ledger should support both keys, and must check the guard BEFORE any ownership or turn test. (confirms ADR-0014)"
+  - "METHODOLOGICAL CORRECTION, recorded against myself: the Phase 3 interim findings called AG2 'downgraded in value' on the strength of a six-project tally and a Phase 1 recon that predated AG2 1.0. That judgement nearly cost the study its answer to the entire F-section. A convergence across N projects is evidence about what is COMMON, not proof about what is POSSIBLE. Budget a project by what it is architected to answer, not by how confident the current tally makes me."
+
+adr_impact:
+  - adr: ADR-0001
+    effect: amends
+    note: "Immutable Passport + mutable Resume + cache-only AgentRuntime. Best identity model in the study."
+  - adr: ADR-0002
+    effect: confirms
+    note: "Task is first-class with checkpoint/resume and TaskExpired distinct from TaskFailed; agent-owned, not framework-scheduled."
+  - adr: ADR-0003
+    effect: confirms
+    note: "REVERSES the seven-project consensus. Full durable A2A messaging: WAL-backed envelopes, audience addressing, at-least-once with causation dedupe, depth caps."
+  - adr: ADR-0004
+    effect: neutral
+    note: "No harness adapter contract, though acp/ drives Claude Code, Codex, KiloCode and OpenCode."
+  - adr: ADR-0005
+    effect: confirms
+    note: "MCP as protocol via mcp/ and an ACP tool_gateway, separate from the capability model (the Resume)."
+  - adr: ADR-0006
+    effect: confirms
+    note: "A2A and ACP are optional edge adapters outside a richer internal envelope model. Clearest confirmation in the study."
+  - adr: ADR-0007
+    effect: confirms
+    note: "kind: agent | human | remote_agent - humans are participant kinds with passport, rule and inbox."
+  - adr: ADR-0008
+    effect: confirms
+    note: "SKILL.md with frontmatter; sixth consecutive project with filesystem skills and no memory service."
+  - adr: ADR-0009
+    effect: neutral
+    note: "No sandbox model."
+  - adr: ADR-0010
+    effect: amends
+    note: "OTel optional (weaker), but rejections are observable via on_envelope_rejected and trace_id rides the envelope."
+  - adr: ADR-0011
+    effect: confirms
+    note: "Immutable but unversioned passports; unversioned resumed_state. Eight projects, still nobody has versioning AND pinning."
+  - adr: ADR-0012
+    effect: confirms
+    note: "Extends to agents and to continuous observation: claimed vs hub-derived observed stats per capability."
+  - adr: ADR-0013
+    effect: confirms
+    note: "Hub-side enforcement, replaceable arbiter, every refusal observable. Still no shadow mode."
+  - adr: ADR-0014
+    effect: confirms
+    note: "Second independent precedent, with causation_id as a better key for reply-shaped work."
