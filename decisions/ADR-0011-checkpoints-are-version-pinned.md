@@ -1,6 +1,6 @@
 # ADR-0011 — Checkpoints record the definition version that produced them
 
-- **Status:** Provisional (raised by evidence, Phase 2)
+- **Status:** Accepted (2026-08-26, Phase 5) — 12 projects. Entered as unprecedented, left as derivative of MAF's bytecode-digest pin. Agent-definition pinning remains ours to build.
 - **Date:** 2026-08-26
 - **Supersedes:** —
 - **Superseded by:** —

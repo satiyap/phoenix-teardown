@@ -1,6 +1,6 @@
 # ADR-0010 — OpenTelemetry is the canonical telemetry transport
 
-- **Status:** Provisional (pre-evidence, Phase 0)
+- **Status:** Accepted (2026-08-26, Phase 5) — 13 projects, 3 amends. Requires semconv adherence, declared version with one deprecation window, stability tiers by module, and an asserted propagation test.
 - **Date:** 2025-08-26
 - **Supersedes:** —
 - **Superseded by:** —

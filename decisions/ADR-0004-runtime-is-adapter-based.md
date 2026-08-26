@@ -1,6 +1,6 @@
 # ADR-0004 — Agent runtime is adapter-based; the platform does not author agents
 
-- **Status:** Provisional (pre-evidence, Phase 0)
+- **Status:** Accepted (2026-08-26, Phase 5) — 13 projects. Narrowed to four adapter methods with durability in the control plane; extended to every stateful concern shipping an in-memory sibling.
 - **Date:** 2025-08-26
 - **Supersedes:** —
 - **Superseded by:** —

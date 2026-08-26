@@ -1,77 +1,210 @@
-# Deliverable 5 — Build / Reuse Map
+# Build / reuse map — v0.1
+<!-- status: final -->
 
-> Status: **updated from Phase 2 evidence** (LangGraph, OpenHands, Letta).
-> Confidence rises as projects corroborate. Finalised at Phase 5.
+Generated from the 203 component decisions recorded across 13 `facts.yaml` files:
+**98 ADOPT_AS_STANDARD, 71 REUSE, 23 BUILD (reject), 11 INTEGRATE.**
 
-Decision vocabulary (`schema/facts.schema.yaml`):
+Reading order: what we **integrate** (someone else's running code), what we
+**port** (their design, our code), what we **build** (no adequate precedent), and
+what we **reject** (patterns we deliberately do not copy).
 
-| Decision | Meaning |
+---
+
+## 1. INTEGRATE — run someone else's code
+
+Four, and only four, survive the test "Apache-2.0 or MIT, in our language or
+language-agnostic, independently useful, and solves a subsystem we would otherwise
+invent."
+
+| What | From | Why it wins | Risk |
+|---|---|---|---|
+| **`ag2.network`** — envelope schema, hub contract, channel protocols | AG2 (Apache-2.0, Python) | The only durable agent-to-agent messaging in 13 projects. Opt-in package, 49 test files, verified 39 passing. Adopting it removes the single largest BUILD with no prior art. | Its WAL is file-based with in-memory indexes, and terminal-channel pruning clears the causation index — so its dedupe guarantee has a retention horizon we must replace. |
+| **Cedar** — the policy language | via AWS AgentCore | Formal semantics + existing analysis toolchain. Makes "is policy set B more permissive than A" decidable, which is the only path to ADR-0013's static shadow comparison. `principal`/`action`/`resource` align with our ADR-0007 split. | Cedar is a language, not a service; we own the evaluation and the integration. |
+| **Agent Control** — the policy control plane | Agent Control (Apache-2.0, Python) | `observe` and `steer` shipped; recursive condition trees; separate agent/admin credentials; composite FKs for tenancy. **The only project built on the assumption that it is not the whole platform** (adapters for four runtimes it does not own). | Its `deny_found` short-circuit biases observe-mode data; we must exempt observe evaluations. No principals. |
+| **`genai-prices`** — cost data | via Pydantic AI | Externally maintained pricing dataset rather than a table we keep current. | Pair with Omnigent's fail-closed-on-unpriced rule; verify maintenance cadence before depending on it for *enforcement* (OQ-028). |
+
+**Deliberately not integrated** despite being technically eligible: LangGraph's
+checkpointers and graph runtime (we are not adopting its graph model), Letta's
+kernel sandbox backends and OpenHands' `BaseWorkspace` set (superseded by ADK's
+seven-executor range and our three-boundary requirement), and Omnigent's cost policy
+(the *design* ports, the implementation is entangled with its session model).
+
+## 2. PORT — their design, our code
+
+The 98 ADOPT_AS_STANDARD and 71 REUSE decisions collapse into these, grouped by the
+component they land in.
+
+### Run engine and durability
+| Pattern | Source |
 |---|---|
-| `BUILD` | We write and own it. Core differentiation or nothing else fits. |
-| `INTEGRATE` | Call across a boundary to an existing system. |
-| `ADOPT_AS_STANDARD` | Implement someone else's specification faithfully. |
-| `REUSE` | Vendor or embed existing code, licence permitting. |
-| `DEFER` | Explicitly out of scope for v0.1. |
+| Derive state by folding an append-only log; no parallel state table | Google AX |
+| Composite PK with the sequence computed inside the insert transaction (single-writer without a lock service) | Google AX |
+| Content-derived pin, canonicalised before hashing, compared on resume | **MAF** |
+| Refuse resume on a definition change, with an error naming the likely cause | Google AX, MAF |
+| Checkpoint only *committed* state | MAF |
+| `previous_checkpoint_id` chaining; checkpoint bound to a definition not an instance | MAF |
+| Hung-work detection by `execution_started_at` cutoff + a re-check alarm | Cloudflare |
+| Orphan detection by outer-joining the ledger against live run rows | Cloudflare |
+| Exponential backoff when a recovery scan makes no forward progress | Cloudflare |
+| Root-side index of descendant work needing recovery (who checks a sleeping child) | Cloudflare |
+| `Healthy` vs `HealthyBusy` — idle-alive ≠ working-alive | AgentCore |
+| Explicit `*_FAILED` terminal statuses; failure is a state, not a timeout | AgentCore |
+| Reflect-and-retry rather than retry-identically | ADK |
+| Eager validation of retry config at enqueue time | Cloudflare |
+| `isErrorRetryable` excluding overload errors (retrying a self-protecting service worsens congestion) | Cloudflare |
+| Event rewind with a single documented source of truth for which events are live | ADK |
 
-## Map
+### Effect ledger
+| Pattern | Source |
+|---|---|
+| `idempotency_key UNIQUE`, checked before execution, `accepted: false` on duplicate | Cloudflare |
+| Causation-based dedupe for reply-shaped work (the reply *is* the record) | AG2 |
+| Guard checked before any ownership or turn test | AG2 |
+| Throw when two identity keys disagree | Cloudflare |
+| `clientToken` idempotency as a platform-wide convention, not per-feature | AgentCore |
 
-| Subsystem | Decision | Confidence | Evidence | Notes |
-|---|---|---|---|---|
-| Agent registry | BUILD | **medium** | Letta `agents list` (fuzzy, tags, `--shared`) | Letta proves the shape. Nobody else has one. |
-| Agent identity / IAM | BUILD | **medium** | Letta `AGENT_ID` as kernel-enforced boundary | Justified by delegation/policy/audit, not durability (ADR-0001). |
-| Agent versioning | BUILD | low | **absent ×3** (`D4`) | No precedent, but ADR-0011 requires it. Phase 3 must confirm. |
-| Agent revocation | BUILD | low | **absent ×3** (`D9`) | No precedent anywhere. |
-| Task lifecycle | BUILD | **medium** | **absent ×3** (`A4`) | No project separates Task from Run; LangGraph's lack of it is why retry has no home. |
-| Run lifecycle | BUILD | **medium** | OpenHands `ExecutionStatus`, Letta cron reasons | Adopt `STUCK`, `CANCELLING` (two entry paths), named failure reasons. |
-| Durable HITL / approvals | BUILD | **high** | `first_class` ×3 (`C11`, `G5`) | Table stakes, not a differentiator. Copy OpenHands `ConfirmRisky` + Letta durable pending requests. |
-| Human-agent channels | BUILD | **medium** | Letta channels (Slack/Discord/Telegram) | Strong precedent for the shape; not our code. |
-| Agent-to-agent transport | **DEFER → decide in Phase 3** | low | **absent ×3** (F-section) | Zero precedent. Must justify from requirements or drop. AG2 is the test. |
-| Harness adapters | BUILD | **high** | OpenHands `AgentKind = openhands\|acp` | Proven achievable. Tool-name canonicalisation is a prerequisite. |
-| Capability declaration | BUILD | **high** | Letta `SandboxAvailability`, LangGraph conformance suite | ADR-0012. Reference implementation exists; combine both patterns. |
-| Conformance test suite | BUILD | **medium** | LangGraph `checkpoint-conformance` | Copy the pattern for adapters and providers. |
-| MCP | INTEGRATE | **high** | OpenHands MCP + full OAuth flow | ADR-0005 validated exactly. |
-| ACP | ADOPT_AS_STANDARD | **medium** | OpenHands: real Claude Code / Codex / Gemini adapters | Live and working. Note stdio may force co-location (OQ-012). |
-| A2A | ADOPT_AS_STANDARD | low | **absent ×3** | Nobody implements it. Reconsider priority. |
-| Workflow engine | INTEGRATE | **medium** | LangGraph is the engine; OpenHands/Letta have none | Do not rebuild. Orchestration ≠ agent coordination. |
-| Sandbox providers | INTEGRATE via interface | **high** | OpenHands 5 providers, Letta bwrap/seatbelt | ADR-0009. Include **kernel-level** backends, not only containers. |
-| Resource quotas (CPU/mem/pid) | BUILD | **medium** | **absent ×3** (`K6`, `N3`, S9) | Nobody does this. Genuine gap; likely control-plane concern. |
-| Policy engine | BUILD or INTEGRATE | **medium** | Letta: rules × scope × mode, traced, shadow-comparable | Letta's is the only production-grade one. ADR-0013. |
-| Policy trace + shadow eval | BUILD | **medium** | Letta `PermissionShadowComparison` | ADR-0013. |
-| Observability / OTel | ADOPT_AS_STANDARD | **high** | **no OTel ×3** | Industry-wide gap. Differentiator rather than checkbox. |
-| Canonical event schema | BUILD | **medium** | OpenHands 17 typed events, LangGraph debug payloads | Good vocabularies exist to borrow from. |
-| Cost accounting | BUILD | **medium** | OpenHands cost-per-workspace, Letta `memory tokens` | Interesting: OpenHands attaches cost to the *sandbox run*. |
-| LLM gateway | INTEGRATE | **high** | all three integrate providers | Never build routing. |
-| Vector store | DEFER | **high** | Letta uses **none** — filesystem + explicit reads | Notable: the memory-focused project has no vector DB. |
-| Agent memory store | BUILD | **medium** | Letta git-backed, kernel-isolated | Only `first_class` `H4` in the study. Separate by residency cost *and* ownership. |
-| Shared knowledge (skills) | INTEGRATE (git) | **medium** | Letta skills/mods, OpenHands org skills from git | Both chose git. Cheap provenance. |
-| Secret management | INTEGRATE + BUILD masking | **medium** | OpenHands `SecretRegistry` with output masking | Masking rotated secrets' previous values is worth copying. |
-| Artifact storage | INTEGRATE | low | no first-class Artifact ×3 | Outputs are workspace files or memory everywhere. |
-| Event bus | INTEGRATE | low | none needed at this scale ×3 | All three are single-node or service-mediated. |
-| Control-plane datastore | INTEGRATE | **medium** | Postgres/SQLite ×2, files+git ×1 | Postgres. |
-| Scheduler / durable timers | BUILD | **medium** | Letta cron: lease + `boot_id` + 9 named reasons | Best-modelled subsystem in the study. Copy the lease design. |
-| Side-effect idempotency | BUILD | low | **absent ×3** (`C6`) | Nobody has a key. Likely a durable effect-ledger on deterministic task id. |
-| Tenant isolation | BUILD | low | **absent ×3** OSS (`J7`) | Every project defers this to a commercial tier. |
-| Capability gateway | BUILD | **medium** | OpenHands blocking `PreToolUse` hooks | Interception point proven to work. |
+### Policy
+| Pattern | Source |
+|---|---|
+| `deny \| steer \| observe`; steer invalid without guidance | Agent Control |
+| Recursive condition trees with shape validation | Agent Control |
+| Positional fail-closed set, defined once so sites cannot drift | Omnigent |
+| `deciding_policies` named on a composed verdict | Omnigent |
+| Refusals observable for *every* attempt | AG2 |
+| Stats + timeseries over decisions | Agent Control |
+| Ownership precedence: org binds agent | MAF/Purview |
+| Bidirectional ingress + egress content policy | MAF/Purview |
+| Policy generation as reviewable assets | AgentCore |
+| Policy binding as its own queryable resource with an `enabled` flag | Agent Control |
+| Replaceable arbiter so custom protocols need no fork | AG2 |
 
-## Confidence changes from Phase 2
+### Identity, credentials, approval
+| Pattern | Source |
+|---|---|
+| Immutable Passport + mutable definition + cache-only runtime | AG2 |
+| `kind: human \| agent \| service \| remote` — one type, discriminated | AG2 |
+| Workload identity; three token variants; `ON_BEHALF_OF_TOKEN_EXCHANGE` named | AgentCore |
+| Exchange and refresh as *separate* interfaces and registries | ADK |
+| Secretless credential proxy: swap on egress, host-bound placeholder, 403 leak guard | Omnigent |
+| Hub-incremented delegation depth capped by rule | AG2 |
+| RFC 8628 device grant with per-request revocation and a path allow-list | Omnigent |
+| `Approval` table: status CHECK, partial index on pending, rationale both ways, `ErrAlreadyDecided` | HumanLayer |
+| Reconciliation on restart, keyed by run, non-fatal | HumanLayer |
+| Expiring dangerous overrides that emit an event on lapse | HumanLayer |
+| Typed user identifiers (never a bare string) | AgentCore |
 
-Raised to **high**: harness adapters, capability declaration, MCP integration,
-sandbox provider interface, OTel adoption, durable HITL, LLM gateway, vector-store
-deferral.
+### Capability and extension
+| Pattern | Source |
+|---|---|
+| Declared capabilities as public API, bench-verified, DRIFT = failure | Omnigent |
+| Two-layer bench: offline every commit, live gated | Omnigent |
+| `unknown` never degrades to `false`; confidence `verified \| asserted` | Omnigent |
+| Continuous observed statistics per capability | AG2 |
+| Declared composition position and ordering; typed wrap points | Pydantic AI |
+| Serializability as an enforced project rule | Pydantic AI |
+| Optional method whose error names the fallback | ADK |
+| Conformance-suite pattern for capability negotiation | LangGraph |
 
-Still **low** and needing Phase 3: agent versioning, agent revocation,
-agent-to-agent transport, side-effect idempotency, tenant isolation, A2A priority.
+### Memory, state, knowledge
+| Pattern | Source |
+|---|---|
+| Four state scopes by prefix, `temp:` never persisted (enforced per backend) | ADK |
+| Schema-validated run-scoped state; open prefixed namespaces | ADK |
+| `MemoryEntry{author, event_timestamp}` — provenance, not storage time | ADK |
+| Declared memory *kinds* orthogonal to scopes | AgentCore |
+| Hierarchical namespaces with prefix queries; **wildcards refused** | AgentCore |
+| Filesystem/git-backed skills | 7 of 13 projects |
+| Compaction as a configured strategy, honest about its limits | AG2, ADK |
 
-## Justification bar
+### Sandbox
+| Pattern | Source |
+|---|---|
+| Provider interface that ships a *local* implementation | ADK |
+| SSRF + cloud-credential guard, unclosable by configuration | Pydantic AI |
+| Escape hatch scoped so it cannot open the worst hole | Pydantic AI |
+| Bounded downloads with size-limitable encodings only | Pydantic AI |
+| Storage boundary as an LLM enforcement boundary | Cloudflare |
+| Naming the unsafe option `unsafe_local` / `dangerously_` | ADK, HumanLayer |
+| Allow-listed unpickler | ADK |
 
-`BUILD` requires an answer to all three:
+### Adapters and protocol
+| Pattern | Source |
+|---|---|
+| Four-method adapter; durability in the control plane | Google AX |
+| Opaque adapter config the control plane refuses to parse | Google AX |
+| Precisely specified stream terminator | Google AX |
+| gRPC southbound; ACP behind an adapter, not as the transport | Google AX |
+| Five-mode integration taxonomy including `NATIVE_TUI` | Omnigent |
+| Entry-point plugins that cannot override builtins | Omnigent |
+| Control-plane / data-plane split with per-plane allow-lists | AgentCore |
+| Typed `CancelReason`; cancel *request* ≠ cancel *fact* | Google AX, AG2 |
+| Envelope: `causation_id`, `depth`, `ttl`, `priority`, `trace_id`, `audience` | AG2 |
+| Log records every accepted envelope regardless of audience | AG2 |
 
-1. Which studied system does this badly enough to justify our doing it?
-2. What breaks if we integrate instead?
-3. Is this differentiation, or just work?
+### Tenancy
+| Pattern | Source |
+|---|---|
+| `tenant_id` in every composite **primary** key | Omnigent, ADK |
+| `tenant_id` in every composite **foreign** key | **Agent Control** |
+| Single-tenant runs as tenant 0 — same code path, one value | Omnigent |
 
-Phase 2 note: for eight subsystems the answer to (1) is now "**none of them has it
-at all**" — Task/Run separation, idempotency, agent versioning, revocation, agent
-transport, tenancy, quotas, and OTel. That is a stronger position than "theirs is
-bad," but it also means no design to borrow, and for `AgentTransport` specifically
-it may mean the requirement is imagined rather than real.
+### Observability and DX
+| Pattern | Source |
+|---|---|
+| GenAI semconv + declared vendor namespace, never squatting | Cloudflare |
+| Declared semconv version with one deprecation window | Pydantic AI |
+| Stability tiers separated by module; experimental marked unguaranteed | ADK |
+| Deployment-pinnable telemetry schema version | ADK |
+| Span lifetime bound to the owning invocation | Cloudflare |
+| Response id *is* the trace id | Omnigent |
+| In-memory implementation of every pluggable interface | ADK, LangGraph, AX, Pydantic AI |
+| Per-package `AGENTS.md` design rules | Pydantic AI |
+| Design docs that describe no API so they cannot go stale | Cloudflare |
+| Naming your unsafe default in the README | Agent Control |
+| Errors that state the mechanism *and* the alternative | Pydantic AI, ADK |
+| Strict-in / lenient-out enum normalisation | Agent Control |
+| Idempotent column-checked migrations | HumanLayer |
+
+## 3. BUILD — no adequate precedent
+
+Four items, each with the evidence for why it is genuinely ours.
+
+| # | What | Evidence that nobody does it | Confidence |
+|---|---|---|---|
+| 1 | **Content-derived pinning applied to the *agent definition***, compared on every resume | MAF proves the mechanism on *workflows* (bytecode digest, enforced). AX pins adapter identity without versions; Omnigent versions agents without pinning; ADK versions storage and telemetry schemas but not agents; Cloudflare versions its schema but leaves user snapshots unversioned. **13 projects, nobody pins an agent.** | **High** — mechanism proven, only the target is new |
+| 2 | **A platform-owned effect ledger** | Cloudflare (explicit key) and AG2 (causation key) each solve half in their own scope. ADK states the requirement precisely and *delegates it to tool authors*. `C6` negative in 8 of 13. | **High** — two working precedents to combine |
+| 3 | **Unified `Capability` + `Extension` with a two-layer bench** | Omnigent has the bench and declared capabilities; Pydantic AI has composition with ordering; AG2 has observed statistics. Nobody has all three, and five projects conflate the two meanings of the word. | **Medium** — three partial precedents, integration is the work |
+| 4 | **Agent-level revocation and an approver identity on approvals** | `D9` negative in 10 of 13, `implicit` in 3 — best available is credential-level (AgentCore) or attachment-level (Agent Control). HumanLayer has the only real approval resource and records *why*, never *who*. | **Medium** — conceptually simple, unprecedented in combination |
+
+## 4. REJECT — patterns not to copy
+
+From the 23 recorded BUILD-as-rejection decisions:
+
+| Anti-pattern | Source | Why |
+|---|---|---|
+| Auth as a developer-supplied hook / no auth at all | Cloudflare, Google AX | A platform must own authN; AX exposes sandbox provisioning unauthenticated |
+| Approval without an approver identity | HumanLayer | Durable decisions that still fail an audit |
+| Idempotency delegated to tool authors | ADK | The platform performs the replay, so it owns the hazard |
+| No egress control alongside web-fetching tools | ADK | The SSRF path Pydantic AI closes is left open |
+| Mutable rows as source of truth | Omnigent | Durability by transaction rather than replay |
+| Hard-delete agents | Omnigent | Revocation is a lifecycle state, not a `DELETE` |
+| In-process scheduler with no cross-replica claim | Omnigent | Correct on one instance, double-fires horizontally |
+| Declared-but-unenforced rate limits | AG2 | Config that does not do what it says is worse than none |
+| Lifetime observed counters with no decay | AG2 | Reputation routing needs a window |
+| File WAL with in-memory indexes | AG2 | A dedupe guarantee must not have a retention horizon |
+| Early cancellation applied to observe-mode controls | Agent Control | Biases shadow data away from denied traffic |
+| Namespaces as the *only* scoping mechanism | AgentCore | A path is a convention; a key is a constraint |
+| An SDK with no local implementation | AgentCore | ADK proves the alternative at the same company scale |
+| Default unrestricted permission mode | Letta | Safe defaults, not convenient ones |
+| Capability signalling via `NotImplementedError` with a silent local no-op | OpenHands | Silent fail-open is the one thing ADR-0012 forbids |
+| 13k-line god class / 35-package surface | Cloudflare, MAF | Scope discipline |
+
+## 5. Licensing
+
+All 13 projects are Apache-2.0 or MIT. **No copyleft anywhere**, so nothing in the
+port list carries a licence obstacle. One process note worth carrying: GitHub's API
+reports HumanLayer as `NOASSERTION` while its `LICENSE` file says Apache-2.0 plainly
+— **licence metadata is not licence evidence**, and an automated scan would have
+excluded a project whose patterns we are porting.
+
+Full detail in [`licensing.md`](licensing.md).

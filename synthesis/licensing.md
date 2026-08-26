@@ -1,4 +1,5 @@
 # Licensing and Commercial Reuse
+<!-- status: final -->
 
 Completed **2026-08-26** during Phase 1, before deep reading. A licence that
 forbids embedding changes what a deep teardown is *for* — read for ideas rather

@@ -1,6 +1,6 @@
 # ADR-0015 — Approval is a durable resource that names its approver
 
-- **Status:** Provisional (raised from evidence, Phase 4)
+- **Status:** Accepted (2026-08-26, Phase 5) — 3 projects. Raised from HumanLayer; approver identity remains unprecedented and is ours to build.
 - **Date:** 2026-08-26 (after HumanLayer)
 - **Supersedes:** —
 - **Superseded by:** —

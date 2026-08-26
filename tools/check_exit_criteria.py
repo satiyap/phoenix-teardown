@@ -126,8 +126,13 @@ def main() -> int:
             state = f"{len(list(path.glob('*.md')))} files"
         elif path.exists():
             body = path.read_text()
-            lowered = body.lower()
-            if "strawman" in lowered or "status: **stub" in lowered:
+            first = "\n".join(body.splitlines()[:12])
+            # Status is read from an explicit marker near the top of the file, not
+            # from prose anywhere in it. A finished document may legitimately
+            # discuss the strawman it replaced.
+            if "<!-- status: final -->" in body:
+                state = "FINAL"
+            elif "strawman" in first.lower() or "status: **stub" in first.lower():
                 state = "strawman"
             elif "GENERATED" in body and body.count("·") > 0 and "not yet examined" in body:
                 state = "generated"

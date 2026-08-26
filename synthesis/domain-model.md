@@ -1,169 +1,184 @@
-# Deliverable 3 — Canonical Domain Model
+# Canonical domain model — v0.1
+<!-- status: final -->
 
-> Status: **revised from Phase 2 evidence** (LangGraph, OpenHands, Letta).
-> Phase 3 will attack it with seven more projects. Finalised at Phase 5.
+Derived from 13 teardowns and 15 accepted ADRs. Every node below cites the
+project that justifies it. Nodes that were in the Phase 0 strawman and are now
+**deleted** are listed at the end with the reason, because the deletions are as
+load-bearing as the additions.
 
-Rule: every node must survive a "which project proved you need this?" challenge.
-Nodes with no precedent and no scenario requiring them are marked **unjustified**
-and must earn their place in Phase 3 or be deleted.
+---
 
-## Revised tree
+## The model
 
 ```text
-Organization                       [unjustified — no OSS precedent, J7 absent ×3]
-   │
-   ├── Policy                      (org-scoped defaults)
-   │
-   └── Workspace
-        │
-        ├── Principal              ✓ Letta: two genuinely different mechanisms
-        │    ├── Human             ✓ Letta channels: allowed/admin, dm|group, pair
-        │    ├── Agent             ✓ Letta: AGENT_ID as kernel-enforced boundary
-        │    │    ├── AgentVersion     [unjustified — D4 absent ×3]
-        │    │    ├── Capability       ✓ ADR-0012: declared, three-valued
-        │    │    ├── Memory           ✓ Letta: per-agent, cross-access denied
-        │    │    └── Identity         ✓ Letta: decides memory-tree access
-        │    └── Service           [unjustified — defer to post-v0.1]
-        │
-        ├── Channel                ✓ Letta — but HUMAN surfaces only
-        │    └── Message           ⚠ no precedent for durable agent messages
-        │
-        ├── Task                   ⚠ no project separates Task from Run
-        │    ├── Run
-        │    │    ├── Step             [telemetry only — not a resource]
-        │    │    └── Event            ✓ all three: event stream + replay
-        │    └── Artifact          ⚠ weak: implicit in all three
-        │
-        ├── Knowledge              ✓ Letta skills/mods, OpenHands org skills (git)
-        │
-        └── Policy                 ✓ Letta: rules × scope × mode, traced
+Tenant  (tenant_id)                     in every composite PRIMARY key
+ │                                      AND in composite FOREIGN keys
+ ├── Principal                          who is acting
+ │    ├── kind: human | agent | service | remote
+ │    ├── authenticated_by
+ │    ├── delegation: on_behalf_of, depth (bounded by policy)
+ │    └── revoked_at                    a lifecycle state, not a delete
+ │
+ ├── Credential                         what an action carries outward
+ │    ├── kind: api_key | http | oauth2 | oidc | service_account
+ │    ├── obtained_by  → Exchanger      obtaining and renewing are
+ │    ├── kept_alive_by → Refresher     DIFFERENT interfaces
+ │    └── never enters a sandbox in plaintext
+ │
+ ├── Agent
+ │    ├── Identity (immutable)          id; mutation ⇒ new id
+ │    ├── Definition (versioned)        manifest: instructions, tools,
+ │    │    ├── digest                   capabilities, approval modes
+ │    │    └── version                  informational only, never compared
+ │    ├── Capability[]                  DECLARED metadata (see below)
+ │    ├── Extension[]                   INSTALLED behaviour (see below)
+ │    └── lifecycle: active | deprecated | revoked
+ │
+ ├── Project                            grouping of sessions
+ │
+ ├── Task                               the durable INTENT
+ │    ├── trigger: manual | rrule + tz | event
+ │    ├── budget: max_cost, max_runs
+ │    ├── state: active | paused | archived
+ │    └── Run[]                         attempts at this intent
+ │         ├── state (see state machine)
+ │         ├── pin { definition_digest, adapter_identity,
+ │         │        adapter_digest, checkpoint_schema_version }
+ │         ├── error, error_code        error_code is QUERYABLE
+ │         ├── rewind_marker            logical history reduction
+ │         └── EffectLedgerEntry[]      one per side effect
+ │
+ ├── Session                            durable conversational container
+ │    ├── State (four scopes by prefix)
+ │    │    ├── "app:"                   tenant-wide
+ │    │    ├── "user:"                  per-principal, cross-session
+ │    │    ├── (unprefixed)             run-scoped, SCHEMA-VALIDATED
+ │    │    └── "temp:"                  NEVER persisted
+ │    ├── Event[]                       append-only, sequence-ordered
+ │    └── Grant[]                       (principal, session, level)
+ │
+ ├── Channel                            addressable conversation
+ │    ├── protocol                      conversation | discussion |
+ │    │                                 consulting | workflow
+ │    ├── Participant[]                 principals of any kind
+ │    ├── Expectation[]                 turn order, max_silence
+ │    └── Envelope[]                    append-only WAL
+ │
+ ├── Approval                           durable, with an approver
+ │    ├── action_ref                    correlated BOTH ways
+ │    ├── status: pending | approved | denied | expired | superseded
+ │    ├── requested_by_rule             WHICH policy required it
+ │    ├── decided_by → Principal        the field nobody has
+ │    ├── decision_rationale            on approve AND deny
+ │    └── expires_at
+ │
+ ├── Policy                             Cedar
+ │    ├── scope: tenant | project | agent | session
+ │    ├── ownership_precedence          org binds agent; agent cannot weaken
+ │    ├── decision: deny | steer | observe
+ │    ├── steering_guidance             REQUIRED when decision = steer
+ │    └── PolicyBinding                 attachment is its own resource
+ │
+ ├── Knowledge                          filesystem/git-backed skills
+ ├── Recall                             semantic memory service
+ │    ├── kind: semantic | summarization | user_preference | custom
+ │    ├── scope: (tenant, principal)
+ │    └── author, event_time            provenance, not storage time
+ │
+ └── Sandbox                            three boundaries
+      ├── process/filesystem            pluggable provider
+      ├── egress                        mandatory guard + credential proxy
+      └── storage                       the LLM must not reach the control DB
 ```
 
-Legend: ✓ evidenced · ⚠ thin or contested · [unjustified] no precedent found
+## The Run state machine
 
-## Contested nodes — resolved
+```text
+        DRAFT ──────────► DISCARDED
+          │
+          ▼
+       QUEUED ──► RUNNING ──► SUCCEEDED
+                    │  ▲          
+                    │  └──────────── (resume)
+                    ├──► WAITING_INPUT ─────┘     blocked on a human; INDEXED
+                    ├──► CANCELLING ──► CANCELLED  cancellation takes time
+                    ├──► FAILED                    with a queryable error_code
+                    ├──► EXPIRED                   distinct from FAILED
+                    ├──► INDETERMINATE             effect dispatched, unconfirmed
+                    └──► INCOMPATIBLE              pin mismatch on resume
+```
 
-| Node | Question | Resolution |
+Six of these states came from evidence rather than the strawman:
+
+| State | Source | Why it exists |
 |---|---|---|
-| `Session` | Needed, or just Channel + Run? | **Delete.** All three converge on *Conversation* as the durable unit, attached to an Agent. Our `Task` + `Channel` covers it; a separate Session adds nothing. |
-| `Step` | Resource or telemetry? | **Telemetry only.** LangGraph's step is checkpoint metadata; OpenHands and Letta have no step resource. Keep it in the event schema, not the domain model. |
-| `Capability` vs `Tool` | Split justified? | **Justified, and strengthened.** OpenHands validates it exactly: MCP is the protocol while policy lives in hooks/confirmation/risk. ADR-0012 makes Capability the declared unit. |
-| `Knowledge` vs `Memory` | Different owners, or one store? | **Genuinely different.** Letta: agent memory is per-agent git with cross-access hard-denied; skills/mods are separately installable packages. OpenHands: org skills from a git repo. Different owner, lifetime and permission model. |
-| `Service` principal | Needed in v0.1? | **Defer.** No precedent; nothing in the scenarios requires it. |
-| `AgentVersion` | Immutable versions or mutable + history? | **Unresolved and unjustified.** `D4` absent in all three (LangGraph versions *Assistant config*, not graph topology). But ADR-0011 *requires* a definition version to pin checkpoints against. Phase 3 must settle this. (OQ-013) |
-| `Workspace` vs `Project` | One level or two? | **One.** No project has two levels. Letta's permission scopes (`project\|local\|user`) are configuration scope, not a resource hierarchy. |
+| `DRAFT` / `DISCARDED` | HumanLayer | A run can be composed before it starts and abandoned without running |
+| `WAITING_INPUT` | HumanLayer, MAF (`IDLE_WITH_PENDING_REQUESTS`) | "Blocked on a human" must be an indexed query, not an inference |
+| `CANCELLING` | HumanLayer (`interrupting` → `interrupted`) | Cancellation is not instantaneous; a machine that pretends otherwise lies during the gap |
+| `EXPIRED` | AG2 (`TaskExpired` ≠ `TaskFailed`) | Different cause, different handling |
+| `INDETERMINATE` | ADR-0014 | An effect dispatched but unconfirmed is not retryable and must surface |
+| `INCOMPATIBLE` | Google AX, MAF | A pin mismatch is a distinct terminal state, not a generic failure |
 
-## New findings that change the model
+## Two kinds of "capability"
 
-**1. Channel is a human surface, not an agent transport.**
-Letta built excellent human channels (Slack/Discord/Telegram with access control,
-threading, mentions, durable approvals) and has *no* agent-to-agent messaging at
-all. All three projects lack F-section entirely.
+Five projects used one word for two things. Splitting them was the most useful
+conceptual correction of the study.
 
-Consequence: `Channel → Message` as drawn conflates two things. Proposed split:
+| | `Capability` | `Extension` |
+|---|---|---|
+| **What** | declared metadata: what a thing *can do* | installed object: what behaviour *is present* |
+| **Consumed by** | routing, degradation, fail-closed decisions | the execution pipeline |
+| **Shape** | tri-state (`true \| false \| unknown`), classified by enforcement position, carrying confidence (`verified \| asserted`) | declared position (`outermost \| innermost`) + ordering + typed wrap points |
+| **Verified by** | a two-layer conformance bench (offline every commit, live gated) plus continuous observed statistics | tests |
+| **Source** | Omnigent, AG2, LangGraph, Letta | Pydantic AI |
 
-```text
-Channel                    human-facing conversation surface
- └── Message               human ↔ agent, durable, threaded
+`unknown` never degrades to `false`. Absence of a claim is not a claim of absence —
+the same discipline this study ran on.
 
-AgentTransport             [PROPOSED — no precedent, must justify from requirements]
- └── Envelope              agent → agent, durable, ordered, correlated
-```
+## Contested nodes, resolved
 
-Keeping one `Message` type for both would inherit a conflation none of the studied
-systems actually made — they simply never built the second half.
+| Node | Resolution |
+|---|---|
+| **`Session` as a resource** | **Kept**, but as a conversational container scoped `(tenant, principal, session)`, not as an execution unit. Omnigent and ADK both key it this way in the primary key. |
+| **`Step` as a resource** | **Deleted.** It is a log entry. Google AX makes `Step` a typed event in the log and nothing addresses it directly; treating it as a resource invites per-step APIs nobody needs. |
+| **`Conversation` distinct from `Session`** | **Deleted.** One concept. AX's `Conversation`, Omnigent's `Conversation`, ADK's `Session` and HumanLayer's `Session` are the same node under four names. |
+| **`Channel` vs `AgentTransport`** | **Split confirmed.** `Channel` is the addressable durable conversation (AG2); transport is how an envelope moves (gRPC, in-process, remote hub) and is not a domain concept. |
+| **`Task` vs `Run`** | **Both kept**, on one real precedent (Omnigent) plus the argument that `error_code` and budget belong to the intent rather than the attempt. Weakest-supported node in the model — flagged in the v0.1 boundary. |
+| **`Approval` as a Run status** | **Rejected; promoted to a resource.** A status cannot hold the question, the decision, the rationale, the approver, or two concurrent approvals in one run (ADR-0015). |
+| **`AgentRuntime` as durable** | **Deleted as durable.** AG2 marks it explicitly "cache-only" — transport binding and last heartbeat. Making connection state authoritative was a strawman error. |
+| **`Memory` as one node** | **Deleted; split three ways** into `Knowledge`, `Recall` and `State` (ADR-0008). Seven projects chose files for knowledge; two have a recall service; ADK supplies the four state scopes. |
+| **`Principal` as one node** | **Split** into `Principal` and `Credential`. Four projects have exactly one half, which proves they are separable subsystems (ADR-0007). |
 
-**2. Memory divides by residency cost, not just ownership.**
-Letta's `system/**` (always in the prompt) versus everything else (metadata only
-until read) is a *cost model*. `letta memory tokens` measures it and explicitly
-leaves policy to the caller. Our Memory node needs a residency dimension, not only
-a scope dimension.
+## Invariants
 
-**3. Identity is the justification for Agent, not durability.**
-Two projects deliver durable execution with no agent identity. Letta needs
-identity because `AGENT_ID` gates memory access and scopes delegation to
-`{self, parent}`. The `Identity` child node is therefore load-bearing: it is what
-makes `Agent` distinct from a durable conversation.
+These are the properties the schema must make impossible to violate, not merely
+discourage.
 
-**4. Capability belongs to both Agent and provider.**
-ADR-0012 applies to harness adapters *and* sandbox providers. Capability should
-probably be a shared shape used in two places rather than a child of Agent alone.
+1. **`tenant_id` is in every composite primary key *and* every composite foreign
+   key.** An unscoped lookup finds nothing (Omnigent, ADK); a cross-tenant
+   *relationship* cannot be created (Agent Control — "Composite FKs enforce
+   same-namespace references on both sides").
+2. **A Run's pin is compared on every resume**, and a mismatch is `INCOMPATIBLE`
+   rather than a silent continuation (Google AX, MAF).
+3. **Every side effect has a ledger entry written before it is attempted**
+   (ADR-0014).
+4. **An Approval's terminal decision requires a `decided_by` Principal.**
+5. **`temp:` state is never persisted** — enforced in every storage backend, not
+   in application code (ADK).
+6. **Envelope identity and hop count are stamped by the authority**, never by the
+   sender (AG2).
+7. **The log records every accepted envelope in full, regardless of audience.**
+   Audit scope exceeds delivery scope (AG2).
+8. **Only committed state is checkpointed.** A checkpoint can never hold a
+   half-applied mutation (MAF).
+9. **A `steer` policy decision without steering guidance fails validation**
+   (Agent Control).
+10. **Organisation policy binds agent policy**; an agent-scoped rule cannot weaken
+    a tenant-scoped one (MAF/Purview).
 
-## State machines
+## What this model deliberately omits
 
-Both revised from evidence. Still provisional.
-
-### Task
-
-```text
-DRAFT → QUEUED → ASSIGNED → IN_PROGRESS → COMPLETED
-                                  ↓
-                          BLOCKED_ON_HUMAN     ✓ durable in all three
-                                  ↓
-                             IN_PROGRESS
-
-terminal: COMPLETED | FAILED | CANCELLED | ABANDONED
-```
-
-No project has a Task resource, so this machine has no precedent to validate
-against. The strongest supporting evidence is negative: LangGraph's lack of one is
-exactly why "retry this intent" has nowhere to live.
-
-### Run
-
-```text
-QUEUED → STARTING → RUNNING → COMPLETED
-                       ↓
-              WAITING_FOR_TOOL
-              WAITING_FOR_HUMAN        ✓ OpenHands WAITING_FOR_CONFIRMATION
-              WAITING_FOR_AGENT
-                       ↓
-                    RUNNING
-
-              STUCK                    ✓ OpenHands — running but not progressing
-              CANCELLING               ✓ OpenHands pause vs interrupt
-                       ↓
-terminal: COMPLETED | FAILED | CANCELLED | TIMED_OUT | SUSPENDED | LOST
-                                                       | INCOMPATIBLE  ← ADR-0011
-```
-
-Additions from evidence:
-
-- **`STUCK`** (OpenHands `ExecutionStatus.STUCK`). Nearly unique, and obviously
-  needed once you operate agents in anger.
-- **`CANCELLING`** must be durable, and OpenHands shows it needs *two* entry
-  paths: graceful (`pause` — drain the current model call) and immediate
-  (`interrupt` — cancel in-flight). Both resumable.
-- **`INCOMPATIBLE`** terminal state for ADR-0011: resume attempted against a
-  definition version that cannot accept the checkpoint.
-- **`LOST`** retained. Letta's `SchedulerOwner` (pid + token +
-  `process_start_ticks` + `boot_id`) shows how to detect it properly.
-
-Also worth adopting from Letta's cron: name the *reasons*, not just the states.
-`started_too_late`, `queue_full`, `runtime_unavailable`, `scheduler_inactive` are
-failure modes that otherwise get swallowed into a generic `FAILED`.
-
-## Cardinality questions — status
-
-- Can a Task have Runs from more than one Agent? (`A8`) — **unresolved.** All three
-  handle multi-agent by nesting, not by co-participation.
-- Can a Run outlive the AgentVersion that started it? (`C12`, `S3`) — **must not,
-  silently.** ADR-0011.
-- Can Memory attach to a Workspace rather than an Agent? (`H2`, `H3`) — **yes, as
-  `Knowledge`.** Letta and OpenHands both use git-backed shared skills, distinct
-  from per-agent memory.
-- Is a Message addressed to a Principal, a Channel, or both? (`F1`, `F2`) — **no
-  precedent.** Depends on the Channel/AgentTransport split above.
-- Does an Artifact belong to a Task or a Workspace? (`A7`) — **unresolved.** No
-  project has a first-class Artifact; outputs are workspace files or memory.
-
-## Open modelling questions
-
-- `AgentVersion` has no precedent but ADR-0011 needs it. Either Phase 3 finds it
-  (Cloudflare Agents, Google AX manifests) or we build it without precedent and
-  say so.
-- Is `AgentTransport` a real requirement or speculative generality? Zero precedent
-  across three projects. AG2 in Phase 3 is the test.
-- Should `Capability` be a shared value type rather than a child of `Agent`?
-- Does `Organization` survive, given `J7` is absent in all three OSS projects and
-  every studied system defers tenancy to a commercial tier?
+`Workflow`/`Graph` (belongs to an external engine — MAF, Pydantic AI),
+`Compensation`/`Saga` (zero precedent in 13 projects; the workflow engine's job),
+`Model`/`Provider` (an explicit anti-goal), and `Tool` as a first-class registry
+entry (tools belong to the agent definition and to MCP, per ADR-0005).

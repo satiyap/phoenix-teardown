@@ -1,6 +1,6 @@
 # ADR-0001 — Agent identity is persistent; Run is not the Agent
 
-- **Status:** Provisional (pre-evidence, Phase 0)
+- **Status:** Accepted (2026-08-26, Phase 5) — 13 projects. Rationale rebased in Phase 2 (identity is for delegation/policy/audit, not durability); model amended to AG2's Passport/Definition/Runtime split.
 - **Date:** 2025-08-26
 - **Supersedes:** —
 - **Superseded by:** —

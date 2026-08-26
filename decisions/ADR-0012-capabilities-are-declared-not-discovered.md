@@ -1,6 +1,6 @@
 # ADR-0012 — Adapter and provider capabilities are declared, not discovered
 
-- **Status:** Provisional (raised by evidence, Phase 2)
+- **Status:** Accepted (2026-08-26, Phase 5) — 11 projects. Split into Capability (declared metadata) and Extension (installed behaviour); fail-closed is positional.
 - **Date:** 2026-08-26
 - **Supersedes:** —
 - **Superseded by:** —

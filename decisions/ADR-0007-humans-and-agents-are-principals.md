@@ -1,6 +1,6 @@
 # ADR-0007 — Humans and agents are distinct subtypes of Principal
 
-- **Status:** Provisional (pre-evidence, Phase 0)
+- **Status:** Accepted (2026-08-26, Phase 5) — 13 projects, 4 challenges — all resolved by splitting Principal from Credential. AgentCore is the reference shape for both halves.
 - **Date:** 2025-08-26
 - **Supersedes:** —
 - **Superseded by:** —

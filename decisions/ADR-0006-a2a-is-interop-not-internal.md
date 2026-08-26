@@ -1,6 +1,6 @@
 # ADR-0006 — A2A is an interoperability protocol, not the internal state model
 
-- **Status:** Provisional (pre-evidence, Phase 0)
+- **Status:** Accepted (2026-08-26, Phase 5) — 13 projects. Five independent confirmations of A2A-as-edge-adapter; southbound amended to gRPC-shaped.
 - **Date:** 2025-08-26
 - **Supersedes:** —
 - **Superseded by:** —

@@ -1,6 +1,6 @@
 # ADR-0005 — MCP is a tool protocol; Capability is the platform abstraction
 
-- **Status:** Provisional (pre-evidence, Phase 0)
+- **Status:** Accepted (2026-08-26, Phase 5) — 13 projects, 8 confirms, 0 challenges. Uncontested.
 - **Date:** 2025-08-26
 - **Supersedes:** —
 - **Superseded by:** —

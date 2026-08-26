@@ -1,6 +1,6 @@
 # ADR-0009 — Sandbox is a provider interface; we do not build a sandbox runtime
 
-- **Status:** Provisional (pre-evidence, Phase 0)
+- **Status:** Accepted (2026-08-26, Phase 5) — 13 projects. Widened to three boundaries: process, egress, storage.
 - **Date:** 2025-08-26
 - **Supersedes:** —
 - **Superseded by:** —

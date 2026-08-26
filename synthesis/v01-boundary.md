@@ -1,78 +1,149 @@
-# Deliverable 6 — v0.1 Product Boundary
+# v0.1 product boundary
+<!-- status: final -->
 
-> Status: **strawman**. This is the most useful final outcome of the teardown:
-> without it the platform becomes a three-year infrastructure project that ships
-> nothing. Finalise at Phase 5.
+The scope decision the study exists to support. Three lists: **in v0.1**,
+**deferred with intent**, and **never**. Every line cites the evidence that put it
+there.
 
-Both lists are load-bearing. The DOES NOT list is what protects the DOES list.
+The governing rule comes from Cloudflare's `channels.md`, which deleted its own
+durable messaging host because it "never delivered exactly-once ingress… so the
+guarantee it appeared to offer was not one it could keep":
 
-## v0.1 DOES
+> **A guarantee you cannot keep is worse than an honest limitation.**
 
-Each line needs an owning ADR before Phase 5 promotes it.
+---
 
-| Capability | ADR | Confidence |
+## In v0.1
+
+Ordered by dependency: each item is buildable once the ones above it exist.
+
+### Tier 1 — the spine (nothing works without these)
+
+| # | Capability | Why v0.1 | Evidence |
+|---|---|---|---|
+| 1 | **Tenant, Principal, Credential** — `tenant_id` in every composite primary *and* foreign key; `Principal.kind ∈ {human, agent, service, remote}`; `Credential` with separate exchanger/refresher | Retrofitting tenancy is a rewrite. Four projects have half the principal model and none can audit properly without both halves. | ADR-0007; Omnigent + ADK (PKs), Agent Control (FKs), AgentCore (both halves) |
+| 2 | **Agent identity + versioned definition + content digest** | The pin (item 5) is meaningless without a digest to pin. Immutable identity is cheap now and impossible later. | ADR-0001; AG2 Passport; MAF digest |
+| 3 | **Run engine: single writer, log-derived state** | Every durability property depends on this. Composite PK with in-transaction sequence, state folded from the log, no parallel state table. | ADR-0004; Google AX |
+| 4 | **Adapter contract (four methods) + one adapter** | Ship with ACP so we adapt Claude Code and Codex on day one. Opaque config, specified stream terminator, gRPC southbound. | ADR-0004, ADR-0006; AX contract, Omnigent integration modes |
+| 5 | **Version-and-pin on resume** → `INCOMPATIBLE` | The clearest differentiator in the study, and the failure it prevents is verified: LangGraph resumes a renamed node returning `[]` with no error and silent work loss. | ADR-0011; MAF (mechanism), LangGraph (the bug) |
+| 6 | **Effect ledger** with both key kinds | The platform performs the replay, so it owns the hazard. ADK delegates this to tool authors; we take it back. | ADR-0014; Cloudflare + AG2 |
+
+### Tier 2 — the platform (what makes it usable by others)
+
+| # | Capability | Why v0.1 | Evidence |
+|---|---|---|---|
+| 7 | **Policy in Cedar: `deny \| steer \| observe`** | `steer` removes most approval prompts; `observe` is how a policy change ships safely. Both are cheap only if the decision type is three-way from the start. | ADR-0013; AgentCore (Cedar), Agent Control (three-way) |
+| 8 | **`Approval` resource with `decided_by`** | Durable HITL is table stakes (4 of 4 anchors had it), and an approval that cannot name its approver fails audit. | ADR-0015; HumanLayer + the gap it leaves |
+| 9 | **Sandbox: three boundaries, one provider each** | Process isolation alone is insufficient — an agent with a fetch tool reads IMDS. Egress guard is ~200 lines and closes a credential-theft path. | ADR-0009; ADK, Pydantic AI, Cloudflare |
+| 10 | **Capability declarations + offline bench layer** | Declaration completeness costs nothing to check and prevents the table rotting. Live probes can come later. | ADR-0012; Omnigent's actual CI split |
+| 11 | **Knowledge (files) + State (four scopes)** | Settled by 7-of-13 convergence, and `temp:` prevents a whole class of "why did my state vanish" bug. | ADR-0008; ADK prefixes |
+| 12 | **OTel with GenAI semconv + a propagation test** | Cheap now, and Omnigent proves that adopting OTel without asserting propagation yields dead code. | ADR-0010; Cloudflare, Pydantic AI, ADK |
+
+### Tier 3 — integrate rather than build
+
+| # | Capability | Decision | Evidence |
+|---|---|---|---|
+| 13 | **Agent-to-agent messaging** | **INTEGRATE `ag2.network`** — do not write an envelope schema. Replace its file WAL with our log. | ADR-0003; AG2 is the only precedent in 13 projects |
+| 14 | **Cost measurement** | INTEGRATE `genai-prices`, with Omnigent's fail-closed-on-unpriced rule | Omnigent, Pydantic AI |
+
+---
+
+## Deferred with intent
+
+Not "forgotten" — each has a named trigger that would pull it forward.
+
+| Capability | Why deferred | What would pull it in |
 |---|---|---|
-| Agent registry | ADR-0001 | low |
-| Stable agent identity | ADR-0001 | low |
-| Runtime adapter interface | ADR-0004 | low |
-| Claude Code adapter | ADR-0004 | low |
-| Codex adapter | ADR-0004 | low |
-| External A2A agent support | ADR-0006 | low |
-| Durable Tasks and Runs | ADR-0002 | low |
-| Message inbox | ADR-0003 | low |
-| Channels | ADR-0003 | low |
-| Task delegation | ADR-0002, ADR-0007 | low |
-| Checkpoint / resume | ADR-0004 | low |
-| Human approval gate | ADR-0007 | low |
-| Sandbox provider abstraction | ADR-0009 | low |
-| MCP capability gateway | ADR-0005 | low |
-| OTel traces | ADR-0010 | low |
-| Basic policy enforcement | — | low |
-| CLI + API | — | low |
+| **Live conformance-bench layer** (probes + DRIFT) | Needs credentials and money per run; the offline layer catches rot | The third adapter, or the first capability-related production incident |
+| **Continuous observed capability statistics** | Needs traffic to be meaningful, and AG2's lifetime-counter design needs a windowing fix first | Capability-based routing becoming a real feature |
+| **Recall (semantic memory service)** | Only 2 of 13 projects have one; Knowledge + State covers the common case | A user needing cross-session semantic recall that files cannot serve |
+| **Agent-level revocation lifecycle** | `D9` absent in 13 projects, so no urgency signal from the field — but we have the identity model to add it cleanly | First multi-tenant deployment, or first compromised-agent incident |
+| **Static policy comparison** (Cedar analysis) | `observe` mode gives empirical comparison, which is sufficient early | A policy change large enough that empirical evidence is too slow |
+| **Scheduled tasks / `Task` as a universal spine** | Only Omnigent separates Task from Run, and only for scheduled work — the weakest-supported node in the domain model | Scheduled or recurring agent work becoming a product requirement |
+| **Channel protocols** (turn expectations) | AG2's messaging works without them | Multi-agent conversations where turn order actually matters |
+| **Multi-surface collaboration** (session sharing, co-driving, comments) | Product surface, not platform | A customer with more than one human per session |
+| **Native TUI adapter** | The hardest integration mode; ACP covers the agents we care about | An agent worth adapting that offers no API |
 
-## v0.1 DOES NOT
+---
 
-| Excluded | Why |
-|---|---|
-| Build models | Not our layer |
-| Build a vector database | Mature vendors exist |
-| Build a full workflow engine | Temporal / Restate exist; ADR pending |
-| Build container orchestration | Kubernetes exists |
-| Build a sandbox runtime | ADR-0009 |
-| Build an IDE | Not the product |
-| Build an enterprise knowledge system | Scope explosion |
-| Visual flow builder | UI investment before the model is proven |
-| Autonomous planner framework | Belongs to harnesses, not the control plane |
-| Multi-region / HA | Premature |
-| Billing and metering | Telemetry substrate first (ADR-0010) |
+## Never
 
-## Deliberate v0.1 weaknesses
+Five hard boundaries. These are not "later" — they are architectural commitments,
+and each is backed by evidence rather than preference.
 
-Known-inadequate choices, recorded so they are decisions rather than surprises.
-
-| Weakness | Accepted because | Revisit when |
+| # | Boundary | Evidence |
 |---|---|---|
-| | | |
+| 1 | **No compensation / rollback / saga engine.** We integrate Temporal, DBOS or Prefect. | **Zero positive answers in 13 projects** — 12 negative, 1 `unknown` only because a client SDK cannot show it — including the project whose whole job is control and the one whose whole job is orchestration. Pydantic AI supplies the reason: saga compensation is the workflow engine's job. |
+| 2 | **No workflow / DAG engine of our own.** | MAF's Pregel engine and Pydantic AI's Temporal integration both demonstrate orchestration is separable and better solved elsewhere. Building one competes with a solved problem. |
+| 3 | **No model gateway or provider abstraction.** | Explicit anti-goal of this study, and a commodity: MAF ships 35 provider packages, which is exactly the surface we should not own. |
+| 4 | **No agent-authoring framework.** We adapt agents; we do not compete with the frameworks that write them. | ADR-0004. Cloudflare offers the coherent alternative (write the agent against our runtime) and it buys ambient durability at the cost of never running someone else's agent. Rejected because adapting existing agents is a hard requirement, not a preference. |
+| 5 | **No bespoke policy DSL, trace format, or messaging protocol.** Cedar, OTel, AG2's envelope. | ADR-0013, ADR-0010, ADR-0003. Every project that invented one of these ended up with a worse version and no ecosystem. |
 
-## Ideal developer journey
+---
 
-The product constraint that should exist before implementation starts. Written
-from the DX logs, not imagined.
+## What v0.1 explicitly does not guarantee
 
-```bash
-platform init
+Stating these is the point of the governing rule.
 
-platform agent add claude
+- **Not exactly-once effects.** At-most-once where the effect target cooperates,
+  and *detected indeterminacy* where it does not. A `pending` ledger row past its
+  lease is `INDETERMINATE` and surfaces to a human — it is never silently retried.
+- **Not exactly-once message delivery.** At-least-once with causation dedupe, as
+  AG2 has it. Cloudflare deleted a component for claiming better.
+- **Not automatic compatibility across an agent edit.** A content digest is brittle
+  in the safe direction: a comment-only change invalidates checkpoints. A false
+  incompatibility costs a restart; a false compatibility costs the silent
+  corruption LangGraph exhibits.
+- **Not a cost *cap*, only cost measurement.** Enforcement needs a budget gate we
+  have deferred; Omnigent is honest that "a single very expensive turn can still
+  overshoot before the next check."
+- **Not cross-tenant authorization.** Composite keys prevent accidental leaks;
+  preventing deliberate impersonation needs the full principal model in use, which
+  is item 1 but only enforced where callers are authenticated.
 
-platform run research-agent --task "research competitors"
-```
+---
 
-For each command: what must be true for it to work, and what must the user
-already understand. If the answer to the second is "more than three concepts,"
-the design is not finished.
+## The riskiest decisions in this boundary
 
-| Command | Preconditions | Concepts required |
-|---|---|---|
-| `init` | | |
-| `agent add` | | |
-| `run` | | |
+Recorded so they can be revisited against reality rather than rediscovered.
+
+1. **Integrating `ag2.network` rather than building messaging.** It is the largest
+   single dependency and the only precedent — if its file-WAL and index-pruning
+   design resists replacement, we inherit a retention-horizon bug in a subsystem we
+   do not control. **Mitigation: spike the storage swap before committing** (this is
+   a Phase 6 task, not a Phase 5 conclusion).
+2. **`Task` as a distinct resource on one precedent.** Omnigent separates Task from
+   Run only for scheduled work. If interactive runs never need it, `Task` is
+   speculative generality — the exact mistake ADR-0003 nearly made in the other
+   direction.
+3. **Content-derived pins with no escape hatch.** MAF appears to have none (OQ-037),
+   and we are copying that. If operators hit false incompatibilities often, the fix
+   must be an explicit recorded assertion, never a loosened default.
+4. **Cedar as a hard dependency for policy.** It buys the analysis story; it also
+   means our policy expressiveness is bounded by Cedar's, and a requirement Cedar
+   cannot express becomes a real problem.
+
+---
+
+## Success test
+
+The study set this condition in Phase 0: a statement of this form, written from
+evidence rather than taste.
+
+> **We build** content-derived version pinning on the agent definition, a
+> platform-owned effect ledger, a unified capability-and-extension model with a
+> conformance bench, and agent-level revocation with attributable approvals —
+> because 13 projects show nobody does these, and one of the failures (silent work
+> loss on resume across a definition change) is verified rather than hypothesised.
+>
+> **We integrate** AG2's envelope and hub for messaging, Cedar for policy, Agent
+> Control's control-plane patterns, and `genai-prices` for cost — because each is
+> permissively licensed, independently useful, and better than what we would write.
+>
+> **We never build** a compensation engine, a workflow engine, a model gateway, an
+> agent-authoring framework, or a bespoke policy/trace/message format — because the
+> evidence says those are either solved elsewhere or absent everywhere for a
+> reason.
+
+All 25 exit criteria are answered with citations; all 15 ADRs are Accepted with
+evidence from 13 projects.

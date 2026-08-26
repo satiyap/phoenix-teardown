@@ -1,4 +1,5 @@
 # Open Questions
+<!-- status: final -->
 
 Anything that would otherwise become "we'll figure it out later." Every entry
 needs an owner and a decide-by date. This register is what stops the exit

@@ -1,6 +1,6 @@
 # ADR-0008 — Agent memory, task context and workspace knowledge are separate
 
-- **Status:** Provisional (pre-evidence, Phase 0)
+- **Status:** Accepted (2026-08-26, Phase 5) — 13 projects, 10 confirms. Knowledge/Recall/State split, with ADK's four scopes and AgentCore's declared kinds.
 - **Date:** 2025-08-26
 - **Supersedes:** —
 - **Superseded by:** —

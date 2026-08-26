@@ -1,6 +1,6 @@
 # ADR-0013 — Policy decisions are traced and shadow-comparable
 
-- **Status:** Provisional (raised by evidence, Phase 2)
+- **Status:** Accepted (2026-08-26, Phase 5) — 10 projects. Cedar for the language and static analysis; Agent Control for observe-mode and steer. Both halves now precedented.
 - **Date:** 2026-08-26
 - **Supersedes:** —
 - **Superseded by:** —

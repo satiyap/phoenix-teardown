@@ -87,8 +87,8 @@ exercise.
 
 ## Status
 
-**Phases 0–3 complete.** Nine deep teardowns, all at 100% probe coverage
-(173/173, zero `unknown`). Phase 4 is four targeted passes.
+**Phases 0–5 complete.** 13 projects read, 15 ADRs Accepted, 25/25 exit criteria
+answered, all six synthesis deliverables final.
 
 | Phase | State |
 |---|---|
@@ -96,52 +96,70 @@ exercise.
 | 1 Recon | 13/14 inspectable; no copyleft anywhere; depth budget set |
 | 2 Deep probes | LangGraph, OpenHands, Letta — the three anchors |
 | 3 Falsification | + Google AX, Omnigent, Cloudflare Agents, AG2, Pydantic AI, Google Agent Platform |
-| 4 Targeted | next: Microsoft Agent Framework, AWS AgentCore, HumanLayer, Agent Control |
+| 4 Targeted | + HumanLayer, AWS AgentCore, Microsoft Agent Framework, Agent Control |
+| 5 Synthesis | domain model, reference architecture, build/reuse map, v0.1 boundary |
 
-**14 ADRs**, four of which did not exist before the evidence: 0011 (version-pinned
-checkpoints), 0012 (declared capabilities), 0013 (traced policy), 0014 (effect
-ledger). Recorded impact across 9 projects × 14 ADRs: 70 confirms, 16 amends,
-7 challenges, 21 neutral. **No ADR was abandoned**, though ADR-0003 came within one
-project of being deleted.
+**173 recorded ADR impacts**: 96 confirms, 19 amends, 10 challenges, 48 neutral.
+Four ADRs did not exist before the evidence (0011 pinning, 0012 capabilities,
+0013 policy, 0014 effect ledger) and one was raised in Phase 4 (0015 approvals).
+**No ADR was abandoned**, though ADR-0003 came within one project of deletion.
 
-### The gap picture
+### What the evidence decided
 
-Phase 2 ended with **16 probes absent in all three anchors**. Phase 3 closed 13 of
-them, and the closures came from the projects I had ranked lowest:
+**BUILD — four things nobody does:**
+1. **Content-derived pinning on the agent definition.** MAF proves the mechanism on
+   *workflows* (a bytecode digest enforced on restore); nobody applies it to agents.
+   13 projects: AX pins adapter identity without versions, Omnigent versions agents
+   without pinning, ADK versions storage and telemetry schemas but not agents.
+2. **A platform-owned effect ledger.** Cloudflare and AG2 each solve half with
+   different keys; ADK states the requirement precisely and delegates it to tool
+   authors.
+3. **Unified `Capability` + `Extension` with a two-layer conformance bench.**
+   Five projects use one word for two different concepts.
+4. **Agent-level revocation and an approver identity on approvals.** HumanLayer has
+   the only real `Approval` resource and records *why*, never *who*.
 
-| Closed by | What |
-|---|---|
-| **AG2** | The entire agent-to-agent messaging section (`F1 F2 F5 F6 F8`) plus capability routing |
-| **Omnigent** | Delegated authority, tenant isolation, cost limits |
-| **Cloudflare Agents** | Side-effect idempotency — verified by running its tests |
-| **Google AX** | Refusing to resume across a definition change |
-| **Google Agent Platform** | The only real memory service, with event-time provenance |
+**INTEGRATE:** AG2's `ag2.network` envelope and hub (the only durable agent
+messaging in 13 projects), Cedar for policy, Agent Control's control plane,
+`genai-prices` for cost data.
 
-**`L8` (compensation/rollback) is the only genuine design gap absent in all nine
-projects.** `Q3`/`Q5` are licensing artefacts of permissive licences, not gaps.
+**NEVER:** compensation/saga engine (zero positive answers in 13 projects), workflow
+engine, model gateway, agent-authoring framework, or any bespoke policy DSL, trace
+format or message protocol.
 
-### The strongest differentiator
+### The verified failure that justifies the headline decision
 
-**Nobody versions *and* pins.** Ten projects: Google AX pins harness identity
-without versions, Omnigent versions agents without pinning, ADK versions its storage
-*and* telemetry schemas but not its agents. Every one of them can silently hand a
-pre-upgrade checkpoint to post-upgrade code. That is ADR-0011, and it survived the
-whole study as a gap rather than a misunderstanding.
+LangGraph resumes a checkpoint whose graph has changed by returning `[]` with **no
+error and silent work loss** — confirmed by running it, not inferred. That is the
+bug ADR-0011 exists to prevent, and 13 projects show nobody prevents it for agents.
 
-### A methodological correction
+### A methodological correction worth reading
 
 Three of six Phase 3 passes found substantially more than recon predicted, each
 because I trusted a cheap signal over the source — a stale version string, a README
-shape, and worst, my own running tally. After seven projects with no agent messaging
-I had drafted an ADR rewrite abandoning it; the eighth implements it better than my
-strawman did. **A convergence across N projects is evidence about what is common,
-not proof about what is possible.** Recorded in full in
+shape, and worst, my own running tally. After seven projects with no agent-to-agent
+messaging I had drafted an ADR rewrite abandoning it; the eighth implements it better
+than my strawman did.
+
+**A convergence across N projects is evidence about what is common, not proof about
+what is possible.** Recorded in full in
 [`synthesis/phase3-findings-final.md`](synthesis/phase3-findings-final.md) §5.
 
-Read [`synthesis/phase3-findings-final.md`](synthesis/phase3-findings-final.md) for
-the cross-project synthesis, and
-[`synthesis/phase2-findings.md`](synthesis/phase2-findings.md) for the earlier
-anchor comparison.
+Three further times, reading a *schema* overturned an inference drawn from an API
+surface (ADK's composite primary key, Agent Control's composite foreign keys). For
+any claim about tenancy, uniqueness or referential integrity, the table definition is
+the only evidence that counts.
+
+### Read next
+
+| Document | What it answers |
+|---|---|
+| [`synthesis/v01-boundary.md`](synthesis/v01-boundary.md) | What ships, what waits, what we never build |
+| [`synthesis/reference-architecture.md`](synthesis/reference-architecture.md) | The component shape and why each piece exists |
+| [`synthesis/domain-model.md`](synthesis/domain-model.md) | The canonical model, its invariants, and the strawman nodes deleted |
+| [`synthesis/build-reuse-map.md`](synthesis/build-reuse-map.md) | 203 component decisions: integrate, port, build, reject |
+| [`synthesis/exit-criteria.md`](synthesis/exit-criteria.md) | All 25 questions, answered with citations |
+| [`synthesis/capability-matrix.md`](synthesis/capability-matrix.md) | 173 probes × 13 projects, generated from `facts.yaml` |
 
 ## Success condition
 

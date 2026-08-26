@@ -1,6 +1,6 @@
 # ADR-0014 — Side effects are made idempotent by a durable effect ledger
 
-- **Status:** Provisional (raised from evidence, Phase 3)
+- **Status:** Accepted (2026-08-26, Phase 5) — 7 projects. Two precedents with different keys (explicit and causation-based); claims at-most-once with detected indeterminacy, not exactly-once.
 - **Date:** 2026-08-26 (after Cloudflare Agents closed `C6`)
 - **Supersedes:** —
 - **Superseded by:** —

@@ -1,6 +1,6 @@
 # ADR-0003 — Messages are first-class durable resources
 
-- **Status:** Provisional (pre-evidence, Phase 0)
+- **Status:** Accepted (2026-08-26, Phase 5) — 13 projects. Nearly abandoned after seven absences, then vindicated by AG2; design now follows AG2's envelope closely.
 - **Date:** 2025-08-26
 - **Supersedes:** —
 - **Superseded by:** —

@@ -1,6 +1,6 @@
 # ADR-0002 — Task and Run are separate resources with separate state machines
 
-- **Status:** Provisional (pre-evidence, Phase 0)
+- **Status:** Accepted (2026-08-26, Phase 5) — 13 projects. Task/Run split has one real precedent (Omnigent, scheduled work only); Run state machine extended from HumanLayer and MAF.
 - **Date:** 2025-08-26
 - **Supersedes:** —
 - **Superseded by:** —
