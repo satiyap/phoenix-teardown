@@ -53,6 +53,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | Pydantic AI | neutral | `pydantic_ai_slim/pydantic_ai/ @ b48ee38` | No A2A. UI protocols (AG-UI, Vercel AI) are the only interop surface. |
 | Google Agent Platform | confirms | `src/google/adk/a2a/ @ 85b52f6` | **Second independent confirmation after AG2.** `a2a/` is a converter-and-executor interop layer (`a2a/agent`, `a2a/converters`, `a2a/executor`) marked `experimental`, wrapping A2A agents as ADK agents at the edge. The internal model is agents, sessions and events. Interop at the boundary, own model inside. |
 | HumanLayer | neutral | `hld/PROTOCOL.md @ 99abe67` | No A2A. Interop is JSON-RPC 2.0 over a Unix socket, plus MCP. |
+| AWS AgentCore | confirms | `src/bedrock_agentcore/runtime/a2a.py @ 826416a`; `runtime/ag_ui.py` | **Fourth independent instance** (with AG2, ADK, and AG-UI here too) of A2A as an optional edge adapter alongside a different internal model. This ADR is settled. |
 
 ## Open questions
 

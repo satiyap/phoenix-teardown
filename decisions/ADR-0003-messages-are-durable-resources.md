@@ -157,6 +157,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | Pydantic AI | confirms | `pydantic_ai_slim/pydantic_ai/agent/ @ b48ee38` | No agent-to-agent messaging; agents call agents as functions or tools. AG2 remains the sole precedent. |
 | Google Agent Platform | confirms | `src/google/adk/agents/ @ 85b52f6` | No durable agent-to-agent messaging. Composition is `SequentialAgent`/`ParallelAgent`/`LoopAgent`, agent-as-tool, and LLM-driven transfer, with coordination through shared session `State`. AG2 remains the sole precedent. |
 | HumanLayer | confirms | `hld/store/sqlite.go:373-405 @ 99abe67` | No agent-to-agent messaging. `parent_tool_use_id` (migration 6, "for sub-task tracking") gives a sub-task tree within a session. AG2 remains the sole F-section answer. |
+| AWS AgentCore | confirms | `src/bedrock_agentcore/runtime/a2a.py @ 826416a` | No durable agent-to-agent messaging; A2A appears only as an edge adapter. AG2 remains the sole precedent. |
 
 ## Open questions
 

@@ -103,6 +103,84 @@ as stated and should be narrowed.
 
 `I8`, `J10`, `J9`, `M1`, `M4`
 
+## Amendment — 2026-08-26 (Phase 4, AWS AgentCore): adopt Cedar
+
+This was the weakest-supported ADR in the study for twelve projects. Traceability
+had precedent — Omnigent's `deciding_policies`, AG2's `on_envelope_rejected`,
+HumanLayer's decision record — but the **shadow-comparison half had none at all**,
+and I was close to concluding it was either a differentiator or a bad idea with no
+way to tell which.
+
+AgentCore answers it by not writing a policy engine at all.
+
+**Policy is Cedar** (`src/bedrock_agentcore/policy/client.py:30-37 @ 826416a`):
+
+```python
+client.create_policy(
+    policy_engine_id=engine["policyEngineId"],
+    name="my_policy",
+    definition={"cedar": {"statement": "permit(principal, action, resource);"}},
+)
+```
+
+Three properties matter here, and only the first is obvious:
+
+1. **Cedar has a formal semantics**, so a policy set is a mathematical object rather
+   than a pile of callbacks. That is what makes shadow comparison *tractable*:
+   "is policy set B strictly more permissive than A" is a decidable question about
+   Cedar, and an intractable one about arbitrary Python predicates.
+2. **`principal`, `action`, `resource` are language primitives**, aligning exactly
+   with ADR-0007's amended split. The agent's workload identity is nameable as a
+   Cedar `principal`; there is no impedance mismatch to bridge.
+3. **The policy engine is a resource with its own lifecycle**, separate from the
+   agent — the cleanest separation of policy from execution in the study.
+
+And `start_policy_generation` (`policy/client.py:240-290`) turns natural language
+into Cedar policies as **reviewable assets**: `content={"rawText": "allow
+refunds..."}` → poll to `GENERATED` → `list_policy_generation_assets` →
+`generatedPolicies`. The candidate policy is *data you inspect before it takes
+effect*. That is a weaker cousin of shadow comparison — review-before-enforce rather
+than run-both-and-diff — and it is the only instance of the instinct in twelve
+projects.
+
+### Amended decision
+
+**Policy is expressed in Cedar, not in a bespoke rule engine.**
+
+The reasoning is the same as ADR-0010's for OpenTelemetry: adopting an existing
+formally-specified standard buys an ecosystem — analysis tooling, a validator, a
+published semantics, other people's correctness proofs — that we would otherwise
+have to build from nothing and would build worse. A bespoke DSL would mean
+implementing the shadow-comparison analysis ourselves against semantics we invented
+and never proved anything about.
+
+The traced half is unchanged and still assembled from three projects:
+
+- **Which policies decided** — Omnigent's `deciding_policies` (one on DENY, all
+  ASKing policies in order).
+- **Every refusal observable** — AG2's `on_envelope_rejected` firing for *every*
+  attempt, not just successes.
+- **The decision record** — HumanLayer's approval row: what was asked, what was
+  decided, when, and why.
+- **Which rule required it** — ADR-0015 rule 6, still ours to build.
+
+The shadow half now has a concrete plan rather than an aspiration:
+
+1. **Shadow evaluation**: run candidate policy set B alongside enforced set A,
+   record both decisions, diff them over real traffic. Needs only that decisions be
+   traced, which the above provides.
+2. **Static comparison**: use Cedar's analysis tooling to answer whether B is more
+   permissive than A *without* traffic — the part that was impossible with a
+   bespoke engine.
+3. **Review-before-enforce**: a candidate policy set is a durable, inspectable
+   artefact with its own status, following AgentCore's generation-assets pattern.
+
+**Open question kept honest.** Whether AgentCore's *managed service* exposes Cedar's
+analysis capability, or only its evaluation, is OQ-033 and unresolved. But Cedar's
+analysis tooling is open source and independent of AWS, so the capability is
+available to us regardless of what the managed service surfaces. That converts this
+ADR's hardest requirement from a research question into a tooling one.
+
 ## Evidence log
 
 | Project | Effect | Evidence | Note |
@@ -118,6 +196,7 @@ as stated and should be narrowed.
 | Pydantic AI | neutral | `pydantic_ai_slim/pydantic_ai/capabilities/hooks.py @ b48ee38` | No policy engine. Typed wrap points and `Hooks` are real interception seams, and `RaiseContentFilterError` is a shipped guard, but there is no decision object to trace. |
 | Google Agent Platform | neutral | `src/google/adk/plugins/base_plugin.py:114-396 @ 85b52f6` | Sixteen named lifecycle hooks — including four distinct error callbacks (`on_model_error`, `on_tool_error`, `on_agent_error`, `on_run_error`) — are real interception seams, but there is no policy decision object to trace. **Still no shadow-comparison mode after ten projects**; that half of this ADR remains entirely without precedent. |
 | HumanLayer | confirms | `hld/store/sqlite.go:201-217 @ 99abe67` | **Traces the decision but not the policy.** The record is strong — which tool, what input, what status, when responded, and a free-text rationale — but nothing records *the rule that required approval*, because that is delegated to the harness's permission mode. That is precisely the half AG2 (`deciding_policies`) and Omnigent supply, and it confirms both halves are needed: a decision trail without the rule cannot answer "why was this gated", and a rule trail without the decision cannot answer "what did the human say". |
+| AWS AgentCore | confirms | `src/bedrock_agentcore/policy/client.py:30-37,240-290 @ 826416a` | **The first real precedent for this ADR, and it changes the plan.** Policy is **Cedar** — `definition={"cedar": {"statement": "permit(principal, action, resource);"}}` — a language with a formal semantics and an existing analysis toolchain, exposed through a dedicated `PolicyEngine` resource separate from the agent. That matters specifically because "is policy set B more permissive than A" becomes a **tractable question**, which is exactly what the shadow-comparison half needs and what twelve projects offered nothing for. Additionally `start_policy_generation` turns natural language into Cedar policies as **reviewable assets** (`content={"rawText": …}` → poll to `GENERATED` → `list_policy_generation_assets`) — the only instance in the study of treating a policy as something you evaluate *before* enforcing. **Amend the ADR to adopt Cedar rather than building a bespoke rule engine.** |
 
 ## Open questions
 

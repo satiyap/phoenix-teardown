@@ -54,6 +54,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | Pydantic AI | confirms | `pydantic_ai_slim/pydantic_ai/capabilities/native_or_local.py @ b48ee38` | MCP as both a capability and a toolset, with `NativeOrLocalTool` resolving to a provider-native implementation where one exists and a local one otherwise. Protocol distinct from capability model, and the provider-native/local distinction handled explicitly. |
 | Google Agent Platform | confirms | `src/google/adk/tools/ @ 85b52f6` | MCP plus OpenAPI-derived tool generation as protocols, with no capability-claim model at all. Protocol and capability model cleanly separate by omission. |
 | HumanLayer | neutral | `hld/mcp/ @ 99abe67` | MCP appears in an inverted role worth noting: not as a way for the agent to reach tools, but as **a surface by which another agent can answer a human-in-the-loop approval request.** |
+| AWS AgentCore | confirms | `src/bedrock_agentcore/gateway/ @ 826416a` | A managed **gateway** service fronts tools — architecturally the right place for credential injection and policy enforcement. Protocol-shaped, with no capability-claim model. |
 
 ## Open questions
 

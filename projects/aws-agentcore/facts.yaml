@@ -11,938 +11,1086 @@ project:
   slug: aws-agentcore
   name: AWS AgentCore
   depth: targeted
-  evidence_class: B
+  evidence_class: A
   read_on: 2026-08-26
   repo: "https://github.com/aws/bedrock-agentcore-sdk-python"
-  commit:                  # SHA the claims were read against
+  commit: 826416a2493131f79137c77575bc1e10b9589d56
   docs: "https://docs.aws.amazon.com/bedrock-agentcore/"
-  version:
+  version: "bedrock-agentcore 1.22.0"
   license: Apache-2.0
   license_verdict: REFERENCE_ONLY
-  runtime_class: unknown
+  runtime_class: hybrid
   one_line: "Managed AWS primitives for running agents in production: runtime, identity, gateway, memory."
-  thesis:                  # the core architectural bet
+  thesis: "An agent is a workload with its own identity, and everything it does is authorized against a formally specified policy - a workload principal that can act as itself or on a user\u0027s behalf, with Cedar rather than a bespoke rule engine."
 
 probes:
 
   # --- A. Core abstraction and object model ---
   # A1: What does this system think an agent *is*? State it in one sentence, in their vocabulary.
   A1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The agent is a WORKLOAD with its own identity, able to obtain access tokens as itself, for a federated JWT, or for a known user id."
+    evidence: "src/bedrock_agentcore/services/identity.py:140-155 @ 826416a; verified live against bedrock-agentcore 1.22.0 (PyPI, 2026-08-26)"
   # A2: What is the root resource — the thing everything else hangs off?
   A2:
     verdict: unknown
-    note:
-    evidence:
+    note: "No session resource in the SDK surface. Sessions may exist in the managed runtime (server-side; not inspectable from the SDK)."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
   # A3: Is `Agent` persistent or ephemeral? Can it exist while not executing?
   A3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Workload identity, credential providers, policy engines and memories are all durable managed resources with CRUD lifecycles."
+    evidence: "src/bedrock_agentcore/services/identity.py:94-111 @ 826416a"
   # A4: Is `Task` a separate resource from `Run`? If not, which concept is missing and what fills the...
   A4:
     verdict: unknown
-    note:
-    evidence:
+    note: "No Task or Run resource visible in the SDK; execution lifecycle is server-side; not inspectable from the SDK."
+    evidence: "src/bedrock_agentcore/runtime/models.py @ 826416a"
   # A5: What is a `Session` attached to: user, agent, task, or execution?
   A5:
     verdict: unknown
-    note:
-    evidence:
+    note: "Not modelled in the SDK (server-side; not inspectable from the SDK)."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
   # A6: Are messages first-class durable resources, or transient function arguments?
   A6:
     verdict: unknown
-    note:
-    evidence:
+    note: "Messages are not an SDK-level resource (server-side; not inspectable from the SDK)."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
   # A7: Are artifacts (files, outputs, deliverables) first-class?
   A7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "PolicyGenerationAssets are first-class inspectable artifacts: natural language in, generated Cedar policies out, fetched via list_policy_generation_assets."
+    evidence: "src/bedrock_agentcore/policy/client.py:284-290 @ 826416a"
   # A8: Can multiple agents participate in one task? How is that represented?
   A8:
     verdict: unknown
-    note:
-    evidence:
+    note: "Multi-agent participation is not modelled in the SDK (server-side; not inspectable from the SDK). A2A support exists as an edge adapter."
+    evidence: "src/bedrock_agentcore/runtime/a2a.py @ 826416a"
   # A9: Draw the object model as a tree. Only nodes that exist in their code or API.
   A9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Workload (agent, with identity) > workload_access_token (3 variants); CredentialProvider{OAuth2|ApiKey} CRUD; PolicyEngine > Policy (Cedar) > PolicyGeneration > assets; Memory > strategies{SEMANTIC|SUMMARIZATION|USER_PREFERENCE|CUSTOM} > MemoryRecord addressed by hierarchical namespace. See teardown section 3."
+    evidence: "src/bedrock_agentcore/ @ 826416a; verified live against bedrock-agentcore 1.22.0 (PyPI, 2026-08-26)"
 
   # --- B. Runtime model ---
   # B1: Does the platform launch agents, host them, or attach to external ones?
   B1:
     verdict: unknown
-    note:
-    evidence:
+    note: "Launch is managed (server-side; not inspectable from the SDK); the SDK provides an app harness, a client and adapters."
+    evidence: "src/bedrock_agentcore/runtime/app.py @ 826416a"
   # B2: Execution substrate: process, container, microVM, serverless, in-process library, remote HTTP?
   B2:
     verdict: unknown
-    note:
-    evidence:
+    note: "Execution substrate is managed (server-side; not inspectable from the SDK)."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
   # B3: Who owns the event loop — platform or agent?
   B3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "The SDK's runtime app hosts the agent loop in-process; the managed runtime can also host it."
+    evidence: "src/bedrock_agentcore/runtime/app.py @ 826416a"
   # B4: Who decides when an agent wakes?
   B4:
     verdict: unknown
-    note:
-    evidence:
+    note: "Placement is AWS's (server-side; not inspectable from the SDK)."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
   # B5: Can an agent run indefinitely? What is the actual ceiling?
   B5:
     verdict: unknown
-    note:
-    evidence:
+    note: "Not visible in the SDK (server-side; not inspectable from the SDK)."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
   # B6: Are there background or unattended agents?
   B6:
     verdict: unknown
-    note:
-    evidence:
+    note: "No scheduling in the SDK (server-side; not inspectable from the SDK)."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
   # B7: Is execution synchronous or asynchronous from the caller's view?
   B7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Streaming through the runtime app and the A2A / AG-UI adapters."
+    evidence: "src/bedrock_agentcore/runtime/ag_ui.py @ 826416a"
   # B8: Can in-flight work migrate between workers?
   B8:
     verdict: unknown
-    note:
-    evidence:
+    note: "Work placement and migration are managed (server-side; not inspectable from the SDK)."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
   # B9: Can an agent survive a machine restart? Automatically, or with operator action?
   B9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "The SDK polls asynchronous resource lifecycles with wait_until / wait_until_deleted and an explicit failure-status set; agent-level recovery is not visible."
+    evidence: "src/bedrock_agentcore/_utils/polling.py @ 826416a; src/bedrock_agentcore/policy/client.py:18"
   # B10: Classify: worker/queue, durable actor, attached harness, or in-process library.
   B10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "hybrid: a thin SDK over managed AWS control-plane (bedrock-agentcore-control) and data-plane (bedrock-agentcore) services, with an in-process app harness."
+    evidence: "src/bedrock_agentcore/services/identity.py:76-90 @ 826416a"
 
   # --- C. Durability and failure semantics ---
   # C1: What state is durable, and what is lost on crash?
   C1:
     verdict: unknown
-    note:
-    evidence:
+    note: "Durable state is in managed services (server-side; not inspectable from the SDK); the SDK persists nothing."
+    evidence: "src/bedrock_agentcore/memory/client.py @ 826416a"
   # C2: *When* is state persisted — every step, every tool call, on checkpoint, never?
   C2:
     verdict: unknown
-    note:
-    evidence:
+    note: "Checkpointing is server-side; not inspectable from the SDK."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
   # C3: Checkpointing or event sourcing? Can state be rebuilt from a log?
   C3:
     verdict: unknown
-    note:
-    evidence:
+    note: "Durability mechanism is server-side; not inspectable from the SDK."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
   # C4: Retry semantics, and at what granularity: run, step, tool call?
   C4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "wait_until / wait_until_deleted with a WaitConfig give bounded polling of async operations, and _FAILED_STATUSES makes failure terminal rather than a timeout - but there is no retry policy for agent work."
+    evidence: "src/bedrock_agentcore/policy/client.py:18 @ 826416a; src/bedrock_agentcore/_utils/polling.py"
   # C5: At-least-once or exactly-once? What do the docs claim versus what the code does?
   C5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "clientToken is a caller-supplied idempotency token on mutating control-plane calls (the AWS-wide convention), so retries are safe by construction. No stated delivery guarantee for agent work."
+    evidence: "src/bedrock_agentcore/policy/client.py:250,267-268 @ 826416a"
   # C6: Is there an idempotency model for tool side effects?
   C6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "No effect ledger in the SDK, but clientToken applies caller-supplied idempotency UNIFORMLY across mutating control-plane operations rather than per-feature - the ADR-0014 key as a platform convention."
+    evidence: "src/bedrock_agentcore/policy/client.py:250 @ 826416a"
   # C7: Process crash recovery: what resumes, and from where?
   C7:
     verdict: unknown
-    note:
-    evidence:
+    note: "State recovery is server-side; not inspectable from the SDK."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
   # C8: Node loss: is work re-dispatched, and how is it detected?
   C8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "PingStatus distinguishes Healthy from HealthyBusy - idle-alive from working-alive - plus a force_healthy task action. The most precise health model in the study; conflating the two is how supervisors kill busy workers or miss stuck ones."
+    evidence: "src/bedrock_agentcore/runtime/models.py:9-13,168 @ 826416a"
   # C9: Context-window overflow: truncation, summarisation, or failure?
   C9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "SUMMARIZATION is a declared memory strategy, so context reduction is a configured named behaviour rather than an implicit side effect."
+    evidence: "src/bedrock_agentcore/memory/constants.py:23-25 @ 826416a"
   # C10: Timers, scheduled execution, long sleeps — durable across restart?
   C10:
     verdict: unknown
-    note:
-    evidence:
+    note: "Timers are not modelled in the SDK (server-side; not inspectable from the SDK)."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
   # C11: Human-in-the-loop pause and resume: durable, or in-memory only?
   C11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "OAuth USER_FEDERATION with an on_auth_url callback and a TokenPoller lets a human complete an authorization out of band while the agent polls - durable in the sense that the token poll survives the wait. But there is no approval resource and no decision on a tool call."
+    evidence: "src/bedrock_agentcore/identity/auth.py:23-35 @ 826416a"
   # C12: Can a definition be upgraded while runs are in flight? What happens to them?
   C12:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent version and no pin. TWELVE PROJECTS."
+    evidence: "src/bedrock_agentcore/services/identity.py @ 826416a"
 
   # --- D. Agent identity and lifecycle ---
   # D1: Is an agent globally addressable? By what identifier?
   D1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "STRONGEST AGENT IDENTITY IN THE STUDY: the agent is a named workload with its own access tokens, and workload_name is the stable identifier used to obtain them."
+    evidence: "src/bedrock_agentcore/services/identity.py:140-155 @ 826416a; verified live against bedrock-agentcore 1.22.0 (PyPI, 2026-08-26)"
   # D2: Does identity survive process restart?
   D2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Workload identity and credential providers are durable managed control-plane resources, independent of any process."
+    evidence: "src/bedrock_agentcore/services/identity.py:94-104 @ 826416a"
   # D3: Is identity distinct from runtime instance?
   D3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "The workload (definition, named) is distinct from a token issuance (use), but there is no Agent-definition vs Agent-instance resource pair."
+    evidence: "src/bedrock_agentcore/services/identity.py:140 @ 826416a"
   # D4: Are agents versioned? Immutable or mutable definitions?
   D4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent versioning. Credential providers have update_* but carry no version."
+    evidence: "src/bedrock_agentcore/services/identity.py:94-104 @ 826416a"
   # D5: Is there a registry or catalog?
   D5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Credential providers are a registry with full CRUD (create/get/list/update/delete for OAuth2, create/get/list/delete for API keys), split across control and data plane allow-lists."
+    evidence: "src/bedrock_agentcore/services/identity.py:94-111 @ 826416a"
   # D6: Can agents discover each other at runtime?
   D6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "list_oauth2_credential_providers and list_api_key_credential_providers give runtime discovery of what an agent can authenticate to."
+    evidence: "src/bedrock_agentcore/services/identity.py:96-104 @ 826416a"
   # D7: Can agents advertise capabilities? In what format?
   D7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No declared capability model for agents or runtimes."
+    evidence: "src/bedrock_agentcore/ @ 826416a"
   # D8: Is there an owner, team, or tenant on the agent record?
   D8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Everything is owned by an AWS account and region, with memory namespaces adding /org/ and /actor/ hierarchy on top."
+    evidence: "src/bedrock_agentcore/memory/client.py:131-134 @ 826416a"
   # D9: Can an agent be suspended, revoked, or deprecated?
   D9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "REVOCATION EXISTS BUT AT THE CREDENTIAL LEVEL: delete_oauth2_credential_provider and delete_api_key_credential_provider revoke an agent's ability to obtain that credential, asynchronously (wait_until_deleted). There is still no agent deprecation lifecycle, so you can revoke what an agent REACHES, not the agent itself. Best answer in twelve projects nonetheless."
+    evidence: "src/bedrock_agentcore/services/identity.py:99,104 @ 826416a; src/bedrock_agentcore/_utils/polling.py"
   # D10: Is there anything resembling a declarative agent manifest?
   D10:
     verdict: unknown
-    note:
-    evidence:
+    note: "Agent manifests may exist in the managed control plane; config_bundle/ hints at packaged configuration but the SDK surface does not define an agent spec (server-side; not inspectable from the SDK)."
+    evidence: "src/bedrock_agentcore/config_bundle/ @ 826416a"
 
   # --- E. Harness and runtime interoperability ---
   # E1: What is the minimum interface an agent implementation must satisfy?
   E1:
     verdict: unknown
-    note:
-    evidence:
+    note: "No adapter contract in the SDK; the runtime is managed (server-side; not inspectable from the SDK). A2A and AG-UI adapters exist for protocol interop."
+    evidence: "src/bedrock_agentcore/runtime/a2a.py @ 826416a"
   # E2: Transport: stdin/stdout, HTTP, gRPC, WebSocket, in-process, ACP, A2A?
   E2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Control plane and data plane boto3 clients, with CP_ENDPOINT_OVERRIDE / DP_ENDPOINT_OVERRIDE for testing, plus A2A and AG-UI transports."
+    evidence: "src/bedrock_agentcore/services/identity.py:80-88 @ 826416a"
   # E3: Can it host a foreign agent (Claude Code, Codex, OpenHands, LangGraph, ADK)?
   E3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A2A support lets external agents interoperate, but there is no pluggable agent-adapter registry."
+    evidence: "src/bedrock_agentcore/runtime/a2a.py @ 826416a"
   # E4: Is there an event stream out of a running agent? What granularity?
   E4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Streaming through the runtime app and AG-UI; no typed platform event stream in the SDK."
+    evidence: "src/bedrock_agentcore/runtime/ag_ui.py @ 826416a"
   # E5: Are tool calls externally observable, or internal to the agent?
   E5:
     verdict: unknown
-    note:
-    evidence:
+    note: "Tool-call observability is server-side; not inspectable from the SDK; the gateway fronts tools."
+    evidence: "src/bedrock_agentcore/gateway/ @ 826416a"
   # E6: How is context injected at start?
   E6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "config_bundle/ packages configuration, and clients accept explicit boto3 sessions and endpoint overrides."
+    evidence: "src/bedrock_agentcore/config_bundle/ @ 826416a"
   # E7: Is cancellation supported? Cooperative or forced? Does it propagate to subagents?
   E7:
     verdict: unknown
-    note:
-    evidence:
+    note: "Cancellation is not visible in the SDK; task actions exist (server-side; not inspectable from the SDK)."
+    evidence: "src/bedrock_agentcore/runtime/models.py:168 @ 826416a"
   # E8: Can a run be checkpointed and restored by the platform, or only by the agent?
   E8:
     verdict: unknown
-    note:
-    evidence:
+    note: "Checkpoint/restore is server-side; not inspectable from the SDK."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
   # E9: Which of these would be hard to adapt, and why?
   E9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The SDK is disciplined about its own contract: per-plane method allow-lists, __getattr__ forwarding ONLY allow-listed names with an AttributeError pointing at the boto3 docs, snake_case/camelCase acceptance, and DeprecationWarning on a superseded kwarg."
+    evidence: "src/bedrock_agentcore/services/identity.py:113-128 @ 826416a; src/bedrock_agentcore/_utils/namespace.py:32-50"
 
   # --- F. Agent-to-agent communication ---
   # F1: Direct messages between agents?
   F1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No durable agent-to-agent messaging in the SDK. AG2 remains the sole answer."
+    evidence: "src/bedrock_agentcore/runtime/a2a.py @ 826416a"
   # F2: Channels, topics, or pub/sub?
   F2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No channels."
+    evidence: "src/bedrock_agentcore/ @ 826416a"
   # F3: Task delegation as a distinct mechanism from messaging?
   F3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Delegation is the point of the identity model: ON_BEHALF_OF_TOKEN_EXCHANGE as a named auth flow, plus workload tokens scoped to a user id or a federated JWT."
+    evidence: "src/bedrock_agentcore/identity/auth.py:30 @ 826416a; verified live against bedrock-agentcore 1.22.0 (PyPI, 2026-08-26)"
   # F4: Synchronous RPC between agents?
   F4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A2A gives RPC-shaped interop at the edge."
+    evidence: "src/bedrock_agentcore/runtime/a2a.py @ 826416a"
   # F5: Asynchronous inbox or mailbox?
   F5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No mailbox."
+    evidence: "src/bedrock_agentcore/ @ 826416a"
   # F6: Is delivery durable? Survives restart of sender and receiver?
   F6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No inter-agent delivery layer."
+    evidence: "src/bedrock_agentcore/ @ 826416a"
   # F7: Is message ordering guaranteed? Per what scope?
   F7:
     verdict: unknown
-    note:
-    evidence:
+    note: "Ordering guarantees are server-side; not inspectable from the SDK."
+    evidence: "src/bedrock_agentcore/ @ 826416a"
   # F8: Acknowledgement or delivery receipts?
   F8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No inter-agent acknowledgement."
+    evidence: "src/bedrock_agentcore/ @ 826416a"
   # F9: Correlation ids for request/response pairing?
   F9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "clientToken correlates a mutating request to its result, and memory namespaces correlate records to actors; there is no trace id on the SDK surface."
+    evidence: "src/bedrock_agentcore/policy/client.py:250 @ 826416a"
   # F10: Conversation threading?
   F10:
     verdict: unknown
-    note:
-    evidence:
+    note: "Forking is not modelled in the SDK (server-side; not inspectable from the SDK)."
+    evidence: "src/bedrock_agentcore/ @ 826416a"
   # F11: Capability-based routing — address by what an agent *can do* rather than who it is?
   F11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No capability routing."
+    evidence: "src/bedrock_agentcore/ @ 826416a"
 
   # --- G. Human-agent collaboration ---
   # G1: Is a human modelled as a special kind of agent, a distinct principal type, or not modelled?
   G1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Users are first-class in the identity model with DISTINCT TYPES: UserTokenIdentifier (an OAuth2 token from the user's IdP) and UserIdIdentifier (a known user id), so 'which user' is never a bare string."
+    evidence: "src/bedrock_agentcore/services/identity.py:64-73 @ 826416a"
   # G2: Shared rooms, channels, or workspaces?
   G2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Memory namespaces give /org/ and /actor/ hierarchy, which is a workspace-shaped boundary, but there is no shared human space."
+    evidence: "src/bedrock_agentcore/memory/client.py:131-134 @ 826416a"
   # G3: Task threads humans can read and post into?
   G3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A human completes an OAuth authorization out of band via on_auth_url while the agent polls with a TokenPoller; AG-UI provides a UI protocol."
+    evidence: "src/bedrock_agentcore/identity/auth.py:28,33 @ 826416a"
   # G4: Mentions or directed addressing?
   G4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No addressing of participants."
+    evidence: "src/bedrock_agentcore/ @ 826416a"
   # G5: Approval gates. Blocking or advisory? Durable while pending?
   G5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "OAuth CONSENT is the only human decision modelled - there is no approval on a tool call, no elicitation model, and no decision record. HumanLayer remains the C11 answer."
+    evidence: "src/bedrock_agentcore/identity/auth.py:23-35 @ 826416a"
   # G6: Mid-run intervention: can a human redirect without restarting?
   G6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A human can grant or withhold OAuth consent, and force_healthy is an operator action; there is no steer/interrupt surface."
+    evidence: "src/bedrock_agentcore/runtime/models.py:168 @ 826416a"
   # G7: Agent status and presence visible to humans?
   G7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "PingStatus (Healthy | HealthyBusy) plus explicit *_FAILED terminal statuses on resource lifecycles make agent and resource state legible."
+    evidence: "src/bedrock_agentcore/runtime/models.py:9-13 @ 826416a; src/bedrock_agentcore/policy/client.py:18"
   # G8: Notifications or escalation when an agent is blocked?
   G8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "on_auth_url is a notification callback for an authorization URL; there is no escalation model."
+    evidence: "src/bedrock_agentcore/identity/auth.py:28 @ 826416a"
   # G9: Shared scratchpad or working surface?
   G9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No shared scratchpad."
+    evidence: "src/bedrock_agentcore/ @ 826416a"
   # G10: Can a human see the context an agent is operating on?
   G10:
     verdict: unknown
-    note:
-    evidence:
+    note: "Transcript visibility is server-side; not inspectable from the SDK; the SDK provides tracing hooks and CloudWatch/X-Ray integration."
+    evidence: "src/bedrock_agentcore/runtime/tracing.py @ 826416a"
 
   # --- H. Context and memory ---
   # H1: Which of these exist as *separate* concepts: prompt context, working state, session history, ...
   H1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "SECOND REAL MEMORY SERVICE IN THE STUDY, and more structured than ADK's: memory is created with TYPED STRATEGIES - SEMANTIC, SUMMARIZATION, USER_PREFERENCE, CUSTOM (plus *_OVERRIDE variants) - so memory KIND is declared rather than implied."
+    evidence: "src/bedrock_agentcore/memory/constants.py:13-35 @ 826416a"
   # H2: Who owns memory: agent, human, workspace, task, or tenant?
   H2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Ownership is the namespace: /org/MyOrg/, /actor/Jane/, /strategies/{id}/actors/{actorId}/ - a hierarchical addressing model with exact-match and prefix-query forms."
+    evidence: "src/bedrock_agentcore/memory/constants.py:76-78 @ 826416a; src/bedrock_agentcore/memory/client.py:131-134"
   # H3: Can memory be shared between agents? At what granularity?
   H3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Namespace hierarchy makes org-level memory shared across actors by construction, with namespace_path prefix queries to read a subtree."
+    evidence: "src/bedrock_agentcore/memory/client.py:133-134 @ 826416a"
   # H4: Are there permissions on memory?
   H4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Server-side authorization is not inspectable, but the SDK narrows the blast radius: build_namespace_params requires exactly one of namespace or namespace_path and REFUSES WILDCARDS ('Wildcards (*) are not supported in namespaces'), so /actor/*/ cannot sweep every actor's memory."
+    evidence: "src/bedrock_agentcore/_utils/namespace.py:18-25 @ 826416a"
   # H5: Is provenance tracked — where a memory came from?
   H5:
     verdict: unknown
-    note:
-    evidence:
+    note: "MemoryRecord provenance fields are not fully visible from the SDK surface (server-side; not inspectable from the SDK); ADK remains the clear H5 answer."
+    evidence: "src/bedrock_agentcore/memory/models/ @ 826416a"
   # H6: Expiry, TTL, or forgetting?
   H6:
     verdict: unknown
-    note:
-    evidence:
+    note: "TTL/expiry on memory records is server-side; not inspectable from the SDK."
+    evidence: "src/bedrock_agentcore/memory/client.py @ 826416a"
   # H7: Summarisation or compaction. Automatic or explicit?
   H7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "SUMMARIZATION is a first-class declared strategy type with its own extraction configuration, so summarisation is configured rather than incidental."
+    evidence: "src/bedrock_agentcore/memory/constants.py:24,86 @ 826416a"
   # H8: Retrieval mechanism: vector, keyword, structured, agent-driven?
   H8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "SEMANTIC strategy plus a knowledge_base/ module provide retrieval; list_memory_records supports exact and prefix namespace queries."
+    evidence: "src/bedrock_agentcore/knowledge_base/ @ 826416a; src/bedrock_agentcore/memory/constants.py:23"
   # H9: Can an agent mutate its own memory mid-run?
   H9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The agent writes memory through the memory client; strategies determine how raw events become durable records."
+    evidence: "src/bedrock_agentcore/memory/client.py:288 @ 826416a"
   # H10: Conflict resolution on concurrent writes?
   H10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Org-level namespaces are shared mutable memory across actors within a memory resource."
+    evidence: "src/bedrock_agentcore/memory/client.py:134 @ 826416a"
   # H11: Is memory in the same store as execution state, or separate?
   H11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Memory (typed strategies, namespaced) is a distinct service from knowledge_base/ (documents) and from runtime state - three separate concerns behind three modules."
+    evidence: "src/bedrock_agentcore/memory/ @ 826416a; src/bedrock_agentcore/knowledge_base/"
 
   # --- I. Tools and capabilities ---
   # I1: Are tools bound to agents statically, or resolved dynamically?
   I1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A tools/ module plus a gateway/ service that fronts tools - the right place for credential injection and policy enforcement."
+    evidence: "src/bedrock_agentcore/gateway/ @ 826416a"
   # I2: Is there a capability abstraction distinct from tool implementation?
   I2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No declared capability model."
+    evidence: "src/bedrock_agentcore/tools/ @ 826416a"
   # I3: Is there a registry of available tools?
   I3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The gateway is a managed tool registry; credential providers are a registry for what tools can authenticate to."
+    evidence: "src/bedrock_agentcore/gateway/ @ 826416a"
   # I4: Tool scoping — can an agent be restricted to a subset?
   I4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Cedar policies scope what a principal may do to which resource, and OAuth scopes/resources/audiences are explicit parameters on every token request."
+    evidence: "src/bedrock_agentcore/identity/auth.py:26-29 @ 826416a; src/bedrock_agentcore/policy/client.py:35"
   # I5: Are tools versioned?
   I5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No tool versioning."
+    evidence: "src/bedrock_agentcore/tools/ @ 826416a"
   # I6: How are credentials supplied to a tool?
   I6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "BEST CREDENTIAL MODEL IN THE STUDY alongside ADK's: OAuth2 and API-key credential providers as CRUD resources, get_resource_oauth2_token / get_resource_api_key for use, and @requires_access_token / @requires_api_key decorators injecting into a named parameter."
+    evidence: "src/bedrock_agentcore/identity/auth.py:23-35 @ 826416a; src/bedrock_agentcore/services/identity.py:105-111"
   # I7: OAuth or delegated user credentials?
   I7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "THREE NAMED FLOWS, verified live: M2M | USER_FEDERATION | ON_BEHALF_OF_TOKEN_EXCHANGE, with scopes, resources, audiences, callback_url, force_authentication, custom_state (callback validation) and custom_parameters. The most precise delegated-credential surface in the study."
+    evidence: "src/bedrock_agentcore/identity/auth.py:23-35 @ 826416a; verified live against bedrock-agentcore 1.22.0 (PyPI, 2026-08-26)"
   # I8: Can policy intercept a tool call before execution?
   I8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A CEDAR POLICY ENGINE as a managed resource: create_policy_engine / create_policy with definition={'cedar': {'statement': 'permit(principal, action, resource);'}}, plus policy generation. Formal semantics rather than a bespoke rule DSL."
+    evidence: "src/bedrock_agentcore/policy/client.py:30-37 @ 826416a"
   # I9: Approval gates on specific tools?
   I9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Cedar permits or forbids, and OAuth consent gates a user-federated token; there is no per-call human approval."
+    evidence: "src/bedrock_agentcore/policy/client.py:35 @ 826416a"
   # I10: Do tools execute inside or outside the agent's sandbox?
   I10:
     verdict: unknown
-    note:
-    evidence:
+    note: "Tool execution isolation is server-side; not inspectable from the SDK; a gateway fronts tools and a shell exists in the runtime."
+    evidence: "src/bedrock_agentcore/runtime/shell/ @ 826416a"
 
   # --- J. Security and identity ---
   # J1: What identity does an agent authenticate as?
   J1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The agent has its own workload identity and obtains tokens under it - a genuine agent principal, not a bearer of someone else's credentials."
+    evidence: "src/bedrock_agentcore/services/identity.py:140-155 @ 826416a"
   # J2: Authentication mechanism for agent-to-platform?
   J2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "AWS SigV4 via boto3 for the planes, plus OAuth2/OIDC and API-key credential providers for outbound, plus JWT-based workload tokens."
+    evidence: "src/bedrock_agentcore/services/identity.py:80-90 @ 826416a"
   # J3: Authorisation model: RBAC, ABAC, capability tokens, none?
   J3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "CEDAR: permit(principal, action, resource) as the authorization language, with a policy engine per environment and policies as CRUD resources. Formally specified, with an existing analysis toolchain."
+    evidence: "src/bedrock_agentcore/policy/client.py:30-37 @ 826416a"
   # J4: Secret storage and injection?
   J4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Credentials never live in the agent: they are fetched per call from a credential provider via get_resource_oauth2_token / get_resource_api_key and injected into a named parameter by decorator."
+    evidence: "src/bedrock_agentcore/identity/auth.py:23-25 @ 826416a"
   # J5: Per-agent credentials, or shared platform credentials?
   J5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Per-agent workload identity plus per-provider credentials, with force_authentication to bypass a cached token deliberately."
+    evidence: "src/bedrock_agentcore/identity/auth.py:31 @ 826416a"
   # J6: Can an agent act as a user? Is that impersonation or delegation?
   J6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "BEST DELEGATION IN THE STUDY: ON_BEHALF_OF_TOKEN_EXCHANGE as a named flow, and workload tokens obtainable for a federated JWT or a specific user id - so the agent can act as itself OR on a named user's behalf, with the distinction visible in the call."
+    evidence: "src/bedrock_agentcore/identity/auth.py:30 @ 826416a; src/bedrock_agentcore/services/identity.py:147-154"
   # J7: Tenant isolation: logical, or enforced at runtime?
   J7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "AWS accounts and regions are the tenancy boundary with IAM enforcing it, plus /org/ memory namespaces. Strongest tenancy in the study, by inheritance rather than by design."
+    evidence: "src/bedrock_agentcore/services/identity.py:79-88 @ 826416a"
   # J8: Network and filesystem isolation?
   J8:
     verdict: unknown
-    note:
-    evidence:
+    note: "Runtime isolation is managed (server-side; not inspectable from the SDK)."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
   # J9: Is there an audit log? Is it tamper-evident?
   J9:
     verdict: unknown
-    note:
-    evidence:
+    note: "Audit is CloudTrail/CloudWatch server-side (server-side; not inspectable from the SDK); the SDK adds tracing hooks and user-agent attribution."
+    evidence: "src/bedrock_agentcore/runtime/tracing.py @ 826416a"
   # J10: Where are policy decisions enforced — control plane, runtime, or tool gateway?
   J10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Policy is enforced by a dedicated Cedar policy engine resource, separate from the agent - the cleanest separation of policy from execution in the study."
+    evidence: "src/bedrock_agentcore/policy/client.py:20-24 @ 826416a"
 
   # --- K. Sandbox and isolation ---
   # K1: Is there a workspace or sandbox concept? What is its lifecycle?
   K1:
     verdict: unknown
-    note:
-    evidence:
+    note: "Sandbox provisioning is managed (server-side; not inspectable from the SDK)."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
   # K2: Persistent filesystem across runs?
   K2:
     verdict: unknown
-    note:
-    evidence:
+    note: "Sandbox persistence is server-side; not inspectable from the SDK."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
   # K3: Snapshot and restore?
   K3:
     verdict: unknown
-    note:
-    evidence:
+    note: "Suspend/resume is server-side; not inspectable from the SDK."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
   # K4: Network egress rules?
   K4:
     verdict: unknown
-    note:
-    evidence:
+    note: "Egress control is server-side; not inspectable from the SDK. Note the SDK does NOT ship an SSRF guard of its own (contrast Pydantic AI)."
+    evidence: "src/bedrock_agentcore/tools/ @ 826416a"
   # K5: Container, microVM, or none?
   K5:
     verdict: unknown
-    note:
-    evidence:
+    note: "Isolation technology is managed and not named in the SDK (server-side; not inspectable from the SDK)."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
   # K6: Resource quotas: CPU, memory, disk, wall clock?
   K6:
     verdict: unknown
-    note:
-    evidence:
+    note: "Resource quotas are AWS service limits (server-side; not inspectable from the SDK)."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
   # K7: How are secrets injected without landing in the image or logs?
   K7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Credentials are injected per call by decorator from a credential provider, so a secret is fetched at point of use rather than living in the environment."
+    evidence: "src/bedrock_agentcore/identity/auth.py:23-25 @ 826416a"
   # K8: Arbitrary code execution? Browser execution?
   K8:
     verdict: unknown
-    note:
-    evidence:
+    note: "Code execution is a managed AgentCore capability not surfaced in this SDK (server-side; not inspectable from the SDK)."
+    evidence: "src/bedrock_agentcore/runtime/shell/ @ 826416a"
   # K9: Is the sandbox pluggable, or a fixed implementation?
   K9:
     verdict: unknown
-    note:
-    evidence:
+    note: "No sandbox provider interface in the SDK (server-side; not inspectable from the SDK)."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
 
   # --- L. Orchestration and scheduling ---
   # L1: Does it distinguish agent coordination from workflow orchestration?
   L1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Cleanest separation of POLICY from execution in the study: the policy engine is its own managed resource with its own lifecycle, not a library inside the agent."
+    evidence: "src/bedrock_agentcore/policy/client.py:20-24 @ 826416a"
   # L2: Topology: DAG, cyclic graph, supervisor, planner, event-driven, queue?
   L2:
     verdict: unknown
-    note:
-    evidence:
+    note: "Workflow modelling is server-side; not inspectable from the SDK."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
   # L3: Cron or scheduled triggers?
   L3:
     verdict: unknown
-    note:
-    evidence:
+    note: "Scheduling is server-side; not inspectable from the SDK."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
   # L4: Dynamic task spawning at runtime?
   L4:
     verdict: unknown
-    note:
-    evidence:
+    note: "Dynamic task spawning is server-side; not inspectable from the SDK."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
   # L5: Fan-out / fan-in?
   L5:
     verdict: unknown
-    note:
-    evidence:
+    note: "Fan-out/fan-in is server-side; not inspectable from the SDK."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
   # L6: Subagents. Are they first-class, or just nested calls?
   L6:
     verdict: unknown
-    note:
-    evidence:
+    note: "Sub-agents are not modelled in the SDK (server-side; not inspectable from the SDK)."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
   # L7: Retry and backoff policy — declarative or hand-rolled?
   L7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Bounded polling with WaitConfig and explicit terminal failure statuses; no retry policy for agent work."
+    evidence: "src/bedrock_agentcore/_utils/config.py @ 826416a"
   # L8: Compensation or rollback on failure?
   L8:
     verdict: unknown
-    note:
-    evidence:
+    note: "Compensation is not visible in the SDK (server-side; not inspectable from the SDK). Recorded unknown rather than absent, since this is a client surface."
+    evidence: "src/bedrock_agentcore/ @ 826416a"
   # L9: Does cancellation propagate through the whole tree?
   L9:
     verdict: unknown
-    note:
-    evidence:
+    note: "Cancellation semantics are server-side; not inspectable from the SDK."
+    evidence: "src/bedrock_agentcore/runtime/models.py @ 826416a"
   # L10: Could this be replaced by Temporal or Restate, or is orchestration inseparable from the agent...
   L10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The SDK embeds no orchestration engine; identity, policy, memory and gateway are separate managed services composed by the caller."
+    evidence: "src/bedrock_agentcore/ @ 826416a"
 
   # --- M. Observability ---
   # M1: Which of these are modelled as telemetry objects: trace, run, step, LLM call, tool call, mess...
   M1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "runtime/tracing.py plus PingStatus and explicit resource lifecycle statuses; the substantive telemetry is CloudWatch and X-Ray server-side."
+    evidence: "src/bedrock_agentcore/runtime/tracing.py @ 826416a"
   # M2: Is telemetry keyed to agent, run, model, task, user, or tenant?
   M2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Correlation is by workload name, memory namespace, clientToken and AWS request ids; no trace id on the SDK surface."
+    evidence: "src/bedrock_agentcore/policy/client.py:250 @ 826416a"
   # M3: OpenTelemetry, proprietary, or none?
   M3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No OpenTelemetry in the SDK; observability is CloudWatch and X-Ray. Note the good minor idea: build_user_agent_suffix / integration_source attributes calls to a client library, which is how a service deprecates a client version with data."
+    evidence: "src/bedrock_agentcore/_utils/user_agent.py @ 826416a"
   # M4: Is there a documented, stable event schema?
   M4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Typed enums and pydantic models throughout (PingStatus, StrategyType, MemoryStrategyTypeEnum, UserTokenIdentifier, UserIdIdentifier), plus snake_case/camelCase conversion at the boundary."
+    evidence: "src/bedrock_agentcore/memory/constants.py:13-35 @ 826416a"
   # M5: Cost and token accounting. Per what unit?
   M5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A payments/ module exists and AWS billing applies, but there is no agent-level cost accounting or budget."
+    evidence: "src/bedrock_agentcore/payments/ @ 826416a"
   # M6: Latency breakdown by phase?
   M6:
     verdict: unknown
-    note:
-    evidence:
+    note: "Phase timing is server-side; not inspectable from the SDK."
+    evidence: "src/bedrock_agentcore/runtime/tracing.py @ 826416a"
   # M7: Error taxonomy?
   M7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Explicit terminal failure statuses (CREATE_FAILED, UPDATE_FAILED, DELETE_FAILED, GENERATE_FAILED) and typed exceptions, so failure is a state rather than a timeout."
+    evidence: "src/bedrock_agentcore/policy/client.py:18,274 @ 826416a"
   # M8: Can the event stream reconstruct a run after the fact — replay or audit?
   M8:
     verdict: unknown
-    note:
-    evidence:
+    note: "Run reconstruction is server-side; not inspectable from the SDK."
+    evidence: "src/bedrock_agentcore/runtime/ @ 826416a"
 
   # --- N. Multi-tenancy and enterprise ---
   # N1: Resource hierarchy: org, workspace, project, environment?
   N1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "AWS account > region > resource, with memory namespaces adding /org/ and /actor/ levels beneath."
+    evidence: "src/bedrock_agentcore/memory/constants.py:76-78 @ 826416a"
   # N2: RBAC model and its granularity?
   N2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "IAM for the control and data planes, and Cedar for in-application authorization - two layers, both formally specified."
+    evidence: "src/bedrock_agentcore/policy/client.py:35 @ 826416a"
   # N3: Quotas and cost limits. Enforced or advisory?
   N3:
     verdict: unknown
-    note:
-    evidence:
+    note: "Quotas are AWS service limits and billing (server-side; not inspectable from the SDK); no agent-level budget in the SDK. Omnigent remains the only enforcement answer."
+    evidence: "src/bedrock_agentcore/payments/ @ 826416a"
   # N4: dev / staging / prod separation?
   N4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Regions and accounts separate environments, and a policy engine is a per-environment resource so authorization can differ per stage."
+    evidence: "src/bedrock_agentcore/policy/client.py:60-80 @ 826416a"
   # N5: Deployment promotion path?
   N5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Policy generation produces reviewable assets that could gate promotion, and config_bundle/ packages configuration, but no promotion workflow exists."
+    evidence: "src/bedrock_agentcore/policy/client.py:284-290 @ 826416a"
   # N6: Agent catalog scoped to a tenant?
   N6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "list_* methods on credential providers, policy engines, policies and generations give a catalog of every governed resource."
+    evidence: "src/bedrock_agentcore/policy/client.py:39-57 @ 826416a"
   # N7: Audit retention controls?
   N7:
     verdict: unknown
-    note:
-    evidence:
+    note: "Retention is server-side; not inspectable from the SDK."
+    evidence: "src/bedrock_agentcore/memory/client.py @ 826416a"
   # N8: Is multi-tenancy in the OSS core, or reserved for a commercial tier?
   N8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Multi-tenancy is inherited from AWS accounts and IAM rather than modelled - the strongest boundary in the study, and free."
+    evidence: "src/bedrock_agentcore/services/identity.py:79-88 @ 826416a"
 
   # --- O. API and protocol surface ---
   # O1: List the actual primary endpoints or SDK entry points. Verbatim.
   O1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Two boto3-backed APIs (control plane and data plane) with endpoint overrides, plus A2A and AG-UI protocol adapters and an MCP-style gateway."
+    evidence: "src/bedrock_agentcore/services/identity.py:80-88 @ 826416a"
   # O2: Is the API resource-oriented or RPC-flavoured?
   O2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Fully resource-oriented: create/get/list/update/delete on credential providers, policy engines, policies, generations and memories."
+    evidence: "src/bedrock_agentcore/policy/client.py:39-57 @ 826416a"
   # O3: Streaming: SSE, WebSocket, long-poll, gRPC stream?
   O3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Streaming via the runtime app and AG-UI; TokenPoller for long-running authorization waits."
+    evidence: "src/bedrock_agentcore/runtime/ag_ui.py @ 826416a"
   # O4: Webhooks or outbound callbacks?
   O4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "callback_url plus custom_state give an OAuth redirect callback with CSRF validation; there is no general webhook surface."
+    evidence: "src/bedrock_agentcore/identity/auth.py:30-33 @ 826416a"
   # O5: Which standards are implemented: MCP, A2A, ACP, OTel, OpenAI-compatible?
   O5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "OAuth2/OIDC, JWT, A2A, AG-UI, MCP-style gateway, and CEDAR as the policy language - a strong preference for existing standards over bespoke formats throughout."
+    evidence: "src/bedrock_agentcore/policy/client.py:35 @ 826416a; src/bedrock_agentcore/runtime/a2a.py"
   # O6: Is the API versioned? Stability commitment?
   O6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Semantic SDK versioning (1.22.0) plus a DeprecationWarning path for superseded kwargs (namespaces -> namespace_templates) - the same one-deprecation-window discipline ADR-0010 adopted, applied to API parameters."
+    evidence: "src/bedrock_agentcore/_utils/namespace.py:32-50 @ 826416a; verified live against bedrock-agentcore 1.22.0 (PyPI, 2026-08-26)"
   # O7: Is there a separate northbound (client) and southbound (runtime) API?
   O7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "EXPLICIT CONTROL-PLANE / DATA-PLANE SPLIT, with separate clients, separate method allow-lists and separate endpoint overrides - administration and use are different surfaces with different permissions."
+    evidence: "src/bedrock_agentcore/services/identity.py:94-111 @ 826416a"
 
   # --- P. Storage ---
   # P1: What datastores are required to run it?
   P1:
     verdict: unknown
-    note:
-    evidence:
+    note: "Storage is managed (server-side; not inspectable from the SDK); the SDK models namespaces and strategies only."
+    evidence: "src/bedrock_agentcore/memory/client.py @ 826416a"
   # P2: What is treated as authoritative, strongly consistent state?
   P2:
     verdict: unknown
-    note:
-    evidence:
+    note: "Source of truth is server-side (server-side; not inspectable from the SDK)."
+    evidence: "src/bedrock_agentcore/memory/client.py @ 826416a"
   # P3: What is event-stream or append-only?
   P3:
     verdict: unknown
-    note:
-    evidence:
+    note: "Log shape is server-side; not inspectable from the SDK."
+    evidence: "src/bedrock_agentcore/ @ 826416a"
   # P4: Where do large artifacts go?
   P4:
     verdict: unknown
-    note:
-    evidence:
+    note: "Blob storage is server-side; not inspectable from the SDK; a knowledge_base/ module exists."
+    evidence: "src/bedrock_agentcore/knowledge_base/ @ 826416a"
   # P5: Is there a vector store? Required or optional?
   P5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The SEMANTIC memory strategy and knowledge_base/ imply managed vector retrieval, exposed through declared strategy configuration rather than a raw vector API."
+    evidence: "src/bedrock_agentcore/memory/constants.py:23,86 @ 826416a"
   # P6: Is storage pluggable, or hardcoded?
   P6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No pluggable storage backend - and none is possible, since every store is an AWS managed service. NO LOCAL IMPLEMENTATION OF ANYTHING (contrast ADK's InMemory* for six subsystems)."
+    evidence: "src/bedrock_agentcore/memory/client.py @ 826416a"
 
   # --- Q. Licensing and commercial ---
   # Q1: Exact license, including any per-directory variation.
   Q1:
     verdict: first_class
-    note: "Apache-2.0."
-    evidence: "https://github.com/aws/bedrock-agentcore-sdk-python (GitHub API, read 2026-08-26; 755★, pushed 2026-08-25)"
+    note: "Apache-2.0 with a NOTICE.txt."
+    evidence: "LICENSE.txt @ 826416a"
   # Q2: Are there enterprise-only components missing from the OSS repo?
   Q2:
     verdict: first_class
-    note: "Managed runtime, identity, gateway and memory are all closed. Only SDK, CLI and starter toolkit are open."
-    evidence: "https://github.com/aws/bedrock-agentcore-sdk-python (GitHub API, read 2026-08-26; 755★, pushed 2026-08-25)"
+    note: "LEAST FAVOURABLE OPEN-CORE POSITION IN THE STUDY: the SDK is Apache-2.0 and does nothing without paid managed services. There is no local implementation of identity, policy, memory or gateway - contrast ADK, which ships an in-memory implementation of six subsystems behind the same interfaces while still selling the managed ones."
+    evidence: "src/bedrock_agentcore/services/identity.py:76-90 @ 826416a"
   # Q3: SaaS or hosted-service restrictions?
   Q3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No SaaS restriction under Apache-2.0."
+    evidence: "LICENSE.txt @ 826416a"
   # Q4: Trademark constraints on derived works?
   Q4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "AWS and Bedrock naming; Apache-2.0 grants no trademark rights."
+    evidence: "NOTICE.txt @ 826416a"
   # Q5: Network copyleft (AGPL, SSPL) implications for a hosted product?
   Q5:
     verdict: absent
-    note: "No network copyleft. Apache-2.0/MIT only across the whole study."
-    evidence: "https://github.com/aws/bedrock-agentcore-sdk-python (GitHub API, read 2026-08-26; 755★, pushed 2026-08-25)"
+    note: "No network copyleft."
+    evidence: "LICENSE.txt @ 826416a"
   # Q6: Verdict: `USE` / `INTEGRATE` / `REFERENCE_ONLY` / `AVOID`, with reasoning.
   Q6:
     verdict: first_class
-    note: "REFERENCE_ONLY — SDK is Apache-2.0; the interesting control plane is closed and docs-only."
-    evidence: "https://github.com/aws/bedrock-agentcore-sdk-python (GitHub API, read 2026-08-26; 755★, pushed 2026-08-25)"
+    note: "REFERENCE_ONLY. The DESIGNS port and several are the best in the study - workload identity, three token variants, Cedar, typed memory strategies, Healthy vs HealthyBusy - but the code is a thin client over services we cannot run."
+    evidence: "LICENSE.txt @ 826416a"
 
   # --- R. Developer experience ---
   # R1: Time from clone to a running agent. Actual elapsed minutes.
   R1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "pip install bedrock-agentcore works cleanly and the types are inspectable offline, but NOTHING RUNS without an AWS account and AgentCore access - the least favourable local-development story in the study."
+    evidence: "verified live against bedrock-agentcore 1.22.0 (PyPI, 2026-08-26)"
   # R2: How many concepts before "hello world"?
   R2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Few SDK concepts (workload, credential provider, policy engine, memory), but each maps to a managed service with its own AWS-side configuration."
+    evidence: "src/bedrock_agentcore/ @ 826416a"
   # R3: Is there a local dev loop? Hot reload?
   R3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No local mode. CP_ENDPOINT_OVERRIDE / DP_ENDPOINT_OVERRIDE allow pointing at a test endpoint, but there is no in-memory or local implementation of any service."
+    evidence: "src/bedrock_agentcore/services/identity.py:82-87 @ 826416a"
   # R4: How do you debug a stuck run?
   R4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Tracing hooks and explicit failure statuses help, but debugging depends on CloudWatch and X-Ray."
+    evidence: "src/bedrock_agentcore/runtime/tracing.py @ 826416a"
   # R5: Can an agent be unit tested? Is there a test harness?
   R5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "tests/ and tests_integ/ with a TESTING.md, and endpoint overrides make integration tests possible - but unit-testing agent behaviour requires mocking boto3, since no service has a local implementation."
+    evidence: "TESTING.md @ 826416a"
   # R6: Deployment story?
   R6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "AWS-managed deployment with a config_bundle for packaging."
+    evidence: "src/bedrock_agentcore/config_bundle/ @ 826416a"
   # R7: CLI ergonomics — try the equivalent of `init`, `agent add`, `run`.
   R7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "The SDK is a library; a shell exists in the runtime, but agent management is via AWS tooling."
+    evidence: "src/bedrock_agentcore/runtime/shell/ @ 826416a"
 
   # --- S. Hard scenarios ---
   # S1: Delegated authority
   S1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class_answer
+    note: "BEST ANSWER IN THE STUDY. The agent has its own WORKLOAD IDENTITY and can obtain a token three ways - as itself, for a federated JWT (get_workload_access_token_for_jwt), or for a known user id (get_workload_access_token_for_user_id) - with three named flows M2M | USER_FEDERATION | ON_BEHALF_OF_TOKEN_EXCHANGE, typed user identifiers, custom_state for callback validation, and Cedar policies in which 'principal' is a first-class term. Omnigent gives a HUMAN a delegated grant; this gives the AGENT a principal and a way to act on someone's behalf."
+    evidence: "src/bedrock_agentcore/services/identity.py:140-155 @ 826416a; src/bedrock_agentcore/identity/auth.py:30; verified live against bedrock-agentcore 1.22.0 (PyPI, 2026-08-26)"
   # S2: Torn side effect
   S2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "No effect ledger in the SDK, but clientToken is a caller-supplied idempotency token applied uniformly across mutating control-plane operations - the ADR-0014 key as a platform-wide convention rather than a per-feature addition."
+    evidence: "src/bedrock_agentcore/policy/client.py:250,267-268 @ 826416a"
   # S3: Upgrade mid-flight
   S3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No agent version and no pin anywhere in the SDK. Twelve projects."
+    evidence: "src/bedrock_agentcore/services/identity.py @ 826416a"
   # S4: Concurrent memory write
   S4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "Namespaces partition memory by org and actor, and typed strategies separate semantic recall from summarisation from user preferences, so concurrent writes to different KINDS do not contend. Weaker than ADK's schema-validated scopes because a namespace path is a convention - though wildcards are refused, which bounds the damage."
+    evidence: "src/bedrock_agentcore/memory/constants.py:13-35,76-78 @ 826416a; src/bedrock_agentcore/_utils/namespace.py:18-25"
   # S5: Cancellation tree
   S5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "Cancellation semantics are not visible in the SDK."
+    evidence: "src/bedrock_agentcore/runtime/models.py @ 826416a"
   # S6: Silent context loss
   S6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "SUMMARIZATION is a declared, configured memory strategy so context reduction is named rather than incidental - but no loss signal is emitted to the caller."
+    evidence: "src/bedrock_agentcore/memory/constants.py:24 @ 826416a"
   # S7: Poison message
   S7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "Not visible in the SDK."
+    evidence: "src/bedrock_agentcore/ @ 826416a"
   # S8: Tenant leak
   S8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "AWS accounts, regions and IAM are the boundary - strongest in the study - plus /org/ namespaces and a refusal of wildcard namespace queries. But enforcement is server-side and unverifiable from here."
+    evidence: "src/bedrock_agentcore/_utils/namespace.py:23-25 @ 826416a"
   # S9: Runaway spend
   S9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "A payments/ module exists but is not a budget control; AWS billing is not an agent-level answer."
+    evidence: "src/bedrock_agentcore/payments/ @ 826416a"
   # S10: Zombie sandbox
   S10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "PingStatus distinguishes Healthy from HealthyBusy - idle-alive from working-alive - and force_healthy is an explicit operator recovery action. The most precise health model in the study; reaping itself is server-side."
+    evidence: "src/bedrock_agentcore/runtime/models.py:9-13,168 @ 826416a"
 
 object_model: |
-  # ASCII tree of resources that actually exist
+  Workload (the agent)          has its own identity and access tokens
+   `-- workload_access_token    3 variants: bare | for_jwt | for_user_id
 
-strongest_ideas: []
+  CredentialProvider            CRUD resources, control plane
+   |-- OAuth2CredentialProvider create / get / list / update / delete
+   `-- ApiKeyCredentialProvider create / get / list / delete
 
-weakest_choices: []
+  PolicyEngine                  create / get / list / update / delete
+   `-- Policy                   Cedar: permit(principal, action, resource)
+        `-- PolicyGeneration    natural language -> reviewable policy ASSETS
 
-reusable_components: []
-  # - component: 
-  #   decision: INTEGRATE   # BUILD|INTEGRATE|ADOPT_AS_STANDARD|REUSE|DEFER
-  #   note: 
+  Memory                        create / update / delete
+   |-- strategies[]             SEMANTIC | SUMMARIZATION | USER_PREFERENCE
+   |                            | CUSTOM  (+ *_OVERRIDE variants)
+   `-- MemoryRecord             addressed by hierarchical NAMESPACE
+                                /org/MyOrg/ - /actor/Jane/
+                                /strategies/{id}/actors/{actorId}/
 
-lessons: []
+  Gateway, KnowledgeBase, Tools, Payments, Evaluation, ConfigBundle
+  Runtime                       PingStatus: Healthy | HealthyBusy
 
-adr_impact: []
-  # - adr: ADR-0001
-  #   effect: confirms      # confirms|amends|challenges|neutral
-  #   note: 
+strongest_ideas:
+  - "A WORKLOAD IDENTITY for the agent itself, so the agent is a principal rather than a bearer of someone else's credentials."
+  - "Three token variants - as itself, for a federated JWT, for a known user id - making 'on whose behalf' an explicit dimension of every token request."
+  - "ON_BEHALF_OF_TOKEN_EXCHANGE as a NAMED flow, distinct from user federation. Delegation is not a special case of login."
+  - "UserTokenIdentifier and UserIdIdentifier as distinct model types, so 'which user' is never an untyped string."
+  - "CEDAR as the policy language: formal semantics, an existing verification toolchain, and principal/action/resource as language primitives. Choosing a verifiable standard over a bespoke DSL - the same instinct as choosing OTel over a proprietary trace format."
+  - "start_policy_generation: natural language in, generated Cedar policies out as REVIEWABLE ASSETS you inspect before they take effect. The only instance in twelve projects of treating a policy as something you evaluate before enforcing."
+  - "Control-plane / data-plane split with separate clients, separate method allow-lists and separate endpoint overrides - administration and use are different surfaces with different permissions."
+  - "__getattr__ forwarding ONLY allow-listed method names, with an AttributeError that points at the boto3 docs - an SDK that cannot accidentally expose an unvetted API."
+  - "Typed memory strategies, with USER_PREFERENCE as a kind distinct from semantic recall and summarisation. Different memory kinds have different write patterns, lifetimes and privacy consequences."
+  - "Hierarchical memory namespaces (/org/MyOrg/, /actor/Jane/) with exact-match and prefix-query variants."
+  - "REFUSING WILDCARDS in namespaces ('Wildcards (*) are not supported'), so /actor/*/ cannot sweep every actor's memory."
+  - "PingStatus.Healthy vs HealthyBusy - idle-alive and working-alive are different answers to a health probe, and conflating them is how supervisors kill busy workers or miss stuck ones."
+  - "wait_until_deleted as a distinct helper, acknowledging that deletion is asynchronous and code assuming otherwise races."
+  - "Explicit _FAILED_STATUSES (CREATE_FAILED, UPDATE_FAILED, DELETE_FAILED, GENERATE_FAILED) so failure is a terminal STATE rather than a timeout."
+  - "clientToken idempotency as a PLATFORM-WIDE convention on every mutating control-plane call, rather than a per-feature afterthought."
+  - "custom_state on the OAuth flow so applications can verify the validity of callbacks - CSRF protection on the consent redirect."
+  - "integration_source in the user-agent suffix, so a managed service can attribute calls to a client library and deprecate versions with data rather than announcements."
+  - "A DeprecationWarning path for a superseded kwarg (namespaces -> namespace_templates) - one-deprecation-window discipline applied to an API parameter."
+
+weakest_choices:
+  - "NO LOCAL IMPLEMENTATION OF ANYTHING. Without an AWS account the SDK does nothing - the least favourable open-core position in the study, and ADK proves it was avoidable by shipping InMemory* siblings behind the same interfaces."
+  - "Architecture is server-side and unreadable, so most findings are inference from API shapes: 52 of 173 probes are unknown rather than absent."
+  - "No agent versioning, and revocation is credential-level rather than agent-level."
+  - "Namespaces are conventions, not constraints - /actor/Jane/ can be misspelled in a way ADK's user: prefix cannot."
+  - "No approval or elicitation model beyond OAuth consent; no human decision on a tool call."
+  - "No OpenTelemetry in the SDK; observability is CloudWatch and X-Ray."
+  - "No SSRF or egress guard of its own, unlike Pydantic AI."
+  - "Total AWS coupling - deeper than Cloudflare's, because even identity and policy are managed services rather than libraries."
+
+reusable_components:
+  - component: "Workload identity for the agent"
+    decision: ADOPT_AS_STANDARD
+    note: "The agent must be a principal; best precedent in the study."
+  - component: "Three token variants (self / for-JWT / for-user)"
+    decision: ADOPT_AS_STANDARD
+    note: "Makes 'on whose behalf' explicit per request."
+  - component: "ON_BEHALF_OF_TOKEN_EXCHANGE as a named flow"
+    decision: ADOPT_AS_STANDARD
+    note: "Delegation deserves its own name, not a flag on login."
+  - component: "Typed user identifiers"
+    decision: REUSE
+    note: "'Which user' should not be a bare string."
+  - component: "Cedar as the policy language"
+    decision: INTEGRATE
+    note: "Formal semantics plus tooling; the only path to ADR-0013's shadow half."
+  - component: "Policy generation as reviewable assets"
+    decision: REUSE
+    note: "Inspect the candidate policy before it takes effect."
+  - component: "Control/data plane split with per-plane allow-lists"
+    decision: ADOPT_AS_STANDARD
+    note: "Administration and use are different surfaces."
+  - component: "Allow-listed dynamic forwarding"
+    decision: REUSE
+    note: "An SDK that cannot leak an unvetted API."
+  - component: "Typed memory strategies incl. USER_PREFERENCE"
+    decision: ADOPT_AS_STANDARD
+    note: "Memory KIND is orthogonal to memory SCOPE; we need both."
+  - component: "Hierarchical namespaces with prefix queries"
+    decision: REUSE
+    note: "Use alongside ADK's enforced scopes, not instead of them."
+  - component: "Refusing wildcards in namespace queries"
+    decision: ADOPT_AS_STANDARD
+    note: "Bounds the blast radius of a convention-based scope."
+  - component: "Healthy vs HealthyBusy"
+    decision: ADOPT_AS_STANDARD
+    note: "Idle-alive is not working-alive; matters for reaping."
+  - component: "wait_until_deleted"
+    decision: REUSE
+    note: "Deletion is asynchronous."
+  - component: "Explicit *_FAILED terminal statuses"
+    decision: ADOPT_AS_STANDARD
+    note: "Failure should be a state, not a timeout."
+  - component: "clientToken idempotency convention"
+    decision: ADOPT_AS_STANDARD
+    note: "Uniform across every mutating operation; feeds ADR-0014."
+  - component: "custom_state callback validation"
+    decision: REUSE
+    note: "CSRF protection on consent redirects."
+  - component: "Namespaces as the only scoping mechanism"
+    decision: BUILD
+    note: "Reject alone; pair with schema-enforced scopes."
+  - component: "SDK with no local implementation"
+    decision: BUILD
+    note: "Reject; ADK's in-memory siblings are the standard to meet."
+
+lessons:
+  - "BEST VINDICATION OF THE REBASED ADR-0001 RATIONALE. Phase 2 concluded agent identity is required for DELEGATION, POLICY ATTACHMENT and AUDIT rather than for durability - and AgentCore is exactly that: a workload identity whose entire purpose is obtaining scoped tokens and being named as a Cedar principal. Nothing about durability requires it; everything about authorization does. (confirms ADR-0001)"
+  - "CLOSES THE ADR-0007 LOOP. The amendment split Principal from Credential because ADK had credentials without principals and HumanLayer had decisions without principals. AgentCore has BOTH halves properly: a workload identity (principal) and credential providers as CRUD resources (credential), with three flows connecting them. This is the reference shape. (confirms ADR-0007)"
+  - "CEDAR CHANGES ADR-0013 FROM ASPIRATION TO PLAN. A formally specified policy language with an existing analysis toolchain makes 'is policy set B more permissive than A' a tractable question - which is exactly what shadow comparison needs, and twelve projects offered nothing for it. Plus start_policy_generation producing candidate policies as reviewable assets. AMEND ADR-0013 to adopt Cedar rather than writing a bespoke rule engine. (confirms ADR-0013)"
+  - "ADR-0008 GAINS MEMORY KINDS. ADK gave four SCOPES (who sees it, how long it lives). AgentCore adds orthogonal KINDS (SEMANTIC, SUMMARIZATION, USER_PREFERENCE, CUSTOM) - what sort of thing it is, and therefore how it is written and expired. Scope and kind are independent dimensions and our Recall interface needs both. (confirms and extends ADR-0008)"
+  - "FOURTH independent instance of A2A as an optional edge adapter alongside an internal model, with AG-UI too. Settled. (confirms ADR-0006)"
+  - "clientToken applies caller-supplied idempotency UNIFORMLY across every mutating control-plane call. Third ADR-0014 precedent and the most consistent: Cloudflare has explicit keys on durable work, AG2 has causation dedupe on replies, AWS makes it a platform convention. The lesson is UNIFORMITY - one convention across every mutating operation beats three mechanisms in three subsystems. (confirms ADR-0014)"
+  - "Healthy vs HealthyBusy is the most precise health model in the study, and it matters for the lost-worker problem: a supervisor that cannot distinguish idle-alive from working-alive either kills busy workers or fails to notice stuck ones."
+  - "TWELVE PROJECTS and still no agent version plus pin. Revocation exists here but at the credential level - you can revoke what an agent REACHES, not the agent itself. (confirms ADR-0011 negatively)"
+  - "EVIDENCE-CLASS LESSON: this is the only project where the evidence class degrades at SUBSYSTEM scale. 52 of 173 probes are unknown because I read a client SDK, not a service. Coding those as absent would have overstated nine gaps in the capability matrix. The absent-vs-unknown distinction earned its keep here."
+  - "OPEN-CORE ANTI-PATTERN: an Apache-2.0 SDK that does nothing without the paid service. ADK ships in-memory implementations of six subsystems behind identical interfaces and still sells the managed versions - which is the standard our own pluggable interfaces should meet."
+
+adr_impact:
+  - adr: ADR-0001
+    effect: confirms
+    note: "Workload identity exists purely for delegation, policy attachment and audit - the rebased rationale, vindicated."
+  - adr: ADR-0002
+    effect: neutral
+    note: "No Task/Run split visible in the SDK surface."
+  - adr: ADR-0003
+    effect: confirms
+    note: "No durable agent-to-agent messaging; A2A is an edge adapter."
+  - adr: ADR-0004
+    effect: neutral
+    note: "A client SDK, not an adapter contract."
+  - adr: ADR-0005
+    effect: confirms
+    note: "A managed gateway fronts tools; MCP-shaped, no capability model."
+  - adr: ADR-0006
+    effect: confirms
+    note: "Fourth independent instance of A2A as optional edge interop, with AG-UI alongside."
+  - adr: ADR-0007
+    effect: confirms
+    note: "Has BOTH halves: a workload principal AND credential providers, with three flows connecting them. Reference shape."
+  - adr: ADR-0008
+    effect: confirms
+    note: "Second real memory service, adding typed KINDS orthogonal to ADK's scopes."
+  - adr: ADR-0009
+    effect: neutral
+    note: "Sandboxing is managed and not inspectable - recorded unknown, not absent."
+  - adr: ADR-0010
+    effect: neutral
+    note: "No OTel in the SDK; CloudWatch/X-Ray server-side. integration_source attribution is a good minor idea."
+  - adr: ADR-0011
+    effect: confirms
+    note: "No agent version, no pin. Twelve projects. Revocation exists but at credential level only."
+  - adr: ADR-0012
+    effect: neutral
+    note: "No declared capability model."
+  - adr: ADR-0013
+    effect: confirms
+    note: "CEDAR - the first real precedent for verifiable policy, plus policy generation as reviewable assets."
+  - adr: ADR-0014
+    effect: confirms
+    note: "clientToken as a platform-wide idempotency convention. Third precedent, most uniform."
+  - adr: ADR-0015
+    effect: neutral
+    note: "No approval resource; human interaction is OAuth consent only."
