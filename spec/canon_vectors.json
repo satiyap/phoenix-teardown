@@ -1,0 +1,69 @@
+[
+  {
+    "n": 1,
+    "kind": "effect_key",
+    "payload": {},
+    "digest": "99b8e1c162394799246cfc64622837f444e7ec8b1c09a1fc8428a81128115f29"
+  },
+  {
+    "n": 2,
+    "kind": "effect_key",
+    "payload": {
+      "a": 1
+    },
+    "digest": "5ba8b395f3df58790a4e12060adbc9110dfd1aa877421ad4ec08fd28ac898bcb"
+  },
+  {
+    "n": 3,
+    "kind": "agent_definition",
+    "payload": {
+      "a": 1
+    },
+    "digest": "728021a557cbf3ef9483676c9c2da2952f23feb08c7b5797a9a0bd10a37f52a4"
+  },
+  {
+    "n": 4,
+    "kind": "effect_key",
+    "payload": {
+      "s": "café"
+    },
+    "digest": "57559b7e2b726eda36bc593080f468f8bfea9d1d195c078f0649179521d0e1e1"
+  },
+  {
+    "n": 5,
+    "kind": "effect_key",
+    "payload": {
+      "s": "café"
+    },
+    "digest": "57559b7e2b726eda36bc593080f468f8bfea9d1d195c078f0649179521d0e1e1"
+  },
+  {
+    "n": 6,
+    "kind": "effect_key",
+    "payload": {
+      "b": 2,
+      "a": 1
+    },
+    "digest": "cb9d48e93fa12f5f483075dc9a2a2c0415d8a87f6e44179d0c73b9686f6c4dc5"
+  },
+  {
+    "n": 7,
+    "kind": "effect_key",
+    "payload": {
+      "k": [
+        1,
+        2,
+        3
+      ]
+    },
+    "digest": "90aac871e9ac40d26d0352e50f151d8ebf57aea009413f1cfc3aca597718a89d"
+  },
+  {
+    "n": 8,
+    "kind": "effect_key",
+    "payload": {
+      "n": 1.0
+    },
+    "digest": "b43c826dcf9c5cb36251734fb9e39abe3c221476d42cf8e93c1aeda9cb8372ee"
+  }
+]

@@ -109,6 +109,9 @@ answered, all six synthesis deliverables final.
 | 3 Falsification | + Google AX, Omnigent, Cloudflare Agents, AG2, Pydantic AI, Google Agent Platform |
 | 4 Targeted | + HumanLayer, AWS AgentCore, Microsoft Agent Framework, Agent Control |
 | 5 Synthesis | domain model, reference architecture, build/reuse map, v0.1 boundary |
+| 6 Handoff | `DESIGN.md` + developer journey |
+| 7 Spikes | AG2 storage swap, definition pin — 47 gate tests, verification rules |
+| 8 Spec | 8 documents, 30 required invariant tests with negative controls |
 
 **173 recorded ADR impacts**: 96 confirms, 19 amends, 10 challenges, 48 neutral.
 Four ADRs did not exist before the evidence (0011 pinning, 0012 capabilities,
@@ -174,7 +177,8 @@ the only evidence that counts.
 
 ### Read next
 
-**Start with [`DESIGN.md`](DESIGN.md)** — the v0.1 architecture and design document,
+**To build: [`spec/`](spec/)** — the implementation specification (8 documents).
+**To understand why: [`DESIGN.md`](DESIGN.md)** — the v0.1 architecture and design document,
 including the ideal developer journey. It is the handoff artefact; everything below is
 the evidence behind it.
 

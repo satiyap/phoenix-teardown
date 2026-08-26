@@ -9,6 +9,11 @@ This document is the handoff. It states what we are building, why each piece is
 shaped the way it is, and — equally important — what we are deliberately not
 building.
 
+> **The implementation specification is in [`spec/`](spec/)** — eight documents
+> settling schemas, consistency, canonicalisation, events, transition authorization,
+> the API, the adapter protocol, and conformance. This document is the *why*; the spec
+> is the *exactly what*.
+>
 > **Two scopes, named separately.** This document describes the **target
 > architecture**. The **v0.1 shipment** is a subset — `Task`, agent revocation, the
 > live conformance-bench layer and `Recall` are all deferred, and messaging is
