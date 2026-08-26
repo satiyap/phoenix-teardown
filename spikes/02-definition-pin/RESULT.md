@@ -1,83 +1,127 @@
 # Spike 02 — the definition pin, end to end
 
-**Verdict: PASS.** ADR-0011's mechanism works and is cheap.
-**Date:** 2026-08-26 · **Duration:** ~20 min · **8/8 tests pass**
+**Verdict: PASS**, on the revised gate. **24/24 tests**, plus a cross-process proof.
+**Date:** 2026-08-26 · **Revised** after review found v1 was a unit sketch with
+unsafe canonicalisation.
 
-## The gate
+## What was wrong with v1
 
-> Digest an agent definition, checkpoint, edit the definition, resume, confirm
-> `INCOMPATIBLE`.
+The review was right on both counts.
 
-Plus one addition I made, because it is the entire justification for the ADR: prove
-the **verified LangGraph failure mode** is actually prevented.
+**It was tautological.** Hash an object, keep the hash, compare it later — all in one
+process, with a dict for state, no adapter, no restart, and no assertion that the
+check happened *before* execution.
 
-## Result
+**The canonicalisation was unsafe.** Demonstrated, not argued:
 
-```
-Cannot resume run r1: definition_digest changed
-  ('d920fe4d...' -> 'f57514c7...'). The agent definition or adapter was modified
-  after this run checkpointed. Start a new run, or restore the prior definition.
-```
-
-The message has the three parts DESIGN.md §5 requires: **what was refused**, **the
-mechanism** (which field changed, with both values), and **the alternative**.
-
-## What the 8 tests establish
-
-| Test | Property |
+| Defect | v1 behaviour |
 |---|---|
-| `resume_after_edit_is_incompatible` | **The gate.** An edited definition cannot resume |
-| `resume_unchanged_succeeds` | The pin is not so brittle that nothing resumes |
-| **`langgraph_failure_mode_is_prevented`** | A renamed tool **raises** instead of silently returning `[]` |
-| `version_bump_alone_does_not_invalidate` | A declared version is informational; bumping it does not break resume |
-| **`forgetting_to_bump_still_detected`** | Content changed, version did not → still caught. **This is the failure Omnigent cannot catch** |
-| `adapter_change_detected_separately` | Names *which* pin field moved (AX pins identity; we pin both) |
-| `digest_is_canonical_not_ordering_sensitive` | Key order does not change the digest |
-| `tool_reordering_does_not_invalidate` | Reordering a list is not a semantic change |
+| `default=str` admitted arbitrary objects | digest embedded `<Obj object at 0x104663e00>` — **a memory address**, so identical definitions in two processes produce different digests and *nothing would ever resume* |
+| NaN / Infinity | accepted; not canonical JSON |
+| Non-string keys | accepted |
+| Unicode | `café` (NFC) ≠ `cafe\u0301` (NFD) |
+| Tools | hashed **by name only** — schema, version, execution binding, approval mode and credential all invisible |
+| Duplicate tool names | silently collapsed |
 
-The two bolded tests are the ones that matter. Together they show the mechanism
-catches both failure modes the study found in the field: LangGraph's silent work loss
-(no version at all) and Omnigent's undetected upgrade (a version nobody pins).
+The first is the serious one, and it inverts the failure mode: a pin that varies per
+process does not cause false compatibility, it causes *nothing to resume at all*.
+
+## What v2 fixes
+
+**Canonicalisation now fails loudly.** `_canon()` walks the structure and raises
+`NonCanonical` with a JSON path for anything not stably serialisable. No `default=`
+fallback. NFC normalisation on all strings and keys. `allow_nan=False`.
+
+**A tool is not a name.** `ToolBinding(name, schema_digest, version,
+execution_binding, approval_mode, credential_ref)` — everything that changes what the
+agent *can do* is in the digest. Tools sort by name (order is not semantic) and
+duplicate names raise.
+
+**The adapter digest is derived, not supplied.** `AdapterContract(identity,
+protocol_version, integration_mode, declared_capabilities).digest`. A caller-supplied
+string was a hole.
+
+**Extensions are in the digest.** ADR-0012's installed behaviour changes execution, so
+it changes the pin. This resolves a question v1 left open.
+
+**Durable everything.** SQLite `definitions` (content-addressed, digest as primary
+key) and `runs` (pin columns + state), with a FK from run to definition.
+
+## The revised gate — all eight properties
+
+| # | Property | Tests |
+|---|---|---|
+| 1 | Equivalent definitions → identical digests | 2 (incl. tool reordering) |
+| 2 | **Every** execution-relevant change mismatches | 9 parametrised: instructions, tool name, schema, version, execution binding, approval mode, credential ref, added tool, extension |
+| 3 | Version-only change does not; forgetting to bump still caught | 2 |
+| 4 | Non-canonical values rejected | 6: object, NaN, Inf, non-string key, unicode, duplicate tools |
+| 5 | **Survives process restart** | 1 + a two-interpreter proof |
+| 6 | Definition / adapter-identity / adapter-digest fail **distinctly** | 1 (three assertions) |
+| 7 | **No adapter method runs before validation** | 2, via a tripwire adapter that raises if touched |
+| 8 | The executed artifact is the one whose digest was checked | 2 |
+
+### The cross-process proof
+
+Two separate OS processes, one file:
+
+```
+PROCESS-A wrote run r1, digest 42fc5a52cdc5
+PROCESS-B resumed : {'resumed_from': {'progress': '23 files'}}
+PROCESS-B refused edit: Cannot resume run r1: definition_digest changed
+                        ('42fc5a52cdc5fa21…' -> …)
+```
+
+The digest is stable across interpreters — which v1's `default=str` would have broken
+— and the edit is still refused after a genuine restart.
+
+### The ordering proof
+
+`TripwireAdapter` records every call and can raise on any. Two assertions:
+
+- on a pin mismatch, `tripwire.calls == []` — **the adapter was never touched**;
+- `start()` does not invoke the adapter either, and a valid resume invokes it
+  **exactly once**.
+
+### The artifact-identity proof
+
+`resume()` resolves the definition **from the registry by pinned digest**, so deleting
+the artifact makes resume refuse (`"no longer in the registry"`) rather than trusting
+the caller's in-memory object. The registry is content-addressed: storing the same
+definition twice yields one row.
 
 ## Design decisions this settles
 
-1. **`version` is excluded from the digest.** Deliberate: bumping it must not
-   invalidate checkpoints, and *forgetting* to bump it must not hide a real change.
-   Declared versions are for humans; digests are for compatibility. This is
-   ADR-0011 amendment 3 made concrete.
-2. **`mismatch()` returns the field name, not a boolean.** An error saying
-   "incompatible" sends an operator hunting; one saying `adapter_identity changed
-   ('acp:claude-code' -> 'acp:codex')` does not.
-3. **Canonicalisation is part of the contract, not an implementation detail.**
-   `sort_keys=True, separators=(",", ":")` and sorted tool lists. A pin that varies
-   by key order fails *randomly*, which is worse than one that never fires.
-4. **Four pin fields are enough** for v0.1: `definition_digest`,
-   `adapter_identity`, `adapter_digest`, `checkpoint_schema_version`. The
-   six-field version in ADR-0011 amendment 2 included two declared versions that
-   amendment 3 removed.
+1. **The declared version is excluded from the digest** — bumping it must not
+   invalidate a checkpoint, and forgetting to bump it must not hide a change.
+2. **Canonicalisation is a fail-closed contract**, not best-effort serialisation.
+3. **Tool identity is the full binding.** Renaming a schema or widening an approval
+   mode is an execution-relevant change.
+4. **Adapter digests are derived from a declared contract.**
+5. **Extensions are digested.**
+6. **`mismatch()` returns the field name**, so the error names what moved.
 
-## Cost
+## What is still not proven
 
-~90 lines of implementation. This is the cheapest of the four BUILD items and the
-one with the clearest verified justification, which is a good argument for doing it
-first in Tier 1.
-
-## What this does not prove
-
-- **No real checkpoint payload.** State is a dict; a production checkpoint carries
-  adapter-specific bytes whose *own* version is the `checkpoint_schema_version`
-  field.
-- **No escape hatch** (OQ-037). Accepted for v0.1: a false incompatibility costs a
-  restart, a false compatibility costs LangGraph's silent corruption. If operators
-  hit false positives often, the fix is an explicit recorded operator assertion —
-  never a loosened default.
-- **Digest inputs are not final.** `name`, `instructions`, `tools`, `capabilities`
-  today. Whether declared *extensions* (ADR-0012) belong in the digest is an open
-  design question for the spec: they change behaviour, so probably yes.
+- **SQLite, not Postgres**; no concurrent-resume test. Two workers resuming one run
+  simultaneously is a control-plane single-writer question, deferred to the spec.
+- **The checkpoint payload is a dict.** Real adapter state is opaque bytes whose own
+  format is what `checkpoint_schema_version` versions.
+- **No escape hatch** (OQ-037). Accepted: a false incompatibility costs a restart, a
+  false compatibility costs LangGraph's silent corruption.
+- **Cross-language canonicalisation is unspecified.** If a non-Python adapter ever
+  computes a digest, the JSON canonicalisation rules must be written down in the spec
+  (RFC 8785 / JCS is the obvious candidate).
 
 ## Reproduce
 
 ```bash
 cd spikes/02-definition-pin
-./.venv/bin/python -m pytest test_pin.py -q -s
+python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt
+./.venv/bin/python -m pytest test_gate.py -q      # 24 passed
 ```
+
+| File | What it is |
+|---|---|
+| `pin.py` | Canonical digest, `ToolBinding`, `AdapterContract`, `AgentDefinition`, `Pin` |
+| `runtime.py` | Durable `Store`, `Runtime`, `TripwireAdapter` |
+| `test_gate.py` | The eight-property gate |

@@ -1,142 +1,128 @@
 # Spike 01 — AG2 storage swap
 
-**Verdict: PASS.** `ag2.network` is approved for integration.
-**Date:** 2026-08-26 · **Duration:** ~1h
+**Verdict: CONDITIONAL PASS — integrate with a documented replacement of one
+method.** Not the unqualified PASS I first claimed.
+**Date:** 2026-08-26 · **Revised** after external review found the first verdict
+unsupported.
 
-## The gate
+## What was wrong with the first attempt
 
-From `synthesis/scope-reconciliation.md` §4:
+The original `test_oq024.py` **never called `Hub.find_envelope_by_causation()`**. It
+fabricated JSONL, cleared a local dict I had created myself, and scanned the WAL by
+hand. That is a tautology dressed as a gate. The reviewer was right, and the
+`RESULT.md` reproduce command also omitted the one file that was failing
+(`test_gate.py`, which passed strings where AG2 wants `Agent` objects).
 
-> Replace AG2's file-based WAL with our append-only log, keeping the `Envelope`
-> schema and hub contract intact, and demonstrate that causation dedupe survives
-> channel termination — i.e. that `find_envelope_by_causation` does not degrade into
-> "cannot tell" once terminal-channel pruning clears the index (OQ-024).
-
-Two criteria. Both pass, and the second required a design decision rather than a
-yes/no answer.
-
----
+Both files are deleted. `test_gate_real.py` replaces them and uses the public API
+only. **5/5 pass**, and they produced a finding the fake test could not.
 
 ## Criterion 1 — does the hub run on our storage? **Yes.**
 
-The swap point is cleaner than expected. `Hub.__init__(store: KnowledgeStore, ...)`
-takes the store by constructor injection, and `KnowledgeStore` is a
-`runtime_checkable` `Protocol` with **eight methods**: `read`, `write`, `list`,
-`delete`, `exists`, `append`, `read_range`, `on_change`. No subclassing, no fork.
+`Hub.open(store, ...)` takes a `KnowledgeStore`, a `runtime_checkable` `Protocol`
+with eight methods. `SqlKnowledgeStore` (SQLite, ~90 lines) satisfies it structurally
+— no fork, no subclass.
 
-I implemented `SqlKnowledgeStore` over SQLite (`sqlstore.py`, ~90 lines). The
-interesting method is `append`, which must return the byte offset written at:
-
-```sql
-UPDATE blobs SET content = CAST(content AS BLOB) || CAST(? AS BLOB)
-WHERE path = ?
-RETURNING length(content) - length(?)
-```
-
-The offset is derived **by the database inside the statement**, so two concurrent
-appends cannot claim the same one. That is AX's `MAX(step)+1`-inside-the-transaction
-pattern () applied to a byte offset, and it is what makes the swap safe
-rather than merely type-correct.
-
-Then I ran **AG2's own network test suite** against it — swapping
-`MemoryKnowledgeStore` for a counting subclass of our store in `conftest.py`, so
-every call is both routed and measured.
+AG2's **own** network suite, with `MemoryKnowledgeStore` swapped for a counting
+subclass of ours:
 
 ```
 480 passed, 1 deselected in 8.80s
-
-storage calls that went through OUR store
-  append()        1789
-  read()           332
-  read_range()       0
-  write()         3731
-  distinct channel WALs written: 201
+append() 1789 · read() 332 · write() 3731 · 201 distinct channel WALs
 ```
 
-The counters are the evidence the swap took effect rather than being silently
-bypassed. **201 distinct channel WALs** were written through our `append()`.
+The counters prove the swap took effect rather than being bypassed. The deselected
+test is a source-linter that reads AG2's own file by relative path, broken by copying
+tests out of the repo.
 
-The one deselected test (`test_handlers_module_does_not_touch_hub_privates`) is a
-source-linting check that reads AG2's own source file by relative path; it fails
-because I copied the tests out of the repo. Unrelated to storage.
+**Caveat the review is right about:** this proves *`KnowledgeStore` compatibility*,
+not that our production log is ready. `sqlstore.py` keeps each WAL as one growing
+BLOB and rewrites it per append — fine for a compatibility proof, wrong for
+production. Row-oriented storage, Postgres contention, indexing, retention and
+transaction boundaries are **untested**. There is no concurrent-writer test.
 
-Two failures during the run were missing optional dependencies (`watchdog`,
-`websockets`, `opentelemetry-sdk`, `anthropic`), not storage defects — installing
-them took the suite from 470 to 480 passing.
+## Criterion 2 — causation after termination: **the defect is worse than documented, and the fix is not free**
 
-## Criterion 2 — does causation dedupe survive termination? **The defect is real, and it is ours to fix.**
+Tested against the real method, five scenarios:
 
-`hub/core.py:2772-2774` clears every causation-index key when a channel closes:
+| Scenario | `find_envelope_by_causation` | Durable WAL |
+|---|---|---|
+| Channel open | **FOUND** (correct) | — |
+| After `close_channel` | `None` | — |
+| After Hub restart on same store | `None` | 6 envelopes readable |
+| Two hubs that hydrated **before** close | **FOUND** (both) | — |
+| Fresh hub started **after** close | `None` | **reply present, 1 causation match** |
+
+The mechanism, in AG2's own comment (`hub/core.py:2907-2911`):
 
 ```python
-# Causation lookups against a closed channel can never produce
-# a meaningful retry decision, so drop every key for this
-# channel and keep the index bounded by active-channel size.
-stale_keys = [k for k in self._causation_index if k[0] == channel_id]
+# Repopulate the causation index for active channels; terminal
+# channels have already had their entries pruned when they
+# closed and shouldn't reappear here.
+if not metadata.is_terminal() and envelope.causation_id and envelope.envelope_id:
 ```
 
-The comment's premise is wrong for our use. AG2 reasons that a closed channel cannot
-produce a *retry decision* — true for its own delivery loop. But **we are adopting
-`causation_id` as an effect-ledger key (ADR-0014)**, and for that purpose the query
-must remain answerable after the channel closes, otherwise a replayed effect against
-a terminated channel returns `None` and reads as "no duplicate, go ahead".
+So the horizon is **not** merely "process-local cache lost on restart". Hydrate
+**deliberately refuses** to rebuild the index for terminal channels. The last row is
+the one that matters: the index says `None` while the durable log contains exactly
+one matching envelope. `None` therefore means "no duplicate **or** cannot tell", and
+the caller cannot distinguish them — the `absent`/`unknown` conflation, inside the
+dedupe path.
 
-That is precisely the `absent` vs `unknown` conflation this study is built on, sitting
-inside the dedupe path.
+Test 4 is instructive about my own reasoning: it passed, and for the wrong reason.
+Both hubs hydrated *before* the close. Test 5 exists because I did not trust that.
 
-**The fix is available because the index is a cache, not the truth.** The WAL itself
-is durable, complete, and in our store. `test_oq024.py` proves both halves:
+## What this means for the integration decision
 
+The gate required keeping the hub contract **intact**. Satisfying OQ-024 requires
+**changing the public semantics** of one method from `Envelope | None` to three
+valued. So the honest verdict is not "integrate unmodified":
+
+**Integrate `ag2.network` for the `Envelope` schema, hub contract, channel protocols
+and delivery machinery — and replace `find_envelope_by_causation` with our own
+log-backed implementation returning `FOUND | NOT_FOUND | INDETERMINATE`.**
+
+That is a **maintained adapter**, not a clean dependency, and it carries an ongoing
+cost: AG2 may change the pruning behaviour or the index shape under us. Recorded as
+a risk rather than waved away.
+
+The alternative — port the `Envelope` schema and build the hub ourselves — remains
+open and is more expensive. The deciding factor is that 480 passing tests represent
+delivery, cursor, replay, expectation and adapter machinery we would otherwise write.
+
+## What is still untested (the review's point 4, which stands)
+
+Storage is one part of the risk. AG2's hub also owns passports, rules, channel state,
+adapter folds, tasks, indexes and dispatch, all in process memory. **Not tested:**
+
+- concurrent causation duplicates across two live hubs
+- tenant scoping (AG2 has none — our `tenant_id` must wrap it)
+- coexistence with our `Principal`, Cedar policy, and effect-ledger authority
+- write contention on one store from two hubs
+- whether two hubs can safely serve the *same* channel at all
+
+**A database-backed WAL does not make an in-memory authority horizontally safe.**
+That question is deferred to the implementation spec, which must decide whether one
+hub per channel is an invariant we enforce.
+
+## Reproduce
+
+```bash
+cd spikes/01-ag2-storage
+python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt
+./.venv/bin/python -m pytest test_gate_real.py -q --asyncio-mode=auto -s   # 5 passed
 ```
-2 passed
-  test_wal_retains_causation_after_index_clear
-  test_absence_is_distinguishable_from_unknown
-```
 
-- With the index deliberately emptied, scanning the durable WAL still finds the reply
-  caused by `e1`.
-- Where no reply exists, `store.exists(wal) is True` plus an empty result set gives a
-  **definite "no duplicate"** rather than a shrug.
-
-## Design decisions this settles
-
-1. **Integrate `ag2.network`.** Envelope schema and hub contract adopted; the storage
-   layer is ours.
-2. **Do not adopt AG2's causation index as the dedupe authority.** It is a
-   process-local cache with a retention horizon. Our effect ledger (ADR-0014) is the
-   authority, backed by the durable log.
-3. **`find_envelope_by_causation` must be reimplemented over our log**, returning a
-   three-valued result — `FOUND(envelope_id)` / `NOT_FOUND` / `INDETERMINATE` — where
-   `INDETERMINATE` occurs only if the log itself is unreadable. AG2's two-valued
-   `Envelope | None` is the bug.
-4. **`read_range` was never called** in 481 tests (0 of 2,121 storage calls). It is in
-   the Protocol for session replay, which the network suite does not exercise. Our
-   implementation must still be correct, but it is not on the hot path.
-
-## What this does not prove
-
-- **SQLite, not Postgres.** The semantics exercised (atomic append returning an
-  offset, byte-range reads, durable rows) are ones Postgres provides, but the
-  production implementation is unwritten.
-- **No concurrency stress.** The suite is single-process. The `RETURNING`-based offset
-  derivation is the right shape, but contention under real load is untested.
-- **`on_change` returns a no-op subscription.** AG2 documents polling as the
-  fallback, and the suite passes with it. A production store should implement it or
-  accept the polling cost.
+`requirements.txt` pins `ag2==1.0.2` and records the source commit
+(`90f490a1b72b27ab4c219dd3586e94d42383a016`). The 480-test upstream run additionally
+needs AG2's `test/` tree copied in, which is **not** reproducible from this checkout
+alone — a real weakness of that evidence, and the reason the 5-test public-API gate
+is the one that carries the verdict.
 
 ## Files
 
 | File | What it is |
 |---|---|
 | `sqlstore.py` | `SqlKnowledgeStore` — the 8-method Protocol over SQLite |
-| `conftest.py` | Swaps AG2's store for a counting subclass of ours |
-| `test_oq024.py` | The retention-horizon gate |
-| `ag2_test/` | AG2's own network suite, copied, run against our store |
-
-Reproduce:
-
-```bash
-cd spikes/01-ag2-storage
-./.venv/bin/python -m pytest ag2_test/network test_oq024.py -q --asyncio-mode=auto \
-  --deselect ag2_test/network/test_sweeper_and_registry.py::test_handlers_module_does_not_touch_hub_privates
-```
+| `test_gate_real.py` | **The gate.** Public API only, 5 scenarios |
+| `conftest.py` | Swaps AG2's store for a counting subclass (upstream-suite run) |
+| `requirements.txt` | Pinned deps + AG2 source commit |

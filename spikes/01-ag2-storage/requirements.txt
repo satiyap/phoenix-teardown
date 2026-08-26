@@ -1,0 +1,8 @@
+ag2==1.0.2
+anthropic==1.1.0
+opentelemetry-sdk==1.44.0
+pytest==9.1.1
+pytest-asyncio==1.4.0
+watchdog==6.0.0
+websockets==16.1.1
+ag2_source_commit=90f490a1b72b27ab4c219dd3586e94d42383a016
