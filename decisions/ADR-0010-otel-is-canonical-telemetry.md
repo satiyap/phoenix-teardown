@@ -47,6 +47,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | LangGraph | confirms | grep `opentelemetry` across `libs/` returns nothing @ 3803173 | Chose proprietary LangSmith telemetry. Consequence: the best observability for the most popular OSS agent runtime is locked behind a closed commercial product. Exactly the outcome OTel avoids. |
 | OpenHands | amends | `openhands-sdk/.../observability/laminar.py:400-430 @ 760eea2` | OTel reachable only indirectly via the Laminar vendor SDK, and integration required working around Laminar's own isolated ContextVar diverging from opentelemetry.context. Subagent traces need explicit parent re-linking (delegate.parent_trace_id) after deliberately severing the span. |
 | Letta | confirms | `src/telemetry/ @ 852ca24` | Third deep teardown, third with no OpenTelemetry. `src/telemetry/` is error reporting and product analytics with batched flushing. The gap is industry-wide rather than a per-project oversight, which strengthens adopting OTel as a differentiator rather than a checkbox. |
+| Google AX | confirms | `internal/telemetry/telemetry.go:23-28 @ b777313`; `internal/controller/eventlog/sql.go:105-108` | **First project in the study with real OpenTelemetry**, breaking a 3-for-3 gap. OTLP gRPC exporter, propagation, trace SDK, with spans instrumenting both the event log (tracer `eventlog.sql`) and every harness adapter. Proves the standard is viable for agent runtimes. |
 
 ## Open questions
 

@@ -46,6 +46,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | LangGraph | neutral | `libs/sdk-py/langgraph_sdk/schema.py @ 3803173` | No A2A, ACP or MCP in the runtime. |
 | OpenHands | neutral | `src/constants/acp-providers.ts @ f48eca6` | No A2A. ACP occupies the adapter role instead, over stdio. |
 | Letta | neutral | `src/ @ 852ca24` | No A2A, ACP or MCP. Letta is its own harness rather than a host for others — the inverse of OpenHands. |
+| Google AX | amends | `proto/ax.proto:85-91 @ b777313` | **Answers OQ-012.** gRPC bidirectional streaming as the southbound contract means a remote harness needs no co-location, unlike OpenHands' ACP-over-stdio. Suggests our southbound API should be gRPC-shaped with ACP as one adapter *behind* it rather than as the transport itself. |
 
 ## Open questions
 

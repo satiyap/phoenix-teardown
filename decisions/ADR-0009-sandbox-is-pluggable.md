@@ -47,6 +47,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | LangGraph | neutral | `libs/langgraph/langgraph/pregel/main.py @ 3803173` | No sandbox at all; nodes run in the host process. Zero evidence either way. |
 | OpenHands | confirms | `openhands-sdk/.../workspace/base.py:27,261 @ 760eea2` | Direct precedent: five providers (Local, Docker, Apptainer, RemoteAPI, Cloud) behind one ABC. Apptainer proves the abstraction is load-bearing. Negative lesson: optional capabilities signalled by NotImplementedError with no query method, and LocalWorkspace.pause() silently no-ops. Isolation is thin - only --ulimit nofile, no CPU/memory/pid quota. |
 | Letta | amends | `src/sandbox/availability.ts:7-45 @ 852ca24`; `src/sandbox/{bwrap,seatbelt}.ts @ 852ca24` | Sandbox providers should include KERNEL-LEVEL backends (bwrap user namespaces, macOS Seatbelt), not only containers — a different and lighter bet than OpenHands. The interface should report availability with a reason rather than throwing on use. But filesystem confinement without CPU/memory/pid quotas leaves S9 unanswered, same gap as OpenHands. |
+| Google AX | confirms | `internal/ate/client.go @ b777313`; `internal/config/config.go:95-97` | Delegates isolation entirely to SubstrATE, an external actor system, and lets users supply their own `ActorTemplate` and container image. A provider interface rather than an implementation, arrived at independently. AX implements no isolation itself. |
 
 ## Open questions
 

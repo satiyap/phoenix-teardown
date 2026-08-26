@@ -111,6 +111,7 @@ as stated and should be narrowed.
 | Letta | supports | `src/permissions/cross-agent-guard.ts:11-19 @ 852ca24` | Documents abandoning shell-command parsing as bypassable and moving enforcement to the kernel — precisely the wholesale mechanism change that requires shadow comparison. |
 | LangGraph | neutral | `libs/sdk-py/langgraph_sdk/auth/__init__.py:98 @ 3803173` | Has a specificity fallback chain but no trace and no engine versioning. |
 | OpenHands | neutral | `openhands-sdk/.../hooks/conversation_hooks.py:92 @ 760eea2` | `HookExecutionEvent.blocked` records that a block happened, but not which rule decided or why. |
+| Google AX | neutral | `internal/server/server.go:82-83 @ b777313` | No policy engine at all, so nothing to trace. |
 
 ## Open questions
 

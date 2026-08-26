@@ -47,6 +47,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | LangGraph | neutral | `libs/langgraph/langgraph/prebuilt @ 3803173` | No capability model; tools are Python callables bound statically. MCP handled outside the runtime. Note vocabulary collision: their `Capability` enum means checkpointer storage ops. |
 | OpenHands | confirms | `openhands-agent-server/.../mcp_router.py:699-790 @ 760eea2` | MCP integrated as a protocol with a full OAuth flow, while policy lives elsewhere (PreToolUse hooks, ConfirmationPolicy, SecurityRisk). Exactly the split this ADR proposes. |
 | Letta | neutral | `src/tools/schemas/ @ 852ca24` | No MCP in the read tree. Tools are native, with schema and description as separate artifacts. |
+| Google AX | neutral | `proto/ax.proto:165-211 @ b777313` | No MCP. Tools appear only as opaque step types the harness owns; AX observes but does not mediate them. |
 
 ## Open questions
 

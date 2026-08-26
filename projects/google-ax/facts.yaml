@@ -14,935 +14,1057 @@ project:
   evidence_class: A
   read_on: 2026-08-26
   repo: "https://github.com/google/ax"
-  commit:                  # SHA the claims were read against
+  commit: b77731302075b3630b200af5e2cf63ac93b5f315
   docs: "https://agentexecutor.io"
-  version:
+  version: "v1alpha (pre-1.0, breaking changes declared)"
   license: Apache-2.0
   license_verdict: REFERENCE_ONLY
-  runtime_class: unknown
+  runtime_class: durable_actor
   one_line: Distributed harness runtime that provisions isolated, suspendable/resumable environments to execute harnesses and agents.
-  thesis:                  # the core architectural bet
+  thesis: "Separate the single-writer orchestrator from disposable suspendable actors, and make the append-only event log the only source of truth: state is derived by replaying the log, never stored separately."
 
 probes:
 
   # --- A. Core abstraction and object model ---
   # A1: What does this system think an agent *is*? State it in one sentence, in their vocabulary.
   A1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A harness is a registered executor of agentic loops. AX itself thinks in CONVERSATIONS, not agents: the durable identity is conversation_id and agent_id names which harness served it."
+    evidence: "proto/ax.proto:27-37 @ b777313"
   # A2: What is the root resource — the thing everything else hangs off?
   A2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Conversation is the root and the durable unit. 'A conversation cannot be continued before the last execution is completed or failed.'"
+    evidence: "proto/ax.proto:27-29 @ b777313"
   # A3: Is `Agent` persistent or ephemeral? Can it exist while not executing?
   A3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Actors persist suspended between turns keyed by conversation_id, so execution capacity exists while idle. But there is no Agent resource to persist."
+    evidence: "internal/harness/substrate/substrate.go:92-99 @ b777313"
   # A4: Is `Task` a separate resource from `Run`? If not, which concept is missing and what fills the...
   A4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "CLOSEST YET: Conversation > Interaction, and Interaction has its own id and terminal state. But it is an execution not an intent, and a TODO admits 'CreateInteraction should return an Interaction message and the outputs should be polled from the Interaction'."
+    evidence: "proto/ax.proto:111-131 @ b777313"
   # A5: What is a `Session` attached to: user, agent, task, or execution?
   A5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Conversation is the session; Interaction is one execution within it."
+    evidence: "proto/ax.proto:30-37 @ b777313"
   # A6: Are messages first-class durable resources, or transient function arguments?
   A6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Steps (including text content) are durable log entries, but there is no Message resource and no addressing."
+    evidence: "proto/ax.proto:134-210 @ b777313"
   # A7: Are artifacts (files, outputs, deliverables) first-class?
   A7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No artifact concept. Outputs are Steps in the log."
+    evidence: "proto/ax.proto:59-61 @ b777313"
   # A8: Can multiple agents participate in one task? How is that represented?
   A8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "One conversation, one in-flight execution, one harness. No multi-agent participation and no subagents at all."
+    evidence: "proto/ax.proto:27-29 @ b777313"
   # A9: Draw the object model as a tree. Only nodes that exist in their code or API.
   A9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Conversation > Interaction > Step (Content|Thought|ToolCall|ToolResult|FunctionCall|FunctionResult). StepEvent is the log entry. Harness > Execution. Actor keyed by conversation. See teardown section 3."
+    evidence: "proto/ax.proto @ b777313"
 
   # --- B. Runtime model ---
   # B1: Does the platform launch agents, host them, or attach to external ones?
   B1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Launches AND resumes: CreateActor then ResumeActor schedules the actor onto a worker and returns a routable IP."
+    evidence: "internal/harness/substrate/substrate.go:86-110 @ b777313"
   # B2: Execution substrate: process, container, microVM, serverless, in-process library, remote HTTP?
   B2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Suspendable/resumable actors in an external actor system (SubstrATE), reached over gRPC. Also a Python sidecar for Python harnesses."
+    evidence: "internal/harness/substrate/substrate.go:50 @ b777313"
   # B3: Who owns the event loop — platform or agent?
   B3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The controller owns the loop and is explicitly 'a single-writer system for managing agentic loops'."
+    evidence: "internal/controller/controller.go:15,33 @ b777313"
   # B4: Who decides when an agent wakes?
   B4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Control plane decides: CreateInteraction starts or resumes; the actor is resumed onto a worker on demand."
+    evidence: "internal/controller/controller.go:64-66 @ b777313"
   # B5: Can an agent run indefinitely? What is the actual ceiling?
   B5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Bounded per interaction; a conversation persists indefinitely as a suspended actor plus its log. No documented ceiling."
+    evidence: "internal/harness/substrate/substrate.go:92 @ b777313"
   # B6: Are there background or unattended agents?
   B6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No background or scheduled execution; no cron."
+    evidence: "internal/controller/controller.go @ b777313"
   # B7: Is execution synchronous or asynchronous from the caller's view?
   B7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Streaming: CreateInteraction returns a stream; the harness contract is a bidirectional stream."
+    evidence: "proto/ax.proto:125-128 @ b777313"
   # B8: Can in-flight work migrate between workers?
   B8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Yes - the actor is suspended between turns and resumed onto ANY worker, getting a fresh routable IP each time. Work is not pinned to a machine."
+    evidence: "internal/harness/substrate/substrate.go:98-109 @ b777313"
   # B9: Can an agent survive a machine restart? Automatically, or with operator action?
   B9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Replaying the append-only log 'brings the executor back to a consistent state from which execution can resume'."
+    evidence: "internal/controller/eventlog/eventlog.go:28-30 @ b777313"
   # B10: Classify: worker/queue, durable actor, attached harness, or in-process library.
   B10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "durable_actor driven by a single-writer control plane: durable identity (conversation), disposable compute (resumable actor on any worker)."
+    evidence: "internal/controller/controller.go:15 @ b777313"
 
   # --- C. Durability and failure semantics ---
   # C1: What state is durable, and what is lost on crash?
   C1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The event log is the only durable state: conversation_id, step, protojson StepEvent payload. Everything else is derived."
+    evidence: "internal/controller/eventlog/postgres.go:44-50 @ b777313"
   # C2: *When* is state persisted — every step, every tool call, on checkpoint, never?
   C2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Every step is appended atomically as it happens - inputs are logged before the harness runs."
+    evidence: "internal/controller/controller.go:243-264 @ b777313"
   # C3: Checkpointing or event sourcing? Can state be rebuilt from a log?
   C3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Event sourcing, explicitly: 'Every entry is an atomic step: replaying the log in order brings the executor back to a consistent state from which execution can resume.'"
+    evidence: "internal/controller/eventlog/eventlog.go:28-30 @ b777313"
   # C4: Retry semantics, and at what granularity: run, step, tool call?
   C4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No declarative retry or backoff policy."
+    evidence: "internal/controller/controller.go @ b777313"
   # C5: At-least-once or exactly-once? What do the docs claim versus what the code does?
   C5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "At-least-once in effect: a PENDING execution is resumed by re-Starting the harness. No exactly-once claim and no dedupe for tool effects."
+    evidence: "internal/controller/controller.go:109-121 @ b777313"
   # C6: Is there an idempotency model for tool side effects?
   C6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No idempotency key for tool side effects. Actor CREATION is idempotent, but tool calls are not. Four for four absent."
+    evidence: "internal/harness/substrate/substrate.go:92-95 @ b777313"
   # C7: Process crash recovery: what resumes, and from where?
   C7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "ResumptionState folds the event log to recover both state and harness id. No separate state store to drift from the log."
+    evidence: "internal/controller/controller.go:224-241 @ b777313"
   # C8: Node loss: is work re-dispatched, and how is it detected?
   C8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "waitForHealthy uses the standard gRPC health protocol with a timeout to detect an actor that is not ready; Unavailable and NOT_SERVING are retried."
+    evidence: "internal/harness/substrate/substrate.go:135-169 @ b777313"
   # C9: Context-window overflow: truncation, summarisation, or failure?
   C9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No context-window management; entirely the harness's concern."
+    evidence: "internal/harness/harness.go @ b777313"
   # C10: Timers, scheduled execution, long sleeps — durable across restart?
   C10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No timers, scheduling or sleeps."
+    evidence: "internal/controller/controller.go @ b777313"
   # C11: Human-in-the-loop pause and resume: durable, or in-memory only?
   C11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "BEST DESIGN IN STUDY: approvals are wire-protocol CONTENT (ConfirmationContent with a stable id, question, and oneof decision), so a pending approval is durable because the log is durable. No separate approval store, and full replayability."
+    evidence: "proto/content.proto:28-47 @ b777313"
   # C12: Can a definition be upgraded while runs are in flight? What happens to them?
   C12:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "VERIFIED: resuming with a different harness is REJECTED - 'resumption not allowed: harness ID changed from harness-a to harness-b'. Only project in the study that fails loudly. Pins harness IDENTITY, not version."
+    evidence: "internal/controller/controller.go:82-85 @ b777313; test TestExec_ResumeExplicitDifferentHarnessRejected; verified locally 2026-08-26: go build ./... and go test ./internal/controller/... pass"
 
   # --- D. Agent identity and lifecycle ---
   # D1: Is an agent globally addressable? By what identifier?
   D1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Harnesses have stable registry ids and conversations have durable ids, but there is no Agent identity distinct from harness id."
+    evidence: "internal/controller/registry.go:38-51 @ b777313"
   # D2: Does identity survive process restart?
   D2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "The registry is IN-MEMORY, rebuilt from YAML at startup. Nothing about harness identity is persisted."
+    evidence: "internal/controller/registry.go:25-36 @ b777313"
   # D3: Is identity distinct from runtime instance?
   D3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Harness id (registration) is distinct from execution id (uuid per execution), but agent and harness are conflated - acknowledged by TODO: 'We need to consolidate agents and harness registration.'"
+    evidence: "internal/controller/controller.go:74-76 @ b777313"
   # D4: Are agents versioned? Immutable or mutable definitions?
   D4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No versioning of harnesses or agents. Four for four absent."
+    evidence: "internal/controller/registry.go @ b777313"
   # D5: Is there a registry or catalog?
   D5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "In-memory Registry keyed by harness id with a default, populated declaratively from YAML. Registration is immutable ('harness %q already registered') but not persisted or discoverable."
+    evidence: "internal/controller/registry.go:38-51 @ b777313; internal/config/config.go:97-102"
   # D6: Can agents discover each other at runtime?
   D6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No runtime discovery."
+    evidence: "internal/controller/registry.go @ b777313"
   # D7: Can agents advertise capabilities? In what format?
   D7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No capability advertisement. Optional behaviour is probed (health) and absence is treated as OK."
+    evidence: "internal/harness/substrate/substrate.go:135-138 @ b777313"
   # D8: Is there an owner, team, or tenant on the agent record?
   D8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No owner, team or tenant on any resource."
+    evidence: "proto/ax.proto @ b777313"
   # D9: Can an agent be suspended, revoked, or deprecated?
   D9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No suspend, revoke or deprecate. Four for four absent."
+    evidence: "internal/controller/registry.go @ b777313"
   # D10: Is there anything resembling a declarative agent manifest?
   D10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Harnesses are declared in YAML config (registry.antigravity / antigravity-interactions / substrate[]), which is a declarative registration but not an agent manifest. manifests/ is Kubernetes deployment, not agent spec."
+    evidence: "internal/config/config.go:97-102 @ b777313"
 
   # --- E. Harness and runtime interoperability ---
   # E1: What is the minimum interface an agent implementation must satisfy?
   E1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "SMALLEST AND CLEANEST IN STUDY: Harness{Start(ctx, conversationID, config) -> Execution} and Execution{Run, Queue, ID, Close}. Four methods. Durability is held by the CONTROLLER, not the adapter."
+    evidence: "internal/harness/harness.go:42-63 @ b777313"
   # E2: Transport: stdin/stdout, HTTP, gRPC, WebSocket, in-process, ACP, A2A?
   E2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "gRPC bidirectional streaming (HarnessService.Connect). Answers OQ-012: a remote harness needs NO co-location, unlike ACP-over-stdio."
+    evidence: "proto/ax.proto:85-91 @ b777313"
   # E3: Can it host a foreign agent (Claude Code, Codex, OpenHands, LangGraph, ADK)?
   E3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Built-in Antigravity and Antigravity-Interactions harnesses plus user-supplied harnesses on substrate with their own ActorTemplate and container image."
+    evidence: "internal/config/config.go:90-102 @ b777313"
   # E4: Is there an event stream out of a running agent? What granularity?
   E4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Typed step stream: HarnessOutputs frames of Steps, terminated by exactly one HarnessEnd carrying terminal State and optional Error."
+    evidence: "proto/ax.proto:59-91 @ b777313"
   # E5: Are tool calls externally observable, or internal to the agent?
   E5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "ToolCallStep, ToolResultStep, FunctionCallStep, FunctionResultStep are all first-class step types in the log."
+    evidence: "proto/ax.proto:165-211 @ b777313"
   # E6: How is context injected at start?
   E6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "agent_config is deliberately opaque bytes: 'opaque to the controller and interpreted by the harness implementation'. Keeps the boundary clean."
+    evidence: "internal/harness/harness.go:43-46 @ b777313"
   # E7: Is cancellation supported? Cooperative or forced? Does it propagate to subagents?
   E7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "HarnessCancel mid-stream with a TYPED reason: USER_REQUESTED | TIMEOUT | INTERNAL_ERROR. No other project types the cancellation reason."
+    evidence: "proto/ax.proto:46-48,103-109 @ b777313"
   # E8: Can a run be checkpointed and restored by the platform, or only by the agent?
   E8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The CONTROL PLANE owns durability via the event log; the adapter has no checkpoint/restore methods at all. Important design lesson for our adapter interface."
+    evidence: "internal/harness/harness.go:42-63 @ b777313"
   # E9: Which of these would be hard to adapt, and why?
   E9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Precisely specified contract makes adapters implementable: 'the server streams zero or more HarnessResponse{outputs} frames terminated by exactly one HarnessResponse{end}'."
+    evidence: "proto/ax.proto:86-90 @ b777313"
 
   # --- F. Agent-to-agent communication ---
   # F1: Direct messages between agents?
   F1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent-to-agent messaging. Four for four absent."
+    evidence: "proto/ax.proto @ b777313"
   # F2: Channels, topics, or pub/sub?
   F2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No channels or pub/sub."
+    evidence: "proto/ax.proto @ b777313"
   # F3: Task delegation as a distinct mechanism from messaging?
   F3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No delegation primitive and no subagents at all - notable, since all three anchors had them."
+    evidence: "proto/ax.proto @ b777313"
   # F4: Synchronous RPC between agents?
   F4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No inter-agent RPC."
+    evidence: "proto/ax.proto @ b777313"
   # F5: Asynchronous inbox or mailbox?
   F5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No mailbox."
+    evidence: "proto/ax.proto @ b777313"
   # F6: Is delivery durable? Survives restart of sender and receiver?
   F6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No inter-agent delivery layer."
+    evidence: "proto/ax.proto @ b777313"
   # F7: Is message ordering guaranteed? Per what scope?
   F7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Total ordering within a conversation, enforced by PRIMARY KEY (conversation_id, step) with the step computed in-transaction."
+    evidence: "internal/controller/eventlog/sql.go:46-57 @ b777313"
   # F8: Acknowledgement or delivery receipts?
   F8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No acknowledgement between agents."
+    evidence: "proto/ax.proto @ b777313"
   # F9: Correlation ids for request/response pairing?
   F9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "conversation_id plus interaction_id on every StepEvent correlate all work; ConfirmationContent carries its own id linking question to decision."
+    evidence: "proto/ax.proto:30-37 @ b777313; proto/content.proto:41"
   # F10: Conversation threading?
   F10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Conversation is the thread; no branching or forking."
+    evidence: "proto/ax.proto:27-29 @ b777313"
   # F11: Capability-based routing — address by what an agent *can do* rather than who it is?
   F11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No capability routing."
+    evidence: "internal/controller/registry.go @ b777313"
 
   # --- G. Human-agent collaboration ---
   # G1: Is a human modelled as a special kind of agent, a distinct principal type, or not modelled?
   G1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No principals of any kind - no humans, no agents, no auth."
+    evidence: "internal/server/server.go:82-83 @ b777313"
   # G2: Shared rooms, channels, or workspaces?
   G2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No workspace or room concept."
+    evidence: "proto/ax.proto @ b777313"
   # G3: Task threads humans can read and post into?
   G3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A conversation is readable via its event log and resumable with new inputs."
+    evidence: "proto/ax.proto:126-127 @ b777313"
   # G4: Mentions or directed addressing?
   G4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No mentions or addressing."
+    evidence: "proto/ax.proto @ b777313"
   # G5: Approval gates. Blocking or advisory? Durable while pending?
   G5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "ConfirmationContent(id, question, oneof{ApprovalDecision|DeclineDecision}) as durable protocol content. Question and answer are the SAME object in the log - cleaner than all three anchors."
+    evidence: "proto/content.proto:28-47 @ b777313"
   # G6: Mid-run intervention: can a human redirect without restarting?
   G6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Resume with new inputs at any point; cancel mid-stream with a reason."
+    evidence: "proto/ax.proto:46-48,126-127 @ b777313"
   # G7: Agent status and presence visible to humans?
   G7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "State on StepEvent (PENDING/COMPLETED/FAILED/CANCELED) is visible, but there is no WAITING_FOR_HUMAN or STUCK state."
+    evidence: "proto/ax.proto:94-101 @ b777313"
   # G8: Notifications or escalation when an agent is blocked?
   G8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No notification or escalation."
+    evidence: "proto/ax.proto @ b777313"
   # G9: Shared scratchpad or working surface?
   G9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No shared scratchpad."
+    evidence: "proto/ax.proto @ b777313"
   # G10: Can a human see the context an agent is operating on?
   G10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The full event log is retrievable, so a human can see every step the agent took."
+    evidence: "internal/controller/eventlog/eventlog.go:35 @ b777313"
 
   # --- H. Context and memory ---
   # H1: Which of these exist as *separate* concepts: prompt context, working state, session history, ...
   H1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No memory subsystem at all. Context is harness-internal plus per-execution agent_config. Skills are the only knowledge mechanism."
+    evidence: "internal/skills/ @ b777313"
   # H2: Who owns memory: agent, human, workspace, task, or tenant?
   H2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Skills are owned by a registry (Gemini Enterprise) or a local directory, explicitly harness-agnostic."
+    evidence: "internal/config/config.go:119-133 @ b777313"
   # H3: Can memory be shared between agents? At what granularity?
   H3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Skills are shared by construction - a registry or directory feeding any harness."
+    evidence: "internal/config/config.go:119-133 @ b777313"
   # H4: Are there permissions on memory?
   H4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No memory permissions (no memory)."
+    evidence: "internal/skills/ @ b777313"
   # H5: Is provenance tracked — where a memory came from?
   H5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Skill provenance is the registry or directory it came from; no per-item provenance."
+    evidence: "internal/config/config.go:119-133 @ b777313"
   # H6: Expiry, TTL, or forgetting?
   H6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No TTL or expiry."
+    evidence: "internal/skills/ @ b777313"
   # H7: Summarisation or compaction. Automatic or explicit?
   H7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No summarisation or compaction in AX."
+    evidence: "internal/harness/harness.go @ b777313"
   # H8: Retrieval mechanism: vector, keyword, structured, agent-driven?
   H8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Skills materialise as <skill-id>/SKILL.md directories fed to a harness system-instruction pointer. Filesystem retrieval, no vector store."
+    evidence: "internal/config/config.go:124-129 @ b777313"
   # H9: Can an agent mutate its own memory mid-run?
   H9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent-writable memory."
+    evidence: "internal/skills/ @ b777313"
   # H10: Conflict resolution on concurrent writes?
   H10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No shared mutable memory."
+    evidence: "internal/skills/ @ b777313"
   # H11: Is memory in the same store as execution state, or separate?
   H11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Execution state (event log, SQL) and knowledge (skills, filesystem/registry) are entirely separate stores. THIRD project to choose filesystem/git-backed skills over a memory store."
+    evidence: "internal/skills/ @ b777313; internal/controller/eventlog/ @ b777313"
 
   # --- I. Tools and capabilities ---
   # I1: Are tools bound to agents statically, or resolved dynamically?
   I1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "Tools are entirely the harness's business; AX only observes ToolCall/ToolResult steps in the log."
+    evidence: "proto/ax.proto:165-211 @ b777313"
   # I2: Is there a capability abstraction distinct from tool implementation?
   I2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No capability abstraction."
+    evidence: "proto/ax.proto @ b777313"
   # I3: Is there a registry of available tools?
   I3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No tool registry (the Registry is for harnesses)."
+    evidence: "internal/controller/registry.go @ b777313"
   # I4: Tool scoping — can an agent be restricted to a subset?
   I4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No tool scoping."
+    evidence: "proto/ax.proto @ b777313"
   # I5: Are tools versioned?
   I5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No tool versioning."
+    evidence: "proto/ax.proto @ b777313"
   # I6: How are credentials supplied to a tool?
   I6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Credentials are the harness's concern; AX supports GCP credentials for its own OTLP export."
+    evidence: "internal/telemetry/telemetry.go:38 @ b777313"
   # I7: OAuth or delegated user credentials?
   I7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No OAuth or delegated credentials."
+    evidence: "internal/server/server.go @ b777313"
   # I8: Can policy intercept a tool call before execution?
   I8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "NO POLICY LAYER AT ALL. Nothing intercepts a tool call."
+    evidence: "internal/server/server.go:82-83 @ b777313"
   # I9: Approval gates on specific tools?
   I9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "ConfirmationContent enables per-action approval, but there is no rule-based gate deciding WHEN to ask - the harness decides."
+    evidence: "proto/content.proto:38-47 @ b777313"
   # I10: Do tools execute inside or outside the agent's sandbox?
   I10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Tools execute inside the substrate actor sandbox, since the whole harness runs there."
+    evidence: "internal/harness/substrate/substrate.go:50 @ b777313"
 
   # --- J. Security and identity ---
   # J1: What identity does an agent authenticate as?
   J1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent identity and no authentication. The gRPC server installs ONLY logging interceptors."
+    evidence: "internal/server/server.go:82-83 @ b777313"
   # J2: Authentication mechanism for agent-to-platform?
   J2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "NO AUTHENTICATION on InteractionsService or HarnessService. A distributed runtime that provisions sandboxes is exposed unauthenticated."
+    evidence: "internal/server/server.go:82-83 @ b777313"
   # J3: Authorisation model: RBAC, ABAC, capability tokens, none?
   J3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No authorisation model."
+    evidence: "internal/server/server.go @ b777313"
   # J4: Secret storage and injection?
   J4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No secret management."
+    evidence: "internal/config/config.go @ b777313"
   # J5: Per-agent credentials, or shared platform credentials?
   J5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No per-agent credentials."
+    evidence: "internal/server/server.go @ b777313"
   # J6: Can an agent act as a user? Is that impersonation or delegation?
   J6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No impersonation or delegation."
+    evidence: "internal/server/server.go @ b777313"
   # J7: Tenant isolation: logical, or enforced at runtime?
   J7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No tenancy. Five for five absent."
+    evidence: "proto/ax.proto @ b777313"
   # J8: Network and filesystem isolation?
   J8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Isolation is delegated to the SubstrATE actor; AX itself applies no network or filesystem controls."
+    evidence: "internal/harness/substrate/substrate.go:50 @ b777313"
   # J9: Is there an audit log? Is it tamper-evident?
   J9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "The append-only event log is a complete action record and a genuine audit substrate, but not tamper-evident and not access-controlled."
+    evidence: "internal/controller/eventlog/eventlog.go:28-30 @ b777313"
   # J10: Where are policy decisions enforced — control plane, runtime, or tool gateway?
   J10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No policy decisions anywhere to enforce."
+    evidence: "internal/server/server.go:82-83 @ b777313"
 
   # --- K. Sandbox and isolation ---
   # K1: Is there a workspace or sandbox concept? What is its lifecycle?
   K1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Sandbox is a SubstrATE actor, created then suspended and resumed per turn, keyed by conversation_id."
+    evidence: "internal/harness/substrate/substrate.go:86-110 @ b777313"
   # K2: Persistent filesystem across runs?
   K2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "The actor persists suspended between turns so its filesystem survives, but persistence semantics belong to SubstrATE."
+    evidence: "internal/harness/substrate/substrate.go:92-94 @ b777313"
   # K3: Snapshot and restore?
   K3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Suspend/resume of actors from 'suspendable/resumable images' is the core mechanism, though implemented by SubstrATE."
+    evidence: "README.md @ b777313; internal/ate/client.go"
   # K4: Network egress rules?
   K4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No network egress rules in AX."
+    evidence: "internal/harness/substrate/substrate.go @ b777313"
   # K5: Container, microVM, or none?
   K5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Actor-based isolation via an external actor system, with user-supplied ActorTemplate and container image for custom harnesses."
+    evidence: "internal/config/config.go:95-97 @ b777313"
   # K6: Resource quotas: CPU, memory, disk, wall clock?
   K6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No resource quotas expressed by AX. Six for six absent."
+    evidence: "internal/config/config.go @ b777313"
   # K7: How are secrets injected without landing in the image or logs?
   K7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No secret injection mechanism."
+    evidence: "internal/harness/substrate/substrate.go @ b777313"
   # K8: Arbitrary code execution? Browser execution?
   K8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The harness runs arbitrary code inside the actor; a Python sidecar supports Python harnesses."
+    evidence: "internal/pythonsidecar/sidecar.go @ b777313"
   # K9: Is the sandbox pluggable, or a fixed implementation?
   K9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Fully pluggable: sandboxing is delegated entirely to SubstrATE and users may supply their own ActorTemplate. AX implements NO isolation itself - independently the ADR-0009 position."
+    evidence: "internal/ate/client.go @ b777313; internal/config/config.go:95-97"
 
   # --- L. Orchestration and scheduling ---
   # L1: Does it distinguish agent coordination from workflow orchestration?
   L1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Clean separation by omission: AX is an EXECUTOR, not an orchestrator. One conversation, one in-flight execution."
+    evidence: "proto/ax.proto:27-29 @ b777313"
   # L2: Topology: DAG, cyclic graph, supervisor, planner, event-driven, queue?
   L2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Sequential turn loop per conversation. No DAG, no graph."
+    evidence: "internal/controller/controller.go:64 @ b777313"
   # L3: Cron or scheduled triggers?
   L3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No scheduled triggers."
+    evidence: "internal/controller/controller.go @ b777313"
   # L4: Dynamic task spawning at runtime?
   L4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "New inputs can be queued into the next turn (Execution.Queue), but no dynamic task spawning."
+    evidence: "internal/harness/harness.go:55-56 @ b777313"
   # L5: Fan-out / fan-in?
   L5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No fan-out/fan-in."
+    evidence: "internal/controller/controller.go @ b777313"
   # L6: Subagents. Are they first-class, or just nested calls?
   L6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No subagents at all."
+    evidence: "proto/ax.proto @ b777313"
   # L7: Retry and backoff policy — declarative or hand-rolled?
   L7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No retry policy."
+    evidence: "internal/controller/controller.go @ b777313"
   # L8: Compensation or rollback on failure?
   L8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No compensation or rollback."
+    evidence: "internal/controller/controller.go @ b777313"
   # L9: Does cancellation propagate through the whole tree?
   L9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "HarnessCancel with typed reason aborts the in-flight execution. No tree to propagate through."
+    evidence: "proto/ax.proto:46-48 @ b777313"
   # L10: Could this be replaced by Temporal or Restate, or is orchestration inseparable from the agent...
   L10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Nothing to replace: AX deliberately does not orchestrate. Consistent with keeping workflow engines external."
+    evidence: "proto/ax.proto:27-29 @ b777313"
 
   # --- M. Observability ---
   # M1: Which of these are modelled as telemetry objects: trace, run, step, LLM call, tool call, mess...
   M1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Modelled: conversation, interaction, step (typed: content/thought/toolcall/toolresult/functioncall/functionresult), state, error with gRPC status code. Plus OTel spans on event log and each adapter."
+    evidence: "proto/ax.proto:63-68,134-211 @ b777313"
   # M2: Is telemetry keyed to agent, run, model, task, user, or tenant?
   M2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Keyed to conversation_id, interaction_id, agent_id (harness), and log step. Not to user or tenant (neither exists)."
+    evidence: "proto/ax.proto:30-37 @ b777313"
   # M3: OpenTelemetry, proprietary, or none?
   M3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "FIRST PROJECT IN THE STUDY WITH REAL OPENTELEMETRY: go.opentelemetry.io/otel, OTLP gRPC trace exporter, propagation, trace SDK. Spans instrument the event log (tracer 'eventlog.sql') and every harness adapter. OTLP enabled in the sample config."
+    evidence: "internal/telemetry/telemetry.go:23-28 @ b777313; internal/controller/eventlog/sql.go:105-108; internal/harness/substrate/substrate.go:195"
   # M4: Is there a documented, stable event schema?
   M4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The proto IS the event schema: StepEvent with typed Steps, State enum, Error with a gRPC status code. Versioned and explicit, though the file warns of breaking changes pre-1.0."
+    evidence: "proto/ax.proto:30-68 @ b777313"
   # M5: Cost and token accounting. Per what unit?
   M5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No cost or token accounting."
+    evidence: "proto/ax.proto @ b777313"
   # M6: Latency breakdown by phase?
   M6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Logging interceptors record RPC latency; OTel spans give phase timing."
+    evidence: "internal/server/interceptors.go:29-30 @ b777313"
   # M7: Error taxonomy?
   M7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Error carries an int32 code corresponding to grpc/codes plus a description; CancelReason types the cancellation cause."
+    evidence: "proto/ax.proto:63-68,103-109 @ b777313"
   # M8: Can the event stream reconstruct a run after the fact — replay or audit?
   M8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "By construction: the append-only log replays to a consistent state, so every run is fully reconstructible."
+    evidence: "internal/controller/eventlog/eventlog.go:28-30 @ b777313"
 
   # --- N. Multi-tenancy and enterprise ---
   # N1: Resource hierarchy: org, workspace, project, environment?
   N1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No org, project, workspace or environment hierarchy."
+    evidence: "proto/ax.proto @ b777313"
   # N2: RBAC model and its granularity?
   N2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No RBAC."
+    evidence: "internal/server/server.go @ b777313"
   # N3: Quotas and cost limits. Enforced or advisory?
   N3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No quotas or cost limits. Six for six absent."
+    evidence: "internal/config/config.go @ b777313"
   # N4: dev / staging / prod separation?
   N4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No environment separation."
+    evidence: "internal/config/config.go @ b777313"
   # N5: Deployment promotion path?
   N5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No promotion path."
+    evidence: "internal/config/config.go @ b777313"
   # N6: Agent catalog scoped to a tenant?
   N6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "The YAML-declared harness registry is a catalog, but not tenant-scoped."
+    evidence: "internal/config/config.go:97-102 @ b777313"
   # N7: Audit retention controls?
   N7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No audit retention controls."
+    evidence: "internal/controller/eventlog/ @ b777313"
   # N8: Is multi-tenancy in the OSS core, or reserved for a commercial tier?
   N8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No multi-tenancy in OSS, and no commercial tier in this repo either - it simply is not modelled."
+    evidence: "proto/ax.proto @ b777313"
 
   # --- O. API and protocol surface ---
   # O1: List the actual primary endpoints or SDK entry points. Verbatim.
   O1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Two gRPC services in 235 lines of proto. Northbound: InteractionsService.CreateInteraction(CreateInteractionEvent) -> stream CreateInteractionResponse. Southbound: HarnessService.Connect(stream HarnessRequest) -> stream HarnessResponse."
+    evidence: "proto/ax.proto:85-91,125-128 @ b777313"
   # O2: Is the API resource-oriented or RPC-flavoured?
   O2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "RPC-flavoured (gRPC services) rather than resource-oriented; a TODO notes Interaction should become a pollable resource."
+    evidence: "proto/ax.proto:130-131 @ b777313"
   # O3: Streaming: SSE, WebSocket, long-poll, gRPC stream?
   O3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "gRPC streaming both directions, with a precisely specified terminator: 'zero or more outputs frames terminated by exactly one end'."
+    evidence: "proto/ax.proto:86-90 @ b777313"
   # O4: Webhooks or outbound callbacks?
   O4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No webhooks."
+    evidence: "proto/ax.proto @ b777313"
   # O5: Which standards are implemented: MCP, A2A, ACP, OTel, OpenAI-compatible?
   O5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "OTel yes; gRPC health protocol yes. No MCP, A2A or ACP."
+    evidence: "internal/telemetry/telemetry.go @ b777313; internal/harness/substrate/substrate.go:135"
   # O6: Is the API versioned? Stability commitment?
   O6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Config carries version: v1alpha, and the proto header warns 'This file is in active development and significant changes can be made with breaking changes.'"
+    evidence: "proto/ax.proto:25-26 @ b777313; ax.yaml"
   # O7: Is there a separate northbound (client) and southbound (runtime) API?
   O7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "CLEANEST northbound/southbound split in the study, both in one small proto: InteractionsService for clients, HarnessService for runtimes."
+    evidence: "proto/ax.proto:85-91,125-128 @ b777313"
 
   # --- P. Storage ---
   # P1: What datastores are required to run it?
   P1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "One table in SQLite or Postgres: conversation_log(conversation_id, step, payload). Nothing else is persisted."
+    evidence: "internal/controller/eventlog/postgres.go:44-50 @ b777313"
   # P2: What is treated as authoritative, strongly consistent state?
   P2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The event log is authoritative and everything is derived from it, including current state and harness id."
+    evidence: "internal/controller/controller.go:224-241 @ b777313"
   # P3: What is event-stream or append-only?
   P3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Append-only by construction. PRIMARY KEY (conversation_id, step) with step computed as MAX+1 INSIDE the insert transaction, so concurrent appends collide rather than corrupting order - single-writer without a distributed lock."
+    evidence: "internal/controller/eventlog/sql.go:38-66 @ b777313"
   # P4: Where do large artifacts go?
   P4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No blob storage; payloads are protojson in the log."
+    evidence: "internal/controller/eventlog/sql.go:53 @ b777313"
   # P5: Is there a vector store? Required or optional?
   P5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No vector store."
+    evidence: "internal/skills/ @ b777313"
   # P6: Is storage pluggable, or hardcoded?
   P6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "EventLogBuilder abstracts the log; SQLite and Postgres implementations provided."
+    evidence: "internal/controller/eventlog/eventlog.go:26 @ b777313"
 
   # --- Q. Licensing and commercial ---
   # Q1: Exact license, including any per-directory variation.
   Q1:
     verdict: first_class
-    note: "Apache-2.0."
-    evidence: "https://github.com/google/ax (GitHub API, read 2026-08-26; 1970★, pushed 2026-08-20)"
+    note: "Apache-2.0, uniform across the tree."
+    evidence: "LICENSE @ b777313"
   # Q2: Are there enterprise-only components missing from the OSS repo?
   Q2:
-    verdict: first_class
-    note: "No enterprise-only components found in repo."
-    evidence: "https://github.com/google/ax (GitHub API, read 2026-08-26; 1970★, pushed 2026-08-20)"
+    verdict: absent
+    note: "No enterprise-only components in the repo. Optional external dependencies: SubstrATE for actors, Gemini Enterprise for the skill registry, Vertex for the Interactions harness."
+    evidence: "internal/config/config.go:104-117 @ b777313"
   # Q3: SaaS or hosted-service restrictions?
   Q3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No SaaS restriction under Apache-2.0."
+    evidence: "LICENSE @ b777313"
   # Q4: Trademark constraints on derived works?
   Q4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Google marks plus the AX / Agent Executor naming. Apache-2.0 grants no trademark rights."
+    evidence: "LICENSE @ b777313"
   # Q5: Network copyleft (AGPL, SSPL) implications for a hosted product?
   Q5:
     verdict: absent
-    note: "No network copyleft. Apache-2.0/MIT only across the whole study."
-    evidence: "https://github.com/google/ax (GitHub API, read 2026-08-26; 1970★, pushed 2026-08-20)"
+    note: "No network copyleft."
+    evidence: "LICENSE @ b777313"
   # Q6: Verdict: `USE` / `INTEGRATE` / `REFERENCE_ONLY` / `AVOID`, with reasoning.
   Q6:
     verdict: first_class
-    note: "REFERENCE_ONLY — Apache-2.0 permits embedding, but Go and pre-1.0 with breaking changes expected; external PRs paused."
-    evidence: "https://github.com/google/ax (GitHub API, read 2026-08-26; 1970★, pushed 2026-08-20)"
+    note: "REFERENCE_ONLY on architectural grounds, not legal: Go, pre-1.0 with declared breaking changes, external PRs paused, and sandboxing depends on the external SubstrATE actor system. The DESIGN is the most valuable thing here - event log, single-writer, and the harness contract."
+    evidence: "LICENSE @ b777313; README.md"
 
   # --- R. Developer experience ---
   # R1: Time from clone to a running agent. Actual elapsed minutes.
   R1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "go build ./... and go test ./internal/controller/... both pass cleanly. Single binary plus one YAML file to serve."
+    evidence: "verified locally 2026-08-26: go build ./... and go test ./internal/controller/... pass"
   # R2: How many concepts before "hello world"?
   R2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Very few: conversation, interaction, step, harness. The whole contract is 235 lines of proto."
+    evidence: "proto/ax.proto @ b777313"
   # R3: Is there a local dev loop? Hot reload?
   R3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "CLI mode (ax --config ax.yaml --input 'hello') alongside ax serve, with SQLite for local runs."
+    evidence: "ax.yaml @ b777313"
   # R4: How do you debug a stuck run?
   R4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The event log is fully retrievable and replayable, and OTel spans cover storage and adapters."
+    evidence: "internal/controller/eventlog/eventlog.go:35 @ b777313"
   # R5: Can an agent be unit tested? Is there a test harness?
   R5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Strong: harnesstest and eventlogtest packages, an in-memory event log, and dedicated resumption tests including the harness-mismatch rejection case."
+    evidence: "internal/harness/harnesstest/, internal/controller/eventlog/eventlogtest/ @ b777313; verified locally 2026-08-26: go build ./... and go test ./internal/controller/... pass"
   # R6: Deployment story?
   R6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Kubernetes manifests (deployment + postgres + install script), ko image builds, single Go binary."
+    evidence: "manifests/ @ b777313"
   # R7: CLI ergonomics — try the equivalent of `init`, `agent add`, `run`.
   R7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "ax serve and a direct CLI input mode, but no agent-management commands - harnesses are declared in YAML rather than added via CLI."
+    evidence: "ax.yaml @ b777313"
 
   # --- S. Hard scenarios ---
   # S1: Delegated authority
   S1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No agent principal AND no authentication at all, so the delegated-authority question cannot be posed."
+    evidence: "internal/server/server.go:82-83 @ b777313"
   # S2: Torn side effect
   S2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "BEST STRUCTURAL ANSWER SO FAR: every step is an atomic log append and CreateActor is explicitly idempotent ('AlreadyExists is expected and fine'). But there is still no idempotency key on TOOL side effects, so a torn tool call can repeat."
+    evidence: "internal/harness/substrate/substrate.go:92-95 @ b777313; internal/controller/eventlog/sql.go:38-66"
   # S3: Upgrade mid-flight
   S3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class_answer
+    note: "ONLY PROJECT THAT FAILS LOUDLY. Verified by test: resuming a conversation with a different harness id is rejected with 'resumption not allowed: harness ID changed from harness-a to harness-b'. Pins harness IDENTITY though, not version - so substitution is caught, upgrade is not."
+    evidence: "internal/controller/controller.go:82-85 @ b777313; verified locally 2026-08-26: go build ./... and go test ./internal/controller/... pass"
   # S4: Concurrent memory write
   S4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No memory store, so the scenario does not arise."
+    evidence: "internal/skills/ @ b777313"
   # S5: Cancellation tree
   S5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "HarnessCancel mid-stream with a typed reason, and the stream contract guarantees exactly one terminating end frame. But there are no subagents, so no tree to propagate through, and cancellation durability is not documented."
+    evidence: "proto/ax.proto:46-48,86-90 @ b777313"
   # S6: Silent context loss
   S6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No compaction in AX; harness-internal."
+    evidence: "internal/harness/harness.go @ b777313"
   # S7: Poison message
   S7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No queue and no dead-letter path. A failing execution reaches STATE_FAILED with a gRPC status code."
+    evidence: "proto/ax.proto:70-75 @ b777313"
   # S8: Tenant leak
   S8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No tenancy and no authentication, so nothing prevents cross-conversation access."
+    evidence: "internal/server/server.go:82-83 @ b777313"
   # S9: Runaway spend
   S9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No budget, quota or cost accounting. Six for six unanswered across the study."
+    evidence: "internal/config/config.go @ b777313"
   # S10: Zombie sandbox
   S10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "waitForHealthy with a timeout detects an actor that never becomes ready, and actors are suspended between turns so orphan lifetime is bounded. No explicit reaping and no fencing of a late-returning actor's output."
+    evidence: "internal/harness/substrate/substrate.go:135-169 @ b777313"
 
 object_model: |
-  # ASCII tree of resources that actually exist
+  Conversation                  (conversation_id; the durable unit)
+   `-- Interaction              (interaction_id; one execution)
+        `-- Step                (the atomic unit; typed)
+             |-- ContentStep         (text, image, audio, document, video,
+             |                        ConfirmationContent)
+             |-- ThoughtStep
+             |-- ToolCallStep / ToolResultStep
+             `-- FunctionCallStep / FunctionResultStep
 
-strongest_ideas: []
+  StepEvent                     (log entry: conversation_id, interaction_id,
+                                 agent_id, agent_config, steps[], state)
 
-weakest_choices: []
+  Harness                       (registered by id; one may be default)
+   `-- Execution                (Run, Queue, ID, Close)
 
-reusable_components: []
-  # - component: 
-  #   decision: INTEGRATE   # BUILD|INTEGRATE|ADOPT_AS_STANDARD|REUSE|DEFER
-  #   note: 
+  Actor                         (substrate; keyed by conversation_id, suspendable)
+  Skill                         (from registry or local dir; harness-agnostic)
 
-lessons: []
+strongest_ideas:
+  - "State DERIVED by folding the event log, never stored separately. ResumptionState recomputes both state and harness id from the log, eliminating log/state drift as a class of bug."
+  - "Single-writer enforced by a composite primary key, with the step number computed as MAX+1 inside the insert transaction. Ordering safety with no distributed lock."
+  - "A three-method durability interface (Append, Events, Close) - the smallest durable-execution contract in the study, and sufficient."
+  - "Approvals as wire-protocol CONTENT: ConfirmationContent(id, question, oneof decision). Question and answer are one durable object in the log, so no separate approval store and full replayability."
+  - "Refusing to resume across a harness change, verified by test. The only project that fails loudly where ADR-0011 says it must."
+  - "Cancellation with a typed reason (USER_REQUESTED | TIMEOUT | INTERNAL_ERROR)."
+  - "A precisely specified stream contract: 'zero or more outputs frames terminated by exactly one end', stated in the service comment so adapters are implementable without guesswork."
+  - "agent_config as opaque bytes - the control plane deliberately refuses to parse adapter config."
+  - "Explicit northbound/southbound API separation in one 235-line proto."
+  - "gRPC as the adapter transport, so remote harnesses work without co-location."
+  - "Idempotent actor creation with the reasoning stated in a comment."
+  - "OpenTelemetry by default, instrumenting both storage and adapters."
+  - "Harness-agnostic skills sourced from a registry or local directories."
 
-adr_impact: []
-  # - adr: ADR-0001
-  #   effect: confirms      # confirms|amends|challenges|neutral
-  #   note: 
+weakest_choices:
+  - "NO authentication or authorization whatsoever - logging-only gRPC interceptors on a service that provisions sandboxes and runs arbitrary harnesses."
+  - "In-memory harness registry with no versioning and no persistence; restart loses registrations."
+  - "Agent and harness are conflated, acknowledged by a TODO."
+  - "No multi-agent anything: no subagents, no delegation, no messaging."
+  - "No memory or context management at all."
+  - "No policy layer, so no interception, no rule-based approval gating, no audit beyond the raw log."
+  - "Fail-OPEN on capability absence (a harness lacking the health service is 'treated as ready') - the opposite of Letta's rule, with no framework distinguishing the two cases."
+  - "Interaction is not yet a first-class resource, acknowledged by TODO, so the Task/Run gap remains open."
+  - "Pre-1.0 with declared breaking changes and paused external PRs, so the design is a moving target."
+
+reusable_components:
+  - component: "Derive state by folding the event log"
+    decision: REUSE
+    note: "Eliminates log/state divergence entirely."
+  - component: "Composite PK + in-transaction step number"
+    decision: REUSE
+    note: "Single-writer ordering without distributed locking."
+  - component: "Three-method event log interface"
+    decision: ADOPT_AS_STANDARD
+    note: "Minimal sufficient durability contract."
+  - component: "Approvals as durable protocol content"
+    decision: ADOPT_AS_STANDARD
+    note: "Better than all three Phase 2 anchors."
+  - component: "Refuse resume on definition change"
+    decision: ADOPT_AS_STANDARD
+    note: "ADR-0011, verified working."
+  - component: "Typed CancelReason"
+    decision: ADOPT_AS_STANDARD
+    note: "Cancellation should carry why."
+  - component: "Precisely specified stream terminator"
+    decision: REUSE
+    note: "Makes third-party adapters implementable."
+  - component: "Opaque agent_config bytes"
+    decision: ADOPT_AS_STANDARD
+    note: "Keeps the control-plane/adapter boundary honest."
+  - component: "gRPC southbound harness contract"
+    decision: REUSE
+    note: "Enables remote adapters; answers OQ-012."
+  - component: "Idempotent actor create/resume"
+    decision: REUSE
+    note: "Correct restart semantics."
+  - component: "OTel setup"
+    decision: REUSE
+    note: "First real precedent for ADR-0010."
+  - component: "No-auth server design"
+    decision: BUILD
+    note: "Reject; must not ship a network service without authN."
+  - component: "In-memory harness registry"
+    decision: BUILD
+    note: "Reject; registry must be durable and versioned."
+
+lessons:
+  - "First implementation of ADR-0001's exact model: actors keyed by conversation, suspended between turns, resumed onto ANY worker, control plane as single writer. But note the divergence - AX's durable identity is the CONVERSATION, not the agent. Reinforces that agent identity earns its place through delegation and policy, neither of which AX has. (confirms ADR-0001)"
+  - "Conversation > Interaction is the closest thing to Task/Run yet, with Interaction carrying its own id and terminal state. A TODO admits it is not yet a first-class resource - even a Google team found this hard. (amends ADR-0002)"
+  - "No agent-to-agent messaging. FOUR FOR FOUR absent. The case for building it now rests entirely on our own requirements. (confirms ADR-0003)"
+  - "The cleanest adapter contract in the study: Start -> Execution{Run, Queue, ID, Close}. Four methods, with durability held by the CONTROLLER rather than the adapter. My strawman AgentRuntime had seven methods including checkpoint/restore; AX shows those belong in the control plane. (confirms ADR-0004)"
+  - "gRPC bidirectional streaming as the southbound contract answers OQ-012: remote adapters need no co-location. Better than ACP-over-stdio, and suggests our southbound API should be gRPC-shaped with ACP as one adapter behind it. (amends ADR-0006)"
+  - "No principals at all, and consequently no auth, no audit, no delegation. Demonstrates precisely what is lost without the abstraction. (confirms ADR-0007 negatively)"
+  - "Third project to choose filesystem/registry-backed skills over a memory store. Strong convergence for the Knowledge node. (confirms ADR-0008)"
+  - "Delegates isolation entirely to SubstrATE with user-supplied ActorTemplates. A provider interface, not an implementation - independently arrived at. (confirms ADR-0009)"
+  - "FIRST project in the study with real OpenTelemetry: OTLP exporter, propagation, spans on both storage and adapters. Breaks the 3-for-3 gap and proves the standard is viable for agent runtimes. (confirms ADR-0010)"
+  - "Only project that fails loudly on definition change, verified by test. Refines the ADR: AX pins harness IDENTITY but not VERSION, so substitution is caught and upgrade is not. Our pin must cover both. (confirms ADR-0011)"
+  - "AX is fail-OPEN on capability absence while Letta is fail-CLOSED. The correlation is instructive: Letta's optional capability guards memory isolation, AX's guards readiness. ADR-0012 must distinguish safety-relevant capabilities (fail closed) from liveness-relevant ones (may fail open). (amends ADR-0012)"
+  - "NEW: narrow the adapter interface. Since ADR-0012 establishes not every harness can checkpoint, putting checkpoint/restore in the adapter guarantees a lowest-common-denominator problem. Proposed: Start -> {Run, Queue, Cancel, Close} with the control plane owning the log."
+
+adr_impact:
+  - adr: ADR-0001
+    effect: confirms
+    note: "First implementation of durable identity + disposable compute. But identity is the conversation, not the agent."
+  - adr: ADR-0002
+    effect: amends
+    note: "Conversation > Interaction is the closest split yet, but a TODO admits Interaction is not yet a resource."
+  - adr: ADR-0003
+    effect: confirms
+    note: "No agent-to-agent messaging. Four for four."
+  - adr: ADR-0004
+    effect: confirms
+    note: "Cleanest adapter contract in the study; four methods, durability held by the controller not the adapter."
+  - adr: ADR-0005
+    effect: neutral
+    note: "No MCP; tools are opaque step types owned by the harness."
+  - adr: ADR-0006
+    effect: amends
+    note: "gRPC southbound streaming enables remote adapters without co-location. Answers OQ-012."
+  - adr: ADR-0007
+    effect: confirms
+    note: "No principals, no auth, no audit, no delegation - shows what is lost without the abstraction."
+  - adr: ADR-0008
+    effect: confirms
+    note: "Third project choosing filesystem/registry skills over a memory store."
+  - adr: ADR-0009
+    effect: confirms
+    note: "Isolation delegated entirely to an external actor system with user-supplied templates."
+  - adr: ADR-0010
+    effect: confirms
+    note: "FIRST real OTel in the study: OTLP, propagation, spans on storage and adapters."
+  - adr: ADR-0011
+    effect: confirms
+    note: "Only project that fails loudly on definition change (verified). Pins identity but not version."
+  - adr: ADR-0012
+    effect: amends
+    note: "Fail-open on capability absence, opposite Letta. ADR must distinguish safety-relevant from liveness-relevant capabilities."
+  - adr: ADR-0013
+    effect: neutral
+    note: "No policy engine, so nothing to trace."

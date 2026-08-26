@@ -94,6 +94,7 @@ definition version, the decision is unimplementable as stated and must weaken to
 | LangGraph | raised | `libs/langgraph @ 3803173`; verified 2026-08-26 | Renamed node → resume returns `[]`, no error, work lost. Same-topology change → new code runs silently. |
 | OpenHands | confirms | `openhands-sdk/.../conversation/state.py @ 760eea2` | Conversation state stores agent config but carries no version pin and performs no compatibility check on resume. Two of two projects share the hazard. |
 | Letta | confirms | `src/agent/system-prompt-versioning.test.ts @ 852ca24` | No version pin on a suspended conversation, despite system-prompt-versioning tests existing. Three for three on this hazard. |
+| Google AX | confirms | `internal/controller/controller.go:82-85 @ b777313`; test `TestExec_ResumeExplicitDifferentHarnessRejected` | **Only project that fails loudly**, verified by running its tests: resuming with a different harness is rejected — "resumption not allowed: harness ID changed from harness-a to harness-b". Refines the ADR: AX pins harness *identity* but not *version*, so substitution is caught and upgrade is not. Our pin must cover both. |
 
 ## Open questions
 

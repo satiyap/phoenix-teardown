@@ -47,6 +47,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | LangGraph | confirms | `libs/sdk-py/langgraph_sdk/schema.py:362 @ 3803173` | No Task resource anywhere; Run exists only in the closed Platform. In OSS a run is a function call, so "retry this intent" has nowhere to live. Strong support for the split. |
 | OpenHands | confirms | `openhands-agent-server/.../conversation_router.py:236-268 @ 760eea2` | `STUCK` and `WAITING_FOR_CONFIRMATION` enrich the state machine. pause (graceful) vs interrupt (immediate) refines the CANCELLING amendment into TWO operations. |
 | Letta | confirms | `src/cron/cron-file.ts:26-43 @ 852ca24` | Nine named cron run reasons (`started_too_late`, `queue_full`, `runtime_unavailable`, `scheduler_inactive`, `invalid_cron`, `scheduler_error`...) plus a five-state task machine incl. `missed`. Best failure-mode enumeration in the study; adopt this discipline for scheduled Runs. |
+| Google AX | amends | `proto/ax.proto:111-131 @ b777313` | `Conversation → Interaction` is the closest thing to the split yet — Interaction has its own id and terminal state. But a `TODO` admits it is not yet first-class: "CreateInteraction should return an Interaction message and the outputs should be polled from the Interaction." Even a Google team found this hard to land. |
 
 ## Amendment — 2026-08-26 (Phase 2, LangGraph)
 

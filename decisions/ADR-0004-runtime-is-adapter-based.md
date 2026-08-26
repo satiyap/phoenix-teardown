@@ -38,6 +38,69 @@ If harness capabilities diverge so far that the common interface becomes useless
 
 `E1`, `E2`, `E3`, `E7`, `E8`, `B1`
 
+## Amendment — 2026-08-26 (Phase 3, Google AX): narrow the adapter interface
+
+The strawman interface sketched in the original plan was:
+
+```python
+class AgentRuntime:
+    async def start(...)      async def send(...)
+    async def events(...)     async def cancel(...)
+    async def checkpoint(...) async def restore(...)
+    async def terminate(...)
+```
+
+Google AX's equivalent is four methods
+(`internal/harness/harness.go:42-63 @ b777313`):
+
+```go
+type Harness interface {
+    Start(ctx, conversationID string, config []byte) (Execution, error)
+}
+type Execution interface {
+    Run(ctx, handler Handler) error       // streams events
+    Queue(ctx, steps ...*proto.Step) error // send
+    ID() string
+    Close(ctx) error
+}
+```
+
+No `checkpoint`, no `restore`. Durability lives in the controller's append-only
+event log, and the adapter merely streams typed steps into it. State is
+reconstructed by replaying the log, so the adapter never needs to serialise
+itself.
+
+This matters because of ADR-0012: not every harness *can* checkpoint. Putting
+`checkpoint`/`restore` in the adapter interface guarantees a
+lowest-common-denominator problem — either most adapters declare the capability
+unsupported, or the platform cannot rely on it. Moving durability to the control
+plane removes the question entirely.
+
+**Amended target interface:**
+
+```text
+Adapter:      start(run_context, opaque_config) -> Execution
+Execution:    run(handler)        stream typed events to the control plane
+              send(inputs)        queue new inputs for the next turn
+              cancel(reason)       typed cancellation reason
+              close()
+```
+
+With two supporting rules taken from AX:
+
+1. **Adapter config is opaque to the control plane.** AX passes `agent_config` as
+   `bytes`, "opaque to the controller and interpreted by the harness
+   implementation". The control plane must not parse adapter configuration.
+2. **Specify the stream contract precisely.** AX documents that the server streams
+   "zero or more `HarnessResponse{outputs}` frames terminated by exactly one
+   `HarnessResponse{end}`". Stating the terminator count is what makes a
+   third-party adapter implementable without reading the reference
+   implementation.
+
+Checkpoint/restore may still exist as a *declared optional capability*
+(ADR-0012) for harnesses that support it as an optimisation, but the platform's
+correctness must not depend on it.
+
 ## Evidence log
 
 Append one row per project as evidence lands. Keep the reasoning, not just the verdict.
@@ -47,6 +110,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | LangGraph | confirms | `libs/checkpoint-conformance/.../capabilities.py @ 3803173` | Supplies the capability-negotiation pattern: BASE vs EXTENDED capabilities, runtime detection via method-override check, spec tests gated on detected set. Adopt this shape for harness adapters. |
 | OpenHands | confirms | `src/constants/acp-providers.ts:82-92 @ f48eca6` | Strongest evidence yet: own agent is a peer of foreign ACP agents behind one enum, with a registry of launch commands. Plus a concrete failure mode - a plausible but wrong ACP command silently DEADLOCKS the handshake, so adapters need validation not just configuration. |
 | Letta | amends | `src/permissions/canonical.ts @ 852ca24`; `src/permissions/cross-agent-guard.ts:6-8 @ 852ca24` | Letta is a harness not a host, yet still pays adapter tax: `canonicalToolName` must map Codex/Gemini aliases onto one vocabulary INSIDE the policy layer. Tool-name canonicalisation is a prerequisite for policy under adapter neutrality, not an afterthought. |
+| Google AX | confirms | `internal/harness/harness.go:42-63 @ b777313` | **Cleanest adapter contract in the study:** `Harness{Start}` → `Execution{Run, Queue, ID, Close}`. Four methods, and durability is held by the *controller's event log*, not the adapter. Our strawman `AgentRuntime` had seven methods including `checkpoint`/`restore`; AX shows those belong in the control plane. Narrow the interface accordingly. |
 
 ## Open questions
 

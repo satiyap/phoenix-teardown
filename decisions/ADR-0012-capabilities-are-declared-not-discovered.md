@@ -123,6 +123,48 @@ of not being knowable before load.
 
 `E1`, `E8`, `E9`, `K9`, `D7`, `C12`
 
+## Amendment — 2026-08-26 (Phase 3, Google AX)
+
+Rule 3 as originally written ("explicit failure over silent success", forbidding
+no-ops) is too blunt. Google AX handles an optional capability by treating its
+absence as acceptable: a harness that does not implement the gRPC health service
+is "treated as ready", while `Unavailable` and `NOT_SERVING` are retried
+(`internal/harness/substrate/substrate.go:135-138 @ b777313`). That is
+**fail-open**, and it is correct there.
+
+Four projects, four designs, and the split is not arbitrary:
+
+| Project | Behaviour | What the capability guards |
+|---|---|---|
+| LangGraph | declared + detected + conformance-tested | storage operations |
+| OpenHands | `NotImplementedError`, no query, silent local no-op | resource suspension |
+| Letta | real probe, `backend \| null` + reason, **fails closed** | **memory isolation** |
+| Google AX | no declaration, absence treated as OK, **fails open** | **readiness** |
+
+The two fail-closed/fail-open choices correlate with what is at stake. Letta
+refuses to run when the kernel sandbox is unavailable because the capability
+enforces a security boundary; degrading there would silently weaken isolation. AX
+proceeds when a health check is unavailable because the worst case is a slower
+failure, not a breach.
+
+**Amended rule 3:** capabilities are classified as *safety-relevant* or
+*liveness-relevant* at declaration time.
+
+- **Safety-relevant** (isolation, permission enforcement, audit, secret handling):
+  absence or uncertainty must **fail closed**. An unavailable capability blocks
+  the operation. Never degrade silently.
+- **Liveness-relevant** (health checks, readiness probes, optional optimisations
+  such as pause/suspend): absence **may fail open**, provided the degradation is
+  logged and observable.
+
+OpenHands' `LocalWorkspace.pause()` remains the anti-pattern under both
+classifications: it is liveness-relevant, so failing open is acceptable, but it
+reports *success* rather than logging a no-op, which makes the degradation
+invisible. Fail-open is permitted; silent fail-open is not.
+
+This classification is itself part of the declaration, so a caller can tell which
+kind it is dealing with.
+
 ## Evidence log
 
 | Project | Effect | Evidence | Note |
@@ -131,6 +173,7 @@ of not being knowable before load.
 | OpenHands | raised | `openhands-sdk/.../workspace/base.py:261 @ 760eea2`; verified 2026-08-26 | `NotImplementedError` signalling, no query method, and `LocalWorkspace.pause()` silently no-ops. The anti-pattern. |
 | OpenHands | confirms | `src/manifests/manifest-capabilities.ts:14,36 @ f48eca6` | Manifest layer states the three-valued rule explicitly and returns which requirements were unmet. |
 | Letta | confirms | `src/sandbox/availability.ts:7-45 @ 852ca24`; `src/memory-confinement.ts:14-21 @ 852ca24` | **Reference implementation.** `SandboxAvailability { backend: SandboxBackend|null, bwrapPath?, reason }` detected by a REAL user-namespace mount probe, cached per process, with a human-readable reason for the null case. Dependent code fails closed: 'Throws when no supported kernel sandbox is available rather than silently running with a weaker policy.' Three projects, three designs; this is the one to copy. |
+| Google AX | amends | `internal/harness/substrate/substrate.go:135-138 @ b777313` | AX has no capability declaration and treats absence as acceptable: a harness that does not implement the gRPC health service is "treated as ready". That is **fail-open**, the opposite of Letta's fail-closed rule. The correlation is instructive — Letta's optional capability guards *memory isolation*, AX's guards *readiness*. The ADR must distinguish safety-relevant capabilities (must fail closed) from liveness-relevant ones (may fail open) instead of issuing one blanket rule. |
 
 ## Open questions
 

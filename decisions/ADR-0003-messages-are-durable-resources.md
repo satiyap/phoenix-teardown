@@ -47,6 +47,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | LangGraph | confirms | `libs/checkpoint/langgraph/checkpoint/base/__init__.py:92 @ 3803173` | Multi-agent = shared mutable channel state. No mailbox, ordering, delivery guarantee or correlation ids. |
 | OpenHands | confirms | `openhands-agent-server/.../sub_agents_router.py:117 @ 760eea2` | Delegation is a nested conversation, not a message. No mailbox, no ordering, no delivery guarantee between agents. |
 | Letta | amends | `src/channels/ @ 852ca24` vs `src/agent/subagents/ @ 852ca24` | Excellent HUMAN channels (Slack/Discord/Telegram with access control, threads, mentions, durable approvals) and ZERO agent-to-agent messaging. Suggests human collaboration surfaces and agent transport are different problems; one `Channel` resource for both may be a modelling error. |
+| Google AX | confirms | `proto/ax.proto @ b777313` | No agent-to-agent messaging, and no subagents at all. **Four for four absent.** The case for building durable agent messaging now rests entirely on our own requirements, with zero prior art. |
 
 ## Open questions
 
