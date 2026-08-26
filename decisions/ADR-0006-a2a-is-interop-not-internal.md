@@ -51,6 +51,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | Cloudflare Agents | neutral | `packages/agents/src/agent-routing.ts @ 2f957bc` | No A2A. Interop is HTTP, WebSocket, email and MCP. |
 | AG2 | confirms | `ag2/a2a/__init__.py:5-22 @ 90f490a`; `ag2/acp/__init__.py:5-12` | **Clearest independent confirmation in the study.** AG2 has a richer *internal* envelope/hub/channel model and treats A2A as an **optional-dependency edge adapter** (agent cards, gRPC transports, push notifications), degrading via `missing_optional_dependency` when uninstalled. Same for ACP. Own model inside, standard protocols at the boundary — exactly this ADR. |
 | Pydantic AI | neutral | `pydantic_ai_slim/pydantic_ai/ @ b48ee38` | No A2A. UI protocols (AG-UI, Vercel AI) are the only interop surface. |
+| Google Agent Platform | confirms | `src/google/adk/a2a/ @ 85b52f6` | **Second independent confirmation after AG2.** `a2a/` is a converter-and-executor interop layer (`a2a/agent`, `a2a/converters`, `a2a/executor`) marked `experimental`, wrapping A2A agents as ADK agents at the edge. The internal model is agents, sessions and events. Interop at the boundary, own model inside. |
 
 ## Open questions
 

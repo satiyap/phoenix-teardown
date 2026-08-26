@@ -11,938 +11,1088 @@ project:
   slug: google-agent-platform
   name: Google Agent Platform
   depth: deep
-  evidence_class: B
+  evidence_class: A
   read_on: 2026-08-26
   repo: "https://github.com/google/adk-python"
-  commit:                  # SHA the claims were read against
+  commit: 85b52f6a307598eb0bc20a6ab2a6780bb9efe7c1
   docs: "https://google.github.io/adk-docs/"
-  version:
+  version: "google-adk 2.7.1"
   license: Apache-2.0
   license_verdict: INTEGRATE
-  runtime_class: unknown
+  runtime_class: hybrid
   one_line: Agent Development Kit plus the managed Vertex AI Agent Engine control plane.
-  thesis:                  # the core architectural bet
+  thesis: "Every stateful concern is a swappable service behind an abstract interface, with an in-memory implementation for development and a managed implementation for production - so the local path and the production path are the same code with a different injection."
 
 probes:
 
   # --- A. Core abstraction and object model ---
   # A1: What does this system think an agent *is*? State it in one sentence, in their vocabulary.
   A1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "BaseAgent subclasses (LlmAgent, SequentialAgent, ParallelAgent, LoopAgent) are Python objects with a name. No agent id or persisted identity."
+    evidence: "src/google/adk/agents/ @ 85b52f6"
   # A2: What is the root resource — the thing everything else hangs off?
   A2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Session keyed by (app_name, user_id, session_id), with pluggable backends: in-memory, SQLite, generic SQL, Firestore, Redis, Vertex AI."
+    evidence: "src/google/adk/sessions/base_session_service.py @ 85b52f6"
   # A3: Is `Agent` persistent or ephemeral? Can it exist while not executing?
   A3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Sessions, memory, artifacts and credentials all persist independently of any running process, each behind a service interface."
+    evidence: "src/google/adk/sessions/database_session_service.py @ 85b52f6"
   # A4: Is `Task` a separate resource from `Run`? If not, which concept is missing and what fills the...
   A4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Invocation is a real run with pausable/resumable/rewindable semantics, but there is no Task resource holding intent across attempts."
+    evidence: "src/google/adk/apps/_configs.py:29-47 @ 85b52f6"
   # A5: What is a `Session` attached to: user, agent, task, or execution?
   A5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Session is the session, with App above it and Invocation below. Consistently keyed by (app_name, user_id)."
+    evidence: "src/google/adk/sessions/session.py @ 85b52f6"
   # A6: Are messages first-class durable resources, or transient function arguments?
   A6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Event is the durable transcript unit, carrying actions including rewind_before_invocation_id."
+    evidence: "src/google/adk/events/event.py @ 85b52f6"
   # A7: Are artifacts (files, outputs, deliverables) first-class?
   A7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "BaseArtifactService with versioned artifacts scoped per session or per user; GCS and in-memory implementations."
+    evidence: "src/google/adk/artifacts/ @ 85b52f6"
   # A8: Can multiple agents participate in one task? How is that represented?
   A8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Multi-agent composition via SequentialAgent, ParallelAgent, LoopAgent, agent-as-tool, and LLM-driven transfer."
+    evidence: "src/google/adk/agents/ @ 85b52f6"
   # A9: Draw the object model as a tree. Only nodes that exist in their code or API.
   A9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "App(is_resumable, compaction, plugins) > Agent > Invocation > Event; Session(app_name, user_id, session_id) > State(app:/user:/temp:/session) + Event[]; plus MemoryEntry, AuthCredential, Artifact, Skill. See teardown section 3."
+    evidence: "src/google/adk/ @ 85b52f6; verified live against google-adk 2.7.1 (PyPI, 2026-08-26)"
 
   # --- B. Runtime model ---
   # B1: Does the platform launch agents, host them, or attach to external ones?
   B1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A Runner drives in-process agents through flows (flows/llm_flows/); services are injected."
+    evidence: "src/google/adk/runners.py @ 85b52f6"
   # B2: Execution substrate: process, container, microVM, serverless, in-process library, remote HTTP?
   B2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The agent runs in-process, but CODE EXECUTION has seven pluggable backends: container, GKE, Vertex AI, Agent Engine sandbox, model-native, and unsafe_local."
+    evidence: "src/google/adk/code_executors/ @ 85b52f6"
   # B3: Who owns the event loop — platform or agent?
   B3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "flows/llm_flows/base_llm_flow.py owns the LLM loop, with sixteen plugin callbacks around it."
+    evidence: "src/google/adk/flows/llm_flows/base_llm_flow.py @ 85b52f6"
   # B4: Who decides when an agent wakes?
   B4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "The caller constructs a Runner and injects services; there is no placement layer."
+    evidence: "src/google/adk/runners.py @ 85b52f6"
   # B5: Can an agent run indefinitely? What is the actual ceiling?
   B5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Sessions are long-lived and resumable; an invocation can pause on a long-running function call and resume from the last event."
+    evidence: "src/google/adk/apps/_configs.py:32-36 @ 85b52f6"
   # B6: Are there background or unattended agents?
   B6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No scheduling or cron in the framework."
+    evidence: "src/google/adk/runners.py @ 85b52f6"
   # B7: Is execution synchronous or asynchronous from the caller's view?
   B7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Async event streaming from the runner, with an on_event_callback plugin hook and live/ bidirectional support."
+    evidence: "src/google/adk/plugins/base_plugin.py:155 @ 85b52f6"
   # B8: Can in-flight work migrate between workers?
   B8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Sessions are backend-stored so any process can resume them, but there is no work distribution or migration mechanism."
+    evidence: "src/google/adk/sessions/base_session_service.py @ 85b52f6"
   # B9: Can an agent survive a machine restart? Automatically, or with operator action?
   B9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "ResumabilityConfig: resume an invocation from the last event if it paused or failed midway, best-effort, with at-least-once semantics once resumed."
+    evidence: "src/google/adk/apps/_configs.py:29-47 @ 85b52f6"
   # B10: Classify: worker/queue, durable actor, attached harness, or in-process library.
   B10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "hybrid: in-process agents with every stateful concern behind a pluggable service interface (in-memory for local, Vertex/GCP for production)."
+    evidence: "src/google/adk/sessions/base_session_service.py @ 85b52f6"
 
   # --- C. Durability and failure semantics ---
   # C1: What state is durable, and what is lost on crash?
   C1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Sessions persist events and state through BaseSessionService, with SQLite, SQL, Firestore, Redis, Vertex and in-memory backends, plus schema migrations."
+    evidence: "src/google/adk/sessions/migration/ @ 85b52f6"
   # C2: *When* is state persisted — every step, every tool call, on checkpoint, never?
   C2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Events are appended to the session as they occur; state mutations are applied through the session service."
+    evidence: "src/google/adk/sessions/base_session_service.py @ 85b52f6"
   # C3: Checkpointing or event sourcing? Can state be rebuilt from a log?
   C3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Event-log-shaped: events are appended and rewind is applied logically via _apply_rewinds ('the single source of truth for which events are live'), but state is also stored as mutable JSON on the session row."
+    evidence: "src/google/adk/events/_rewind_events.py @ 85b52f6; src/google/adk/sessions/schemas/v0.py:163-165"
   # C4: Retry semantics, and at what granularity: run, step, tool call?
   C4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "_reflect_retry_model_plugin and reflect_retry_tool_plugin reflect on a failure and retry DIFFERENTLY rather than repeating the same call; _retry_options_utils covers eval retries."
+    evidence: "src/google/adk/plugins/_reflect_retry_model_plugin.py @ 85b52f6"
   # C5: At-least-once or exactly-once? What do the docs claim versus what the code does?
   C5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Stated explicitly and precisely: 'we only guarantee an at-least-once behavior once resumed'. A platform naming its guarantee rather than implying exactly-once."
+    evidence: "src/google/adk/apps/_configs.py:38-40 @ 85b52f6"
   # C6: Is there an idempotency model for tool side effects?
   C6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No effect ledger or idempotency key - but the requirement is stated as a developer contract: 'Tool call to resume needs to be idempotent because we only guarantee an at-least-once behavior once resumed.' The clearest articulation of the hazard in the study, and it delegates the work rather than doing it."
+    evidence: "src/google/adk/apps/_configs.py:38-40 @ 85b52f6"
   # C7: Process crash recovery: what resumes, and from where?
   C7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Resume from the last event, with rewind semantics resolving which events are live, and temp: state explicitly discarded on resumption."
+    evidence: "src/google/adk/apps/_configs.py:33-42 @ 85b52f6; src/google/adk/events/_rewind_events.py"
   # C8: Node loss: is work re-dispatched, and how is it detected?
   C8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No lost-worker or hung-invocation detection."
+    evidence: "src/google/adk/runners.py @ 85b52f6"
   # C9: Context-window overflow: truncation, summarisation, or failure?
   C9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "EventsCompactionConfig with a pluggable BaseEventsSummarizer and an llm_event_summarizer; apps/compaction.py performs it. Second project after AG2 to ship a compaction STRATEGY rather than only a hook."
+    evidence: "src/google/adk/apps/compaction.py @ 85b52f6; src/google/adk/apps/_configs.py:49-60"
   # C10: Timers, scheduled execution, long sleeps — durable across restart?
   C10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No timers or durable sleeps."
+    evidence: "src/google/adk/runners.py @ 85b52f6"
   # C11: Human-in-the-loop pause and resume: durable, or in-memory only?
   C11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Long-running function calls pause an invocation, and resumability restores it from the last event - so an approval can outlive the process. Combined with before_tool_callback / after_tool_callback this is durable HITL, though as a pattern rather than a named Approval resource."
+    evidence: "src/google/adk/apps/_configs.py:32-36 @ 85b52f6; src/google/adk/plugins/base_plugin.py:297,321"
   # C12: Can a definition be upgraded while runs are in flight? What happens to them?
   C12:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Session storage schema is versioned with migrations (schemas/v0.py, v1.py) and telemetry schema is deployment-pinnable - so schema pinning is clearly understood - but nothing pins the AGENT definition to an in-flight invocation."
+    evidence: "src/google/adk/sessions/schemas/ @ 85b52f6; src/google/adk/telemetry/_schema_version.py"
 
   # --- D. Agent identity and lifecycle ---
   # D1: Is an agent globally addressable? By what identifier?
   D1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Agents have a name used for transfer and tracing, but no id and no persisted identity record."
+    evidence: "src/google/adk/agents/base_agent.py @ 85b52f6"
   # D2: Does identity survive process restart?
   D2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No persisted agent identity."
+    evidence: "src/google/adk/agents/ @ 85b52f6"
   # D3: Is identity distinct from runtime instance?
   D3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "The agent class/config is the definition and the Invocation is the execution, but there is no Agent definition resource."
+    evidence: "src/google/adk/agents/ @ 85b52f6"
   # D4: Are agents versioned? Immutable or mutable definitions?
   D4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent versioning. Note the contrast: session STORAGE schema and TELEMETRY schema are both versioned, so the team versions what it owns - just not agents."
+    evidence: "src/google/adk/sessions/schemas/ @ 85b52f6"
   # D5: Is there a registry or catalog?
   D5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "auth_provider_registry, credential_exchanger_registry and credential_refresher_registry are real registries - but for credential providers, not agents."
+    evidence: "src/google/adk/auth/auth_provider_registry.py @ 85b52f6"
   # D6: Can agents discover each other at runtime?
   D6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent discovery beyond A2A agent cards at the interop edge."
+    evidence: "src/google/adk/a2a/ @ 85b52f6"
   # D7: Can agents advertise capabilities? In what format?
   D7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No declared capability metadata for agents or runtimes."
+    evidence: "src/google/adk/agents/ @ 85b52f6"
   # D8: Is there an owner, team, or tenant on the agent record?
   D8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Everything is owned by (app_name, user_id): sessions, memory, artifacts, credentials, and app:/user: state scopes."
+    evidence: "src/google/adk/sessions/schemas/v0.py:146-161 @ 85b52f6"
   # D9: Can an agent be suspended, revoked, or deprecated?
   D9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No revocation or deprecation lifecycle for agents. TEN PROJECTS absent."
+    evidence: "src/google/adk/agents/ @ 85b52f6"
   # D10: Is there anything resembling a declarative agent manifest?
   D10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Agents can be declared in config (agents can be built from YAML-ish config objects) and Apps carry declarative configuration, but there is no portable agent-image manifest of the Omnigent or Pydantic AI kind."
+    evidence: "src/google/adk/apps/_configs.py @ 85b52f6"
 
   # --- E. Harness and runtime interoperability ---
   # E1: What is the minimum interface an agent implementation must satisfy?
   E1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "THE MOST CONSISTENTLY APPLIED PATTERN IN THE STUDY, generalised beyond runtimes: BaseSessionService, BaseMemoryService, BaseArtifactService, BaseCredentialService, BaseCodeExecutor, BaseEvalService, BaseCredentialExchanger, BaseCredentialRefresher, BaseEventsSummarizer - each with an InMemory implementation AND a managed one, so the local path and the production path are the same code with a different injection."
+    evidence: "src/google/adk/memory/base_memory_service.py @ 85b52f6; src/google/adk/sessions/base_session_service.py"
   # E2: Transport: stdin/stdout, HTTP, gRPC, WebSocket, in-process, ACP, A2A?
   E2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Code executors span container, GKE, Vertex AI, Agent Engine sandbox and model-native; A2A provides HTTP interop; MCP for tools."
+    evidence: "src/google/adk/code_executors/ @ 85b52f6"
   # E3: Can it host a foreign agent (Claude Code, Codex, OpenHands, LangGraph, ADK)?
   E3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A2A agents can be wrapped as ADK agents (a2a/agent, a2a/converters, a2a/executor), and MCP tools are consumed - so third-party agents are reachable through the A2A protocol."
+    evidence: "src/google/adk/a2a/ @ 85b52f6"
   # E4: Is there an event stream out of a running agent? What granularity?
   E4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Typed Event stream with an on_event_callback hook, plus four distinct error callbacks (on_model_error, on_tool_error, on_agent_error, on_run_error)."
+    evidence: "src/google/adk/plugins/base_plugin.py:114-396 @ 85b52f6"
   # E5: Are tool calls externally observable, or internal to the agent?
   E5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "before_tool_callback / after_tool_callback / on_tool_error_callback, plus auth_preprocessor injecting credentials into tool calls."
+    evidence: "src/google/adk/plugins/base_plugin.py:297-348 @ 85b52f6"
   # E6: How is context injected at start?
   E6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "App and agent configuration objects (ResumabilityConfig, EventsCompactionConfig) are declarative Pydantic models with extra='forbid'."
+    evidence: "src/google/adk/apps/_configs.py:49-56 @ 85b52f6"
   # E7: Is cancellation supported? Cooperative or forced? Does it propagate to subagents?
   E7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No cancellation model found for an in-flight invocation."
+    evidence: "src/google/adk/runners.py @ 85b52f6"
   # E8: Can a run be checkpointed and restored by the platform, or only by the agent?
   E8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Resumability plus event rewind: an invocation resumes from the last event, and rewind_before_invocation_id logically drops a range of events with _apply_rewinds as the single source of truth."
+    evidence: "src/google/adk/events/_rewind_events.py @ 85b52f6"
   # E9: Which of these would be hard to adapt, and why?
   E9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Abstract base classes with docstring contracts throughout, an AGENTS.md, llms.txt and llms-full.txt for machine consumption, and per-Python-version constraints files."
+    evidence: "src/google/adk/memory/base_memory_service.py:43-49 @ 85b52f6; llms.txt"
 
   # --- F. Agent-to-agent communication ---
   # F1: Direct messages between agents?
   F1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No durable agent-to-agent messaging. Coordination is through shared session State and LLM-driven transfer. AG2 remains the sole answer."
+    evidence: "src/google/adk/agents/ @ 85b52f6"
   # F2: Channels, topics, or pub/sub?
   F2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No channels or pub/sub between agents."
+    evidence: "src/google/adk/agents/ @ 85b52f6"
   # F3: Task delegation as a distinct mechanism from messaging?
   F3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Agent transfer and agent-as-tool are first-class delegation mechanisms, with SequentialAgent / ParallelAgent / LoopAgent for structured composition."
+    evidence: "src/google/adk/agents/ @ 85b52f6"
   # F4: Synchronous RPC between agents?
   F4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A2A gives RPC-shaped interop at the edge; internally an agent is called as a tool."
+    evidence: "src/google/adk/a2a/executor/ @ 85b52f6"
   # F5: Asynchronous inbox or mailbox?
   F5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No mailbox or inbox."
+    evidence: "src/google/adk/agents/ @ 85b52f6"
   # F6: Is delivery durable? Survives restart of sender and receiver?
   F6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No inter-agent delivery layer, so no delivery guarantees to state."
+    evidence: "src/google/adk/agents/ @ 85b52f6"
   # F7: Is message ordering guaranteed? Per what scope?
   F7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Events are ordered within a session, and _apply_rewinds defines authoritatively which are live after a rewind."
+    evidence: "src/google/adk/events/_rewind_events.py @ 85b52f6"
   # F8: Acknowledgement or delivery receipts?
   F8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No inter-agent acknowledgement."
+    evidence: "src/google/adk/agents/ @ 85b52f6"
   # F9: Correlation ids for request/response pairing?
   F9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "invocation_id correlates events within a run, (app_name, user_id, session_id) scopes everything, and OTel spans carry gen_ai plus adk.* attributes."
+    evidence: "src/google/adk/telemetry/_adk_attributes.py @ 85b52f6"
   # F10: Conversation threading?
   F10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Event REWIND is effectively a branch operation: rewind_before_invocation_id drops an invocation and everything after it, so history can be replayed differently from a chosen point."
+    evidence: "src/google/adk/events/_rewind_events.py @ 85b52f6"
   # F11: Capability-based routing — address by what an agent *can do* rather than who it is?
   F11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "LLM-driven transfer selects a sub-agent by description, which is capability-ish routing, but there is no declared capability index."
+    evidence: "src/google/adk/agents/ @ 85b52f6"
 
   # --- G. Human-agent collaboration ---
   # G1: Is a human modelled as a special kind of agent, a distinct principal type, or not modelled?
   G1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No principals. Notably ADK models CREDENTIALS the agent carries outward thoroughly and inbound authority not at all."
+    evidence: "src/google/adk/auth/ @ 85b52f6"
   # G2: Shared rooms, channels, or workspaces?
   G2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "App and (app_name, user_id) scoping delimit a workspace-like boundary, but there is no shared multi-human space."
+    evidence: "src/google/adk/sessions/schemas/v0.py:146-161 @ 85b52f6"
   # G3: Task threads humans can read and post into?
   G3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A CLI with a dev UI, live/ bidirectional streaming, and event streams let a human drive and observe a running agent."
+    evidence: "src/google/adk/cli/ @ 85b52f6"
   # G4: Mentions or directed addressing?
   G4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No participant addressing."
+    evidence: "src/google/adk/agents/ @ 85b52f6"
   # G5: Approval gates. Blocking or advisory? Durable while pending?
   G5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Long-running function calls pause the invocation until resolved, and resumability makes the pause durable - approval outlives the process. before_tool_callback can gate a call."
+    evidence: "src/google/adk/apps/_configs.py:32-36 @ 85b52f6"
   # G6: Mid-run intervention: can a human redirect without restarting?
   G6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A human can resume a paused invocation, rewind to before an invocation, and gate tools via callbacks."
+    evidence: "src/google/adk/events/_rewind_events.py @ 85b52f6"
   # G7: Agent status and presence visible to humans?
   G7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Events and plugin callbacks expose progress and errors, but there is no WAITING_FOR_HUMAN status field."
+    evidence: "src/google/adk/plugins/base_plugin.py:155 @ 85b52f6"
   # G8: Notifications or escalation when an agent is blocked?
   G8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No notification or escalation."
+    evidence: "src/google/adk/ @ 85b52f6"
   # G9: Shared scratchpad or working surface?
   G9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Session State with app:/user:/temp:/session scopes is shared context, and artifacts are shared per session or per user."
+    evidence: "src/google/adk/sessions/state.py:64-66 @ 85b52f6"
   # G10: Can a human see the context an agent is operating on?
   G10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Full event history, a sqlite_span_exporter for local trace inspection, a dev UI, and an evaluation package."
+    evidence: "src/google/adk/telemetry/sqlite_span_exporter.py @ 85b52f6"
 
   # --- H. Context and memory ---
   # H1: Which of these exist as *separate* concepts: prompt context, working state, session history, ...
   H1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "THE ONLY REAL MEMORY SERVICE IN THE STUDY. BaseMemoryService with add_session_to_memory, add_events_to_memory, add_memory and search_memory, scoped by (app_name, user_id). Implementations: in-memory, VERTEX AI MEMORY BANK, and VERTEX AI RAG. Verified live."
+    evidence: "src/google/adk/memory/base_memory_service.py:43-140 @ 85b52f6; verified live against google-adk 2.7.1 (PyPI, 2026-08-26)"
   # H2: Who owns memory: agent, human, workspace, task, or tenant?
   H2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Memory is scoped by (app_name, user_id) on every call, and state has explicit app: and user: scopes - ownership is in the key."
+    evidence: "src/google/adk/memory/base_memory_service.py:64-72 @ 85b52f6; src/google/adk/sessions/state.py:64-66"
   # H3: Can memory be shared between agents? At what granularity?
   H3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "app: state is application-wide across users and sessions; user: state is per-user across sessions. Cross-session sharing is a declared scope rather than an accident."
+    evidence: "src/google/adk/sessions/state.py:64-66 @ 85b52f6; verified live against google-adk 2.7.1 (PyPI, 2026-08-26)"
   # H4: Are there permissions on memory?
   H4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Scoping by (app_name, user_id) is enforced in the storage primary key, which prevents accidental cross-user reads - but there is no authorization check on the claimed user_id."
+    evidence: "src/google/adk/sessions/schemas/v0.py:146-161 @ 85b52f6"
   # H5: Is provenance tracked — where a memory came from?
   H5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "FIRST REAL MEMORY PROVENANCE: MemoryEntry carries author and timestamp, with the timestamp documented as 'when the original content of this memory happened' - event time, not storage time - plus an id and custom_metadata."
+    evidence: "src/google/adk/memory/memory_entry.py:26-45 @ 85b52f6"
   # H6: Expiry, TTL, or forgetting?
   H6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "TTL is named as an example of a service-specific field to pass via custom_metadata that 'may later become first-class API parameters', so expiry is anticipated but not in the interface. temp: state is discarded by construction."
+    evidence: "src/google/adk/memory/base_memory_service.py:86-90 @ 85b52f6"
   # H7: Summarisation or compaction. Automatic or explicit?
   H7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "EventsCompactionConfig with a pluggable BaseEventsSummarizer and an LLM summarizer; apps/compaction.py applies it alongside rewind resolution."
+    evidence: "src/google/adk/apps/compaction.py @ 85b52f6"
   # H8: Retrieval mechanism: vector, keyword, structured, agent-driven?
   H8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "search_memory(app_name, user_id, query) returning SearchMemoryResponse with matching MemoryEntry list, backed by Vertex AI RAG or Memory Bank."
+    evidence: "src/google/adk/memory/base_memory_service.py:124-140 @ 85b52f6"
   # H9: Can an agent mutate its own memory mid-run?
   H9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Agents write state (including app:/user: scopes) and can add to memory; output_key writes tool results into state."
+    evidence: "src/google/adk/sessions/state.py @ 85b52f6"
   # H10: Conflict resolution on concurrent writes?
   H10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "app: and user: state are shared mutable scopes; unprefixed session state is schema-validated so a stray key raises StateSchemaError."
+    evidence: "src/google/adk/sessions/state.py:24-46 @ 85b52f6"
   # H11: Is memory in the same store as execution state, or separate?
   H11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "CLEANEST SEPARATION IN THE STUDY: execution state is the Session (events + state, with four scopes), knowledge is the MemoryService (semantic recall), and artifacts are a third service. Three interfaces, three lifetimes."
+    evidence: "src/google/adk/memory/base_memory_service.py @ 85b52f6; src/google/adk/sessions/; src/google/adk/artifacts/"
 
   # --- I. Tools and capabilities ---
   # I1: Are tools bound to agents statically, or resolved dynamically?
   I1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A large tools/ package, MCP support, OpenAPI-derived tool generation, and auth_tool for tools that declare credential requirements."
+    evidence: "src/google/adk/tools/ @ 85b52f6"
   # I2: Is there a capability abstraction distinct from tool implementation?
   I2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No declared capability-metadata model. In Pydantic AI's terms ADK has extensions (plugins, callbacks, services) but not capabilities-as-claims."
+    evidence: "src/google/adk/plugins/base_plugin.py @ 85b52f6"
   # I3: Is there a registry of available tools?
   I3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Toolsets and MCP toolsets, plus auth_provider_registry, credential_exchanger_registry and credential_refresher_registry."
+    evidence: "src/google/adk/tools/ @ 85b52f6"
   # I4: Tool scoping — can an agent be restricted to a subset?
   I4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "before_tool_callback can block or rewrite a call, context_filter_plugin constrains what reaches the model, and tools are attached per agent."
+    evidence: "src/google/adk/plugins/context_filter_plugin.py @ 85b52f6"
   # I5: Are tools versioned?
   I5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No tool versioning."
+    evidence: "src/google/adk/tools/ @ 85b52f6"
   # I6: How are credentials supplied to a tool?
   I6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "BEST TOOL-CREDENTIAL STORY IN THE STUDY: five typed credential kinds (apiKey, http, oauth2, openIdConnect, serviceAccount), auth_schemes from OpenAPI, OIDC discovery, a credential_manager, an auth_preprocessor that injects credentials into tool calls, and a pluggable BaseCredentialService (in-memory or session-state)."
+    evidence: "src/google/adk/auth/auth_credential.py:232-252 @ 85b52f6; src/google/adk/auth/credential_manager.py; verified live against google-adk 2.7.1 (PyPI, 2026-08-26)"
   # I7: OAuth or delegated user credentials?
   I7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Full OAuth2 lifecycle with SEPARATE registries for exchange and refresh: BaseCredentialExchanger + oauth2_credential_exchanger + registry, and BaseCredentialRefresher + oauth2_credential_refresher + registry. Obtaining a credential and keeping it alive are treated as different problems."
+    evidence: "src/google/adk/auth/exchanger/ @ 85b52f6; src/google/adk/auth/refresher/"
   # I8: Can policy intercept a tool call before execution?
   I8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Sixteen named plugin callbacks including before/after model, tool, agent and run, plus four distinct error callbacks - a real interception layer, though not a policy engine with decisions."
+    evidence: "src/google/adk/plugins/base_plugin.py:114-396 @ 85b52f6"
   # I9: Approval gates on specific tools?
   I9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "before_tool_callback gates individual tool calls, and long-running calls plus resumability make an approval durable."
+    evidence: "src/google/adk/plugins/base_plugin.py:297 @ 85b52f6"
   # I10: Do tools execute inside or outside the agent's sandbox?
   I10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Code runs in a pluggable executor: container, GKE, Vertex AI, Agent Engine sandbox, model-native, or explicitly-named unsafe_local."
+    evidence: "src/google/adk/code_executors/ @ 85b52f6"
 
   # --- J. Security and identity ---
   # J1: What identity does an agent authenticate as?
   J1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent principal or agent-level authentication."
+    evidence: "src/google/adk/auth/ @ 85b52f6"
   # J2: Authentication mechanism for agent-to-platform?
   J2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "The framework authenticates OUTBOUND to tools and providers thoroughly, but there is no inbound authentication of a caller."
+    evidence: "src/google/adk/auth/ @ 85b52f6"
   # J3: Authorisation model: RBAC, ABAC, capability tokens, none?
   J3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No authorization model. Storage-layer scoping prevents accidental cross-user access but nothing authorizes the claimed user_id."
+    evidence: "src/google/adk/sessions/schemas/v0.py:146-161 @ 85b52f6"
   # J4: Secret storage and injection?
   J4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A complete credential subsystem: typed credential kinds, OIDC discovery, exchangers, refreshers, a credential manager, and a pluggable credential service (including one backed by session state so credentials follow the conversation)."
+    evidence: "src/google/adk/auth/credential_service/ @ 85b52f6"
   # J5: Per-agent credentials, or shared platform credentials?
   J5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Credentials are per (app_name, user_id) via the credential service, and service-account credentials are a first-class kind."
+    evidence: "src/google/adk/auth/auth_credential.py:251-252 @ 85b52f6"
   # J6: Can an agent act as a user? Is that impersonation or delegation?
   J6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "OAuth2 exchange can obtain user-delegated tokens, which is delegation in the credential sense, but there is no impersonation or agent-acting-as-user principal model."
+    evidence: "src/google/adk/auth/exchanger/oauth2_credential_exchanger.py @ 85b52f6"
   # J7: Tenant isolation: logical, or enforced at runtime?
   J7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "ENFORCED IN THE SCHEMA: StorageSession declares app_name, user_id and id all primary_key=True, so a query that omits or mistakes the scope finds nothing. Same mechanism as Omnigent's workspace_id - second independent convergence on tenancy-in-the-primary-key."
+    evidence: "src/google/adk/sessions/schemas/v0.py:146-161 @ 85b52f6"
   # J8: Network and filesystem isolation?
   J8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Seven pluggable code executors provide the isolation boundary, plus _restricted_pickle.py - an allow-listed unpickler, treating session-state deserialization as an attack surface."
+    evidence: "src/google/adk/code_executors/ @ 85b52f6; src/google/adk/sessions/_restricted_pickle.py"
   # J9: Is there an audit log? Is it tamper-evident?
   J9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Full event history plus OTel spans with stable and experimental semconv tiers, a bigquery_agent_analytics_plugin, and a local sqlite span exporter."
+    evidence: "src/google/adk/telemetry/ @ 85b52f6"
   # J10: Where are policy decisions enforced — control plane, runtime, or tool gateway?
   J10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Enforcement points are the plugin callbacks and the auth preprocessor - explicit locations - but there is no policy decision object or rule engine."
+    evidence: "src/google/adk/plugins/base_plugin.py @ 85b52f6"
 
   # --- K. Sandbox and isolation ---
   # K1: Is there a workspace or sandbox concept? What is its lifecycle?
   K1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "BaseCodeExecutor with container, GKE, Vertex AI, Agent Engine sandbox, built-in (model-native) and unsafe_local implementations, plus a code_executor_context."
+    evidence: "src/google/adk/code_executors/base_code_executor.py @ 85b52f6"
   # K2: Persistent filesystem across runs?
   K2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Artifacts persist per session or per user through BaseArtifactService; executor filesystem persistence depends on the backend."
+    evidence: "src/google/adk/artifacts/ @ 85b52f6"
   # K3: Snapshot and restore?
   K3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Invocation-level pause/resume exists; sandbox-level suspend is the backend's concern."
+    evidence: "src/google/adk/apps/_configs.py:32-36 @ 85b52f6"
   # K4: Network egress rules?
   K4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "NO EGRESS CONTROL, and ADK ships web-fetching tools - so the SSRF and cloud-credential hazard Pydantic AI closes is open here."
+    evidence: "src/google/adk/tools/ @ 85b52f6"
   # K5: Container, microVM, or none?
   K5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "SEVEN executor backends, the widest range in the study, and the dangerous one is NAMED unsafe_local_code_executor so it cannot be selected without reading the word 'unsafe'."
+    evidence: "src/google/adk/code_executors/unsafe_local_code_executor.py @ 85b52f6"
   # K6: Resource quotas: CPU, memory, disk, wall clock?
   K6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "_token_usage.py measures token consumption and eval retry options exist, but there are no resource quotas."
+    evidence: "src/google/adk/telemetry/_token_usage.py @ 85b52f6"
   # K7: How are secrets injected without landing in the image or logs?
   K7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The auth_preprocessor injects credentials into tool calls at execution time, and a session-state credential service keeps them with the conversation rather than in the environment."
+    evidence: "src/google/adk/auth/auth_preprocessor.py @ 85b52f6"
   # K8: Arbitrary code execution? Browser execution?
   K8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Arbitrary code execution is a first-class, pluggable capability across six safe backends plus one explicitly unsafe local one."
+    evidence: "src/google/adk/code_executors/ @ 85b52f6"
   # K9: Is the sandbox pluggable, or a fixed implementation?
   K9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Fully pluggable via BaseCodeExecutor, with the widest set of shipped implementations in the study."
+    evidence: "src/google/adk/code_executors/base_code_executor.py @ 85b52f6"
 
   # --- L. Orchestration and scheduling ---
   # L1: Does it distinguish agent coordination from workflow orchestration?
   L1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Agents own their loop, workflow agents own composition, planners own strategy, and services own state - clean separation by interface."
+    evidence: "src/google/adk/workflow/ @ 85b52f6"
   # L2: Topology: DAG, cyclic graph, supervisor, planner, event-driven, queue?
   L2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "SequentialAgent, ParallelAgent and LoopAgent compose agents structurally; workflow/ and planners/ add strategy. Agent-shaped rather than graph-shaped."
+    evidence: "src/google/adk/agents/ @ 85b52f6"
   # L3: Cron or scheduled triggers?
   L3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No scheduled triggers."
+    evidence: "src/google/adk/runners.py @ 85b52f6"
   # L4: Dynamic task spawning at runtime?
   L4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Agent transfer and agent-as-tool spawn work dynamically at LLM discretion."
+    evidence: "src/google/adk/agents/ @ 85b52f6"
   # L5: Fan-out / fan-in?
   L5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "ParallelAgent fans out and collects; LoopAgent iterates. Declarative composition primitives."
+    evidence: "src/google/adk/agents/ @ 85b52f6"
   # L6: Subagents. Are they first-class, or just nested calls?
   L6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Sub-agents are first-class: an agent tree with transfer, plus agent-as-tool."
+    evidence: "src/google/adk/agents/base_agent.py @ 85b52f6"
   # L7: Retry and backoff policy — declarative or hand-rolled?
   L7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Reflect-and-retry plugins for both model and tool failures - retrying DIFFERENTLY after reflecting on the error, rather than repeating the same call."
+    evidence: "src/google/adk/plugins/reflect_retry_tool_plugin.py @ 85b52f6"
   # L8: Compensation or rollback on failure?
   L8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No compensation or rollback. TEN PROJECTS absent - though event rewind is a partial analogue for conversational state (it undoes the RECORD, not the side effects)."
+    evidence: "src/google/adk/events/_rewind_events.py @ 85b52f6"
   # L9: Does cancellation propagate through the whole tree?
   L9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No cancellation propagation."
+    evidence: "src/google/adk/runners.py @ 85b52f6"
   # L10: Could this be replaced by Temporal or Restate, or is orchestration inseparable from the agent...
   L10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "No workflow engine embedded; composition is agent-shaped and durable orchestration is left to the deployment (Agent Engine, Cloud Run, GKE)."
+    evidence: "src/google/adk/workflow/ @ 85b52f6"
 
   # --- M. Observability ---
   # M1: Which of these are modelled as telemetry objects: trace, run, step, LLM call, tool call, mess...
   M1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "OTel spans and metrics with gen_ai semconv plus adk.* attributes, token usage, node tracing, an auto_tracing_plugin, and a BigQuery analytics plugin."
+    evidence: "src/google/adk/telemetry/ @ 85b52f6"
   # M2: Is telemetry keyed to agent, run, model, task, user, or tenant?
   M2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Keyed to invocation_id, (app_name, user_id, session_id), agent name and skill; adk.experimental.skill.* attributes exist."
+    evidence: "src/google/adk/telemetry/_adk_attributes.py:28-30 @ 85b52f6"
   # M3: OpenTelemetry, proprietary, or none?
   M3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "MOST CAREFULLY STRUCTURED OTEL IN THE STUDY. Stability tiers are SEPARATE MODULES: _stable_semconv.py (guaranteed), _experimental_semconv.py (incubating gen_ai attributes), _adk_attributes.py (vendor-owned, where 'everything named adk.experimental.* ... carries no compatibility guarantee: an attribute may be renamed, restructured, or removed in any release'), and _schema_version.py which lets 'a deployment pin which version of the ADK telemetry format ... it emits'."
+    evidence: "src/google/adk/telemetry/_adk_attributes.py:15-24 @ 85b52f6; src/google/adk/telemetry/_schema_version.py:15-20"
   # M4: Is there a documented, stable event schema?
   M4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Explicit attribute-name constants per stability tier, a pinnable schema version, and _serialization.py for payload shaping."
+    evidence: "src/google/adk/telemetry/_stable_semconv.py @ 85b52f6"
   # M5: Cost and token accounting. Per what unit?
   M5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "_token_usage.py and _agent_engine_metric_exporter track token consumption and emit metrics, but there is no cost calculation or budget."
+    evidence: "src/google/adk/telemetry/_token_usage.py @ 85b52f6"
   # M6: Latency breakdown by phase?
   M6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Span timings across agent, model and tool phases, with node_tracing and an auto-tracing plugin."
+    evidence: "src/google/adk/telemetry/node_tracing.py @ 85b52f6"
   # M7: Error taxonomy?
   M7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Four distinct error callbacks (model, tool, agent, run), an errors/ package, and reflect-retry plugins that consume the error to change behaviour."
+    evidence: "src/google/adk/plugins/base_plugin.py:272-396 @ 85b52f6; src/google/adk/errors/"
   # M8: Can the event stream reconstruct a run after the fact — replay or audit?
   M8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Full event history in the session store with rewind resolution, plus a local sqlite span exporter for trace inspection."
+    evidence: "src/google/adk/telemetry/sqlite_span_exporter.py @ 85b52f6"
 
   # --- N. Multi-tenancy and enterprise ---
   # N1: Resource hierarchy: org, workspace, project, environment?
   N1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "App > (app_name, user_id) > Session is a real hierarchy, enforced in the storage primary key, with app: and user: state scopes to match."
+    evidence: "src/google/adk/sessions/schemas/v0.py:146-161 @ 85b52f6"
   # N2: RBAC model and its granularity?
   N2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No RBAC or role model."
+    evidence: "src/google/adk/auth/ @ 85b52f6"
   # N3: Quotas and cost limits. Enforced or advisory?
   N3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No quotas or cost limits; token usage is measured only. Omnigent remains the only enforcement answer."
+    evidence: "src/google/adk/telemetry/_token_usage.py @ 85b52f6"
   # N4: dev / staging / prod separation?
   N4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "app_name separates applications and deployment targets differ, but there is no declared environment dimension."
+    evidence: "src/google/adk/sessions/schemas/v0.py:146-161 @ 85b52f6"
   # N5: Deployment promotion path?
   N5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No promotion path."
+    evidence: "src/google/adk/ @ 85b52f6"
   # N6: Agent catalog scoped to a tenant?
   N6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent catalog."
+    evidence: "src/google/adk/agents/ @ 85b52f6"
   # N7: Audit retention controls?
   N7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Session schema migrations exist and compaction reduces history, but there is no audit retention policy."
+    evidence: "src/google/adk/sessions/migration/ @ 85b52f6"
   # N8: Is multi-tenancy in the OSS core, or reserved for a commercial tier?
   N8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Tenant-shaped scoping is fully in the OSS code and enforced in the primary key; what is withheld is only the MANAGED backends (Vertex Sessions, Memory Bank), each of which has a working local equivalent."
+    evidence: "src/google/adk/sessions/schemas/v0.py:146-161 @ 85b52f6"
 
   # --- O. API and protocol surface ---
   # O1: List the actual primary endpoints or SDK entry points. Verbatim.
   O1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A CLI with a dev UI, A2A HTTP interop (server and client), MCP, OpenAPI tool generation, and Agent Engine deployment."
+    evidence: "src/google/adk/cli/ @ 85b52f6; src/google/adk/a2a/"
   # O2: Is the API resource-oriented or RPC-flavoured?
   O2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Service interfaces are method-oriented (add/search/get/list/delete) over scoped resources rather than a REST resource model."
+    evidence: "src/google/adk/sessions/base_session_service.py @ 85b52f6"
   # O3: Streaming: SSE, WebSocket, long-poll, gRPC stream?
   O3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Async event streaming, live/ bidirectional support, and an on_event_callback hook."
+    evidence: "src/google/adk/plugins/base_plugin.py:155 @ 85b52f6"
   # O4: Webhooks or outbound callbacks?
   O4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No webhook subscription model."
+    evidence: "src/google/adk/ @ 85b52f6"
   # O5: Which standards are implemented: MCP, A2A, ACP, OTel, OpenAI-compatible?
   O5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A2A, MCP, OpenAPI, OAuth2/OIDC (with discovery), and OpenTelemetry with explicit stable and experimental semconv tiers."
+    evidence: "src/google/adk/a2a/ @ 85b52f6; src/google/adk/auth/oauth2_discovery.py; src/google/adk/telemetry/_stable_semconv.py"
   # O6: Is the API versioned? Stability commitment?
   O6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Semantic package version 2.7.1, versioned session storage schemas (v0, v1) with migrations, a pinnable telemetry schema version, and @experimental markers on unstable APIs."
+    evidence: "src/google/adk/version.py @ 85b52f6; src/google/adk/sessions/schemas/; verified live against google-adk 2.7.1 (PyPI, 2026-08-26)"
   # O7: Is there a separate northbound (client) and southbound (runtime) API?
   O7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Northbound is the CLI/runner/A2A server; southbound is the set of service interfaces and code executors. Real, but not framed as a two-API split."
+    evidence: "src/google/adk/runners.py @ 85b52f6"
 
   # --- P. Storage ---
   # P1: What datastores are required to run it?
   P1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Per concern: sessions (in-memory, SQLite, SQL, Firestore, Redis, Vertex), artifacts (in-memory, GCS), memory (in-memory, Vertex Memory Bank, Vertex RAG), credentials (in-memory, session-state)."
+    evidence: "src/google/adk/sessions/ @ 85b52f6; src/google/adk/memory/"
   # P2: What is treated as authoritative, strongly consistent state?
   P2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The session store is authoritative for events and state, with _apply_rewinds authoritative for which events are live."
+    evidence: "src/google/adk/events/_rewind_events.py @ 85b52f6"
   # P3: What is event-stream or append-only?
   P3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Events are appended and rewind is logical rather than destructive, but session state is a mutable JSON column - a hybrid of append-only and mutable."
+    evidence: "src/google/adk/sessions/schemas/v0.py:163-165 @ 85b52f6"
   # P4: Where do large artifacts go?
   P4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "BaseArtifactService with versioned artifacts and a GCS implementation; save_files_as_artifacts_plugin routes tool outputs there."
+    evidence: "src/google/adk/artifacts/ @ 85b52f6"
   # P5: Is there a vector store? Required or optional?
   P5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Vertex AI RAG memory service provides vector retrieval behind BaseMemoryService.search_memory."
+    evidence: "src/google/adk/memory/vertex_ai_rag_memory_service.py @ 85b52f6"
   # P6: Is storage pluggable, or hardcoded?
   P6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Every store is pluggable behind an ABC with an in-memory implementation - the most thoroughly pluggable persistence layer in the study."
+    evidence: "src/google/adk/sessions/base_session_service.py @ 85b52f6"
 
   # --- Q. Licensing and commercial ---
   # Q1: Exact license, including any per-directory variation.
   Q1:
     verdict: first_class
-    note: "Apache-2.0."
-    evidence: "https://github.com/google/adk-python (GitHub API, read 2026-08-26; 21292★, pushed 2026-08-26)"
+    note: "Apache-2.0 throughout."
+    evidence: "LICENSE @ 85b52f6"
   # Q2: Are there enterprise-only components missing from the OSS repo?
   Q2:
-    verdict: first_class
-    note: "Vertex AI Agent Engine control plane is closed. ADK is open."
-    evidence: "https://github.com/google/adk-python (GitHub API, read 2026-08-26; 21292★, pushed 2026-08-26)"
+    verdict: absent
+    note: "HEALTHIEST OPEN-CORE MODEL IN THE STUDY: the managed services (Vertex Memory Bank, Vertex RAG, Vertex Sessions, Agent Engine) are the commercial layer, but every one sits behind an abstract base class with a WORKING in-memory or local implementation. Nothing is withheld - the interfaces and local implementations are complete enough to build and test against."
+    evidence: "src/google/adk/memory/in_memory_memory_service.py @ 85b52f6"
   # Q3: SaaS or hosted-service restrictions?
   Q3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No SaaS restriction under Apache-2.0."
+    evidence: "LICENSE @ 85b52f6"
   # Q4: Trademark constraints on derived works?
   Q4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Google and ADK naming; Apache-2.0 grants no trademark rights."
+    evidence: "LICENSE @ 85b52f6"
   # Q5: Network copyleft (AGPL, SSPL) implications for a hosted product?
   Q5:
     verdict: absent
-    note: "No network copyleft. Apache-2.0/MIT only across the whole study."
-    evidence: "https://github.com/google/adk-python (GitHub API, read 2026-08-26; 21292★, pushed 2026-08-26)"
+    note: "No network copyleft."
+    evidence: "LICENSE @ 85b52f6"
   # Q6: Verdict: `USE` / `INTEGRATE` / `REFERENCE_ONLY` / `AVOID`, with reasoning.
   Q6:
     verdict: first_class
-    note: "INTEGRATE — ADK is Apache-2.0; managed plane is class B evidence only."
-    evidence: "https://github.com/google/adk-python (GitHub API, read 2026-08-26; 21292★, pushed 2026-08-26)"
+    note: "REUSE (targeted). Apache-2.0 and Python. Worth taking: the service-interface-plus-in-memory-implementation pattern, the credential exchange/refresh split, three-tier state scoping with temp:, MemoryEntry provenance, and the telemetry stability tiers. The rest is Google-stack-shaped."
+    evidence: "LICENSE @ 85b52f6"
 
   # --- R. Developer experience ---
   # R1: Time from clone to a running agent. Actual elapsed minutes.
   R1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "VERIFIED: python -m venv, pip install google-adk, import and inspect - clean first try, 2.7.1. In-memory services mean no infrastructure is needed to run."
+    evidence: "verified live against google-adk 2.7.1 (PyPI, 2026-08-26)"
   # R2: How many concepts before "hello world"?
   R2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "An agent plus a runner plus a model is a small start, but the full model is large: App, Agent, Session, State scopes, MemoryService, ArtifactService, CredentialService, plugins, executors."
+    evidence: "src/google/adk/runners.py @ 85b52f6"
   # R3: Is there a local dev loop? Hot reload?
   R3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Excellent: an InMemory implementation of every service, a CLI dev UI, a local sqlite span exporter, and per-Python-version constraints files for reproducible installs."
+    evidence: "src/google/adk/cli/ @ 85b52f6; constraints-3.13.txt"
   # R4: How do you debug a stuck run?
   R4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Full event history, sixteen plugin callbacks, a debug_logging_plugin, a local sqlite span exporter, and a dev UI."
+    evidence: "src/google/adk/plugins/debug_logging_plugin.py @ 85b52f6"
   # R5: Can an agent be unit tested? Is there a test harness?
   R5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "In-memory services make every path testable without infrastructure, plus a whole evaluation package (BaseEvalService, eval sets, agent_evaluator, scenario generation)."
+    evidence: "src/google/adk/evaluation/ @ 85b52f6"
   # R6: Deployment story?
   R6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Agent Engine, Cloud Run, GKE or self-hosted, with a deploy path in the CLI."
+    evidence: "src/google/adk/cli/ @ 85b52f6"
   # R7: CLI ergonomics — try the equivalent of `init`, `agent add`, `run`.
   R7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A real CLI with run, eval, web/dev UI and deploy subcommands."
+    evidence: "src/google/adk/cli/ @ 85b52f6"
 
   # --- S. Hard scenarios ---
   # S1: Delegated authority
   S1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "The strongest CREDENTIAL story in the study - five typed kinds, OAuth2 exchange and refresh as separate registries, OIDC discovery, a pluggable credential service - but no agent principal, so the agent acts WITH credentials rather than AS an identity. Omnigent's RFC 8628 remains the only first_class answer."
+    evidence: "src/google/adk/auth/ @ 85b52f6"
   # S2: Torn side effect
   S2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "No effect ledger, but the hazard is stated as a developer contract with the guarantee named: 'Tool call to resume needs to be idempotent because we only guarantee an at-least-once behavior once resumed.' The clearest articulation in the study - and it delegates the work rather than doing it."
+    evidence: "src/google/adk/apps/_configs.py:38-40 @ 85b52f6"
   # S3: Upgrade mid-flight
   S3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "Session storage schema is versioned with migrations and telemetry schema is deployment-pinnable, so this team understands schema pinning - yet nothing pins the agent definition to an in-flight invocation. Ten projects, still nobody versions AND pins."
+    evidence: "src/google/adk/sessions/schemas/ @ 85b52f6; src/google/adk/telemetry/_schema_version.py"
   # S4: Concurrent memory write
   S4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "Best answer in the study, by DECOMPOSITION rather than locking: app: / user: / temp: / session scopes separate what is shared from what is not, and unprefixed session state is validated against a declared Pydantic schema so a stray or mistyped key raises StateSchemaError. Reduces the surface where conflict can occur rather than resolving conflicts."
+    evidence: "src/google/adk/sessions/state.py:24-46,64-66 @ 85b52f6"
   # S5: Cancellation tree
   S5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No cancellation model found."
+    evidence: "src/google/adk/runners.py @ 85b52f6"
   # S6: Silent context loss
   S6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class_answer
+    note: "TWO EXPLICIT MECHANISMS. EventsCompactionConfig with a pluggable BaseEventsSummarizer performs compaction deliberately, and event REWIND makes history reduction first-class and inspectable, with _apply_rewinds documented as 'the single source of truth for which events are live after rewinds'. Context loss is a modelled operation rather than a side effect."
+    evidence: "src/google/adk/apps/compaction.py @ 85b52f6; src/google/adk/events/_rewind_events.py"
   # S7: Poison message
   S7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "Reflect-and-retry plugins consume the error and retry DIFFERENTLY rather than repeating the same call, and four distinct error callbacks let a plugin classify failures. No dead-letter or quarantine."
+    evidence: "src/google/adk/plugins/_reflect_retry_model_plugin.py @ 85b52f6"
   # S8: Tenant leak
   S8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class_answer
+    note: "ENFORCED IN THE SCHEMA, which I checked rather than assumed: StorageSession declares app_name, user_id and id all primary_key=True (sessions/schemas/v0.py:146-161), so a query that omits or mistakes the scope finds nothing. Second independent convergence on tenancy-in-the-primary-key after Omnigent. Caveat: nothing authorizes the caller's claim to a user_id, so this prevents accidental leaks, not deliberate impersonation."
+    evidence: "src/google/adk/sessions/schemas/v0.py:146-161 @ 85b52f6"
   # S9: Runaway spend
   S9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "Token usage is measured; nothing enforces a budget."
+    evidence: "src/google/adk/telemetry/_token_usage.py @ 85b52f6"
   # S10: Zombie sandbox
   S10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "Code executors are pluggable but sandbox lifecycle reaping is the backend's concern."
+    evidence: "src/google/adk/code_executors/ @ 85b52f6"
 
 object_model: |
-  # ASCII tree of resources that actually exist
+  App                          is_resumable, compaction config, plugins
+   `-- Agent (BaseAgent)       LlmAgent | Sequential | Parallel | Loop
+        `-- Invocation         one run; resumable, rewindable
+             `-- Event         actions{rewind_before_invocation_id, ...}
 
-strongest_ideas: []
+  Session                      (app_name, user_id, session_id)
+   |-- State                   FOUR SCOPES by key prefix:
+   |    |-- "app:"             application-wide
+   |    |-- "user:"            per-user, cross-session
+   |    |-- "temp:"            NEVER persisted (filtered by every backend)
+   |    `-- (unprefixed)       session-scoped, schema-VALIDATED
+   `-- Event[]                 the transcript
 
-weakest_choices: []
+  MemoryEntry                  content, author, timestamp, id, custom_metadata
+  AuthCredential               apiKey | http | oauth2 | openIdConnect
+                               | serviceAccount
+  Artifact                     versioned, per-session or per-user
 
-reusable_components: []
-  # - component: 
-  #   decision: INTEGRATE   # BUILD|INTEGRATE|ADOPT_AS_STANDARD|REUSE|DEFER
-  #   note: 
+strongest_ideas:
+  - "Every stateful concern behind an abstract base class WITH an in-memory implementation, so the local development path and the production path are the same code with a different service injected - not a mock, not a separate mode."
+  - "Four state scopes by key prefix (app:, user:, temp:, unprefixed session), with temp: filtered out independently by every persistence backend."
+  - "Unprefixed session state validated against a declared Pydantic schema, raising StateSchemaError on an undeclared or mistyped key - while prefixed namespaces are deliberately exempt. The scoped namespaces are open, the session's own contract is closed."
+  - "MemoryEntry records author and timestamp, with the timestamp documented as 'when the original content of this memory happened' - event time, not storage time."
+  - "Credential EXCHANGE and REFRESH as separate registries behind separate interfaces: obtaining a credential and keeping it alive are different problems with different failure modes."
+  - "An optional interface method whose NotImplementedError names the fallback: 'This memory service does not support adding event deltas. Call add_session_to_memory(session) to ingest the full session.'"
+  - "custom_metadata as a documented staging area: 'Prefer this for service-specific fields (e.g., TTL) that may later become first-class API parameters.'"
+  - "Stating the idempotency requirement as a developer contract with the guarantee named: 'Tool call to resume needs to be idempotent because we only guarantee an at-least-once behavior once resumed.'"
+  - "Marking non-durable state IN THE KEY (temp:), so 'any temporary / in-memory state will be lost upon resumption' is visible at the point of use."
+  - "Event rewind with a single documented source of truth: rewind_before_invocation_id drops a range, and _apply_rewinds is 'the single source of truth for which events are live'."
+  - "Naming the dangerous executor unsafe_local_code_executor, so it cannot be chosen without reading the word 'unsafe'."
+  - "Telemetry stability tiers as SEPARATE MODULES: _stable_semconv, _experimental_semconv, and _adk_attributes for vendor-owned names."
+  - "adk.experimental.* attributes explicitly declaring 'no compatibility guarantee: an attribute may be renamed, restructured, or removed in any release'."
+  - "A deployment-pinnable telemetry schema version, so consumers pin while producers evolve."
+  - "An allow-listed unpickler for session state, treating deserialization as an attack surface."
+  - "Tenancy enforced in the composite primary key (app_name, user_id, id) - the same mechanism as Omnigent's workspace_id, arrived at independently."
+  - "Reflect-and-retry rather than retry-identically: consume the error and change the next attempt."
+  - "Sixteen named lifecycle hooks including four distinct error callbacks (model, tool, agent, run)."
+  - "Per-Python-version constraints files (3.10 through 3.14) for reproducible installs."
+  - "A credential service backed by session state, so credentials follow the conversation rather than requiring separate infrastructure."
+  - "Six managed services, every one behind an interface with a working local implementation - open core without withholding anything needed to build or test."
 
-lessons: []
+weakest_choices:
+  - "No agent identity, registry, versioning or revocation - despite versioning session storage schemas AND telemetry schemas carefully."
+  - "No principals, authorization model or policy engine: outbound credentials are excellent, inbound authority is unmodelled. Storage-layer scoping prevents accidental cross-tenant reads but nothing authorizes the claimed user_id."
+  - "Idempotency delegated entirely to tool authors, honestly but completely - asking every tool author to solve a distributed-systems problem correctly."
+  - "No durable agent-to-agent messaging."
+  - "No cancellation model at all."
+  - "NO EGRESS CONTROL, and ADK ships web-fetching tools - the SSRF and cloud-credential hazard Pydantic AI closes is open here."
+  - "No quotas or cost enforcement; token usage is measured only."
+  - "Large shipped surface including labs/, features/, optimization/ and @experimental markers."
+  - "State is a mutable JSON column while events are appended - a hybrid that makes 'what is authoritative' less crisp than a pure log."
 
-adr_impact: []
-  # - adr: ADR-0001
-  #   effect: confirms      # confirms|amends|challenges|neutral
-  #   note: 
+reusable_components:
+  - component: "Service interface + in-memory implementation for every stateful concern"
+    decision: ADOPT_AS_STANDARD
+    note: "Local and production paths become the same code."
+  - component: "Four state scopes (app:/user:/temp:/session)"
+    decision: ADOPT_AS_STANDARD
+    note: "The concrete mechanism ADR-0008 was missing."
+  - component: "temp: filtered by every backend"
+    decision: ADOPT_AS_STANDARD
+    note: "Non-durable state marked at the point of use."
+  - component: "Schema-validated session state"
+    decision: ADOPT_AS_STANDARD
+    note: "Only typed session state in the study."
+  - component: "MemoryEntry{author, timestamp} with event-time semantics"
+    decision: ADOPT_AS_STANDARD
+    note: "First real memory provenance."
+  - component: "Credential exchange / refresh split"
+    decision: ADOPT_AS_STANDARD
+    note: "Two problems, two interfaces, two registries."
+  - component: "Optional method whose error names the fallback"
+    decision: ADOPT_AS_STANDARD
+    note: "Correct form of the ADR-0012 fail-closed message."
+  - component: "custom_metadata as declared staging area"
+    decision: REUSE
+    note: "Honest extension point with a stated migration path."
+  - component: "Idempotency stated as a contract, with the guarantee named"
+    decision: ADOPT_AS_STANDARD
+    note: "Quote it in ADR-0014, then take the obligation back."
+  - component: "Event rewind + single source of truth"
+    decision: REUSE
+    note: "Logical history reduction over an append-only store."
+  - component: "unsafe_local naming"
+    decision: ADOPT_AS_STANDARD
+    note: "Make the unsafe path visible rather than convenient."
+  - component: "Telemetry stability tiers as separate modules"
+    decision: ADOPT_AS_STANDARD
+    note: "Completes ADR-0010 alongside Cloudflare and Pydantic AI."
+  - component: "Pinnable telemetry schema version"
+    decision: ADOPT_AS_STANDARD
+    note: "Consumers pin, producers evolve."
+  - component: "Tenancy in the composite primary key"
+    decision: ADOPT_AS_STANDARD
+    note: "Second independent convergence; settles the question."
+  - component: "Allow-listed unpickler"
+    decision: REUSE
+    note: "Session state deserialization is an attack surface."
+  - component: "Reflect-and-retry"
+    decision: REUSE
+    note: "Better than identical retry for LLM-caused failures."
+  - component: "Per-Python-version constraints files"
+    decision: REUSE
+    note: "Reproducible installs across interpreter versions."
+  - component: "Idempotency delegated to tool authors"
+    decision: BUILD
+    note: "Reject; the platform performs the replay, so it owns the hazard."
+  - component: "No egress control"
+    decision: BUILD
+    note: "Reject; port Pydantic AI's SSRF guard."
+
+lessons:
+  - "THE ONLY REAL MEMORY SERVICE IN THE STUDY, and it CONFIRMS rather than contradicts ADR-0008's claim that memory is not one thing: a BaseMemoryService for semantic recall (scoped (app_name, user_id), backed by Vertex Memory Bank or RAG) and SEPARATELY a four-scope state model (app:, user:, temp:, session). Adopt both the split and the prefix mechanism. MemoryEntry.author/timestamp gives the provenance our Knowledge node needs. (confirms ADR-0008 strongly)"
+  - "SPLITS ADR-0007 in a way I had not considered: ADK has an excellent model of CREDENTIALS the agent carries outward (five typed schemes, OAuth2 exchange and refresh as separate registries, OIDC discovery, a pluggable credential service) and NO model of authority flowing inward (no principals, no authorization). Our ADR conflates these. A Principal model and a Credential model are different subsystems, and a system can have one without the other. (challenges ADR-0007)"
+  - "The most consistent application of the adapter pattern in the study, generalised beyond runtimes: every stateful concern is a service interface with an in-memory implementation AND a managed one. The lesson for our adapter design is the in-memory sibling - if every pluggable interface ships a working local implementation, development and production are the same code path. (confirms ADR-0004 strongly)"
+  - "Seven pluggable code executors (container, GKE, Vertex, Agent Engine sandbox, model-native, unsafe_local) - widest range in the study. But no egress guard, so ADK ships web-fetching tools with the SSRF hazard Pydantic AI closes. Our three-boundary sandbox needs all three: ADK has the process boundary, Pydantic AI has egress, Cloudflare argues storage. (confirms ADR-0009 strongly)"
+  - "COMPLETES ADR-0010. Cloudflare: follow the conventions. Pydantic AI: version your adherence. ADK: separate stable from experimental into distinct modules, namespace what you own, declare that adk.experimental.* carries no compatibility guarantee, and let the DEPLOYMENT pin the telemetry schema version. Adopt all four. (confirms ADR-0010)"
+  - "Invocation is pausable, resumable 'from the last event', and REWINDABLE. No separate Task, but rewind is a Run-level operation my model lacked: our Run should support a logical rewind marker rather than only forward progress. (amends ADR-0002)"
+  - "States ADR-0014's requirement better than I did: 'Tool call to resume needs to be idempotent because we only guarantee an at-least-once behavior once resumed.' A platform naming its guarantee precisely and pushing the remainder to the developer. Our ADR should quote it, then explain why we take the obligation BACK - a platform that replays owns the hazard. (confirms ADR-0014)"
+  - "Second independent convergence on tenancy-in-the-primary-key: StorageSession declares app_name, user_id and id all primary_key=True, exactly like Omnigent's workspace_id. Two projects reaching the same mechanism independently settles this for our design. (confirms J7 approach)"
+  - "Best example in the study of the ADR-0012 fail-closed MESSAGE rule: an unsupported optional method raises NotImplementedError naming the fallback. Compare OpenHands' silent pause() no-op - same situation, opposite handling. (confirms ADR-0012)"
+  - "TEN PROJECTS and nobody versions AND pins. ADK versions session storage schemas with migrations and makes telemetry schema pinnable, so this team plainly understands schema pinning - and still nothing pins the agent definition to an in-flight invocation. The consistency of this gap across projects that version other things carefully is now the strongest argument for ADR-0011 being a genuine differentiator. (confirms ADR-0011 negatively)"
+  - "METHODOLOGICAL, and the third of its kind: Phase 1 triaged this class B on its README and package shape. It has the only memory service, the best credential subsystem, the only typed session state, the widest sandbox range, and the most careful telemetry structure. With AG2 (dismissed on a tally) and Pydantic AI (stale version), THREE of Phase 3's six passes found substantially more than recon predicted, and each time the error was trusting a cheap signal over the source."
+
+adr_impact:
+  - adr: ADR-0001
+    effect: neutral
+    note: "Agents are Python objects with a name; no identity, registry or lifecycle."
+  - adr: ADR-0002
+    effect: amends
+    note: "Invocation is pausable, resumable from the last event, and REWINDABLE. Our Run needs a logical rewind marker."
+  - adr: ADR-0003
+    effect: confirms
+    note: "No durable agent messaging; coordination via shared State. AG2 remains the sole precedent."
+  - adr: ADR-0004
+    effect: confirms
+    note: "Most consistent application in the study, generalised to every stateful concern - each with an in-memory sibling."
+  - adr: ADR-0005
+    effect: confirms
+    note: "MCP and OpenAPI tool generation as protocols, with no capability-claim model."
+  - adr: ADR-0006
+    effect: confirms
+    note: "a2a/ is a converter-and-executor interop layer marked experimental, separate from the internal model. Second confirmation after AG2."
+  - adr: ADR-0007
+    effect: challenges
+    note: "Splits the ADR: excellent outbound credential model, no inbound authority model. Principal and Credential are different subsystems."
+  - adr: ADR-0008
+    effect: confirms
+    note: "The only real memory service, and it validates the claim: a memory SERVICE for recall plus four STATE scopes. Adopt both."
+  - adr: ADR-0009
+    effect: confirms
+    note: "Seven pluggable code executors, widest in the study, with the unsafe one named unsafe_local. No egress guard though."
+  - adr: ADR-0010
+    effect: confirms
+    note: "Completes the picture: stable vs experimental semconv modules, vendor namespace, no-guarantee marking, pinnable schema version."
+  - adr: ADR-0011
+    effect: confirms
+    note: "Versions storage and telemetry schemas but not the agent definition. Ten projects, nobody versions AND pins."
+  - adr: ADR-0012
+    effect: confirms
+    note: "Best example of the fail-closed message rule: NotImplementedError naming the fallback."
+  - adr: ADR-0013
+    effect: neutral
+    note: "Sixteen plugin callbacks are real seams, but no policy decision object. Still no shadow mode after ten projects."
+  - adr: ADR-0014
+    effect: confirms
+    note: "States the requirement precisely as a developer contract, naming the at-least-once guarantee."
