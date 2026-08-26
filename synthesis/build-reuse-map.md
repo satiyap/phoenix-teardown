@@ -173,7 +173,10 @@ component they land in.
 
 ## 3. BUILD — no adequate precedent
 
-Four items, each with the evidence for why it is genuinely ours.
+Four **target-architecture** items, each with the evidence for why it is genuinely
+ours. **Two ship in v0.1** (1 and 2); item 3 ships its offline layer only, and item 4
+ships attributable approvals with revocation deferred. See
+[`scope-reconciliation.md`](scope-reconciliation.md) §1.
 
 | # | What | Evidence that nobody does it | Confidence |
 |---|---|---|---|

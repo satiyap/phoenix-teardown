@@ -136,22 +136,47 @@ Recorded so they can be revisited against reality rather than rediscovered.
 ## Success test
 
 The study set this condition in Phase 0: a statement of this form, written from
-evidence rather than taste.
+evidence rather than taste. Stated twice, because **the target architecture and the
+v0.1 shipment are different scopes** (§1 of `scope-reconciliation.md`).
+
+### Target architecture
 
 > **We build** content-derived version pinning on the agent definition, a
 > platform-owned effect ledger, a unified capability-and-extension model with a
-> conformance bench, and agent-level revocation with attributable approvals —
-> because 13 projects show nobody does these, and one of the failures (silent work
-> loss on resume across a definition change) is verified rather than hypothesised.
+> two-layer conformance bench, and agent-level revocation with attributable
+> approvals — because 13 projects show nobody does these, and one of the failures
+> (silent work loss on resume across a definition change) is verified rather than
+> hypothesised.
 >
-> **We integrate** AG2's envelope and hub for messaging, Cedar for policy, Agent
-> Control's control-plane patterns, and `genai-prices` for cost — because each is
-> permissively licensed, independently useful, and better than what we would write.
+> **We integrate** AG2's envelope and hub for messaging, Cedar for policy, and
+> `genai-prices` for cost — because each is permissively licensed, independently
+> useful, and better than what we would write. **We port, but do not run,** Agent
+> Control: it has no `Principal` model, so running it would mean a second policy
+> store unable to name the principal every decision must reference.
 >
 > **We never build** a compensation engine, a workflow engine, a model gateway, an
 > agent-authoring framework, or a bespoke policy/trace/message format — because the
-> evidence says those are either solved elsewhere or absent everywhere for a
-> reason.
+> evidence says those are either solved elsewhere or absent everywhere for a reason.
+
+### v0.1 shipment
+
+> **We build** content-derived pinning and the effect ledger, plus the **offline**
+> conformance-bench layer and **attributable approvals**.
+>
+> **We defer** agent revocation, the live probe layer, `Recall`, and `Task` — each
+> with a named trigger, not forgotten.
+>
+> **We integrate** Cedar and `genai-prices`. **Messaging is contingent**: integrate
+> `ag2.network` only if the storage spike passes, otherwise port its `Envelope`
+> schema and build the hub on our own log. **The spike has not been run.**
+>
+> **We port** Agent Control's `deny | steer | observe` vocabulary, Omnigent's
+> positional fail-closed rule, Pydantic AI's SSRF guard, ADK's four state scopes and
+> in-memory-sibling discipline, HumanLayer's `Approval` schema, AX's fold-the-log
+> derivation, MAF's bytecode-digest pin, and Cloudflare's hung-work detection.
 
 All 25 exit criteria are answered with citations; all 15 ADRs are Accepted with
-evidence from 13 projects.
+evidence from 13 projects. Three probes remain `unknown` and are tracked with reasons
+(`langgraph/C8` closed source; `letta/C5` and `openhands/C5` undocumented delivery
+semantics) — `make check` exits 0 with them present, and fails on any *untracked*
+unknown.

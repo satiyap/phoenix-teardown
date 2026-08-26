@@ -223,7 +223,9 @@ OTel packages and its own audit found dead propagation code.
 ## The four things nobody does
 
 Everything above is assembled from prior art except these, which are the
-differentiators and the risk:
+differentiators and the risk. **These are target-architecture items** — two ship in
+v0.1, one ships partially, one is deferred with a trigger
+([`scope-reconciliation.md`](scope-reconciliation.md) §1):
 
 1. **Content-derived pinning applied to the agent definition.** MAF proves the
    mechanism on workflows; nobody applies it to agents.
