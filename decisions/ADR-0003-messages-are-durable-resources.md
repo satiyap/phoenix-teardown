@@ -48,6 +48,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | OpenHands | confirms | `openhands-agent-server/.../sub_agents_router.py:117 @ 760eea2` | Delegation is a nested conversation, not a message. No mailbox, no ordering, no delivery guarantee between agents. |
 | Letta | amends | `src/channels/ @ 852ca24` vs `src/agent/subagents/ @ 852ca24` | Excellent HUMAN channels (Slack/Discord/Telegram with access control, threads, mentions, durable approvals) and ZERO agent-to-agent messaging. Suggests human collaboration surfaces and agent transport are different problems; one `Channel` resource for both may be a modelling error. |
 | Google AX | confirms | `proto/ax.proto @ b777313` | No agent-to-agent messaging, and no subagents at all. **Four for four absent.** The case for building durable agent messaging now rests entirely on our own requirements, with zero prior art. |
+| Omnigent | confirms | `omnigent/server/routes/comments.py:343-360 @ ba9e371` | No agent-to-agent messaging — **six for six**, and this from a product whose headline feature is supervising multiple agents. Agents relate through parentage (`parent_conversation_id`) and shared `session_state`, never by sending messages. `send_to_agent` is human→agent (formats file-anchored review comments for a person to send). **Decisive: durable agent messaging must not be in v0.1.** |
 
 ## Open questions
 

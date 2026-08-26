@@ -112,6 +112,7 @@ as stated and should be narrowed.
 | LangGraph | neutral | `libs/sdk-py/langgraph_sdk/auth/__init__.py:98 @ 3803173` | Has a specificity fallback chain but no trace and no engine versioning. |
 | OpenHands | neutral | `openhands-sdk/.../hooks/conversation_hooks.py:92 @ 760eea2` | `HookExecutionEvent.blocked` records that a block happened, but not which rule decided or why. |
 | Google AX | neutral | `internal/server/server.go:82-83 @ b777313` | No policy engine at all, so nothing to trace. |
+| Omnigent | confirms | `omnigent/policies/types.py:244-252 @ ba9e371` | **First implementation of the traceability half.** `PolicyResult.deciding_policies` names every policy that drove a composed verdict — a single policy on DENY, all ASKing policies in YAML order on ASK. Policies also *transform* content in a chain, each seeing the previous one's output, which makes PII redaction a policy rather than a special case. No shadow-comparison mode exists, so that half of the ADR remains without precedent after six projects. |
 
 ## Open questions
 

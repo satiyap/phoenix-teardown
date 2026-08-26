@@ -48,6 +48,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | OpenHands | confirms | `openhands-agent-server/.../mcp_router.py:699-790 @ 760eea2` | MCP integrated as a protocol with a full OAuth flow, while policy lives elsewhere (PreToolUse hooks, ConfirmationPolicy, SecurityRisk). Exactly the split this ADR proposes. |
 | Letta | neutral | `src/tools/schemas/ @ 852ca24` | No MCP in the read tree. Tools are native, with schema and description as separate artifacts. |
 | Google AX | neutral | `proto/ax.proto:165-211 @ b777313` | No MCP. Tools appear only as opaque step types the harness owns; AX observes but does not mediate them. |
+| Omnigent | confirms | `omnigent/runner/proxy_mcp_manager.py @ ba9e371`; `omnigent/harness_capabilities.py:124-141` | MCP appears as declarations in the agent image plus a manager and a proxying manager, while capabilities are modelled in a completely separate 16-axis type. The clearest separation of protocol from capability model in the study. |
 
 ## Open questions
 

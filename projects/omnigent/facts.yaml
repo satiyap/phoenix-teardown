@@ -14,935 +14,1082 @@ project:
   evidence_class: A
   read_on: 2026-08-26
   repo: "https://github.com/omnigent-ai/omnigent"
-  commit:                  # SHA the claims were read against
+  commit: ba9e371464695018c8362967a6c23e8725f0cc8c
   docs: "https://omnigent.ai"
-  version:
+  version: "omnigent 0.11.0 (built 2026-08-25), alpha"
   license: Apache-2.0
   license_verdict: INTEGRATE
-  runtime_class: unknown
+  runtime_class: meta_harness
   one_line: Open-source meta-harness providing a common orchestration layer over Claude Code, Codex, Cursor, OpenCode, Hermes and Pi.
-  thesis:                  # the core architectural bet
+  thesis: "The harness is a driver, not the system: declare what each driver can do in one typed model, publish it as API, then verify every declaration against live behaviour with a conformance bench that reports DRIFT when a claim is false."
 
 probes:
 
   # --- A. Core abstraction and object model ---
   # A1: What does this system think an agent *is*? State it in one sentence, in their vocabulary.
   A1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Agent is a first-class persisted entity: id, name, bundle_location (content-addressed tarball), monotonic version, description. Distinguishes TEMPLATE agents (session_id=None) from SESSION-SCOPED agents created inline."
+    evidence: "omnigent/entities/agent.py:31-38 @ ba9e371"
   # A2: What is the root resource — the thing everything else hangs off?
   A2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Conversation is the durable session with parent/root ids for sub-agents, pinned host/runner, labels, session_state, session_usage."
+    evidence: "omnigent/entities/conversation.py:215-217 @ ba9e371"
   # A3: Is `Agent` persistent or ephemeral? Can it exist while not executing?
   A3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Agent rows persist independently of any conversation; template agents exist with no session at all."
+    evidence: "omnigent/entities/agent.py:38 @ ba9e371"
   # A4: Is `Task` a separate resource from `Run`? If not, which concept is missing and what fills the...
   A4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "FIRST REAL TASK/RUN SEPARATION IN THE STUDY: scheduled_tasks (intent: prompt, rrule, timezone, state, max_cost_usd) and scheduled_task_runs (attempt: status, scheduled_at, fired_at, finished_at, error, error_code) are separate tables. Caveat: only for scheduled work, not interactive sessions."
+    evidence: "omnigent/db/db_models.py:1434,1546 @ ba9e371"
   # A5: What is a `Session` attached to: user, agent, task, or execution?
   A5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Conversation is the session; Project groups sessions; ConversationItem is the transcript."
+    evidence: "omnigent/db/db_models.py:777,882,690 @ ba9e371"
   # A6: Are messages first-class durable resources, or transient function arguments?
   A6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "ConversationItem is a persisted, paginated, full-text-searchable transcript row appended via store.append()."
+    evidence: "omnigent/stores/conversation_store/__init__.py:583-600 @ ba9e371"
   # A7: Are artifacts (files, outputs, deliverables) first-class?
   A7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Artifact store holds agent bundles as tarballs keyed by bundle_location; separate file_store for session files."
+    evidence: "omnigent/stores/artifact_store/ @ ba9e371; omnigent/entities/agent.py:21"
   # A8: Can multiple agents participate in one task? How is that represented?
   A8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Sub-agents are conversations with parent_conversation_id / root_conversation_id and kind='sub_agent'; multiple harnesses can be mixed in one session."
+    evidence: "omnigent/entities/conversation.py:49-57 @ ba9e371"
   # A9: Draw the object model as a tree. Only nodes that exist in their code or API.
   A9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Workspace > {User/Account > DeviceGrant, Project, Agent, Policy, Host, ScheduledTask > ScheduledTaskRun, Conversation > {ConversationItem, ConversationLabel, SessionPermission, Comment}}. Richest model in the study. See teardown section 3."
+    evidence: "omnigent/db/db_models.py @ ba9e371"
 
   # --- B. Runtime model ---
   # B1: Does the platform launch agents, host them, or attach to external ones?
   B1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Four-tier: client > server > host daemon > runner (harness subprocess). Server or CLI launches; hosts may be user machines or server-provisioned cloud sandboxes (managed hosts)."
+    evidence: "omnigent/host/, omnigent/runner/ @ ba9e371"
   # B2: Execution substrate: process, container, microVM, serverless, in-process library, remote HTTP?
   B2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Five integration modes named explicitly: SDK_IN_PROCESS, CLI_SUBPROCESS, ACP_SUBPROCESS, NATIVE_TUI (wraps a resident vendor TUI via tmux/file-inject), NATIVE_SERVER."
+    evidence: "omnigent/harness_capabilities.py:24-31 @ ba9e371"
   # B3: Who owns the event loop — platform or agent?
   B3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The runner owns the turn loop and the harness subprocess; the server owns policy and orchestration decisions."
+    evidence: "omnigent/runner/app.py @ ba9e371"
   # B4: Who decides when an agent wakes?
   B4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Server or CLI decides; conversations are pinned to a host_id/runner_id."
+    evidence: "omnigent/entities/conversation.py:61-66 @ ba9e371"
   # B5: Can an agent run indefinitely? What is the actual ceiling?
   B5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Sessions are long-lived and resumable across devices; NATIVE_TUI harnesses keep a resident terminal alive for warm reattach."
+    evidence: "omnigent/harness_capabilities.py:40-45 @ ba9e371"
   # B6: Are there background or unattended agents?
   B6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "FIRST SCHEDULED EXECUTION IN THE STUDY: ScheduledTask with a required RFC 5545 rrule, IANA timezone, lifecycle state (active/paused), and per-firing max_cost_usd. In-process self-rearming timer per task."
+    evidence: "omnigent/entities/scheduled_task.py:25-76 @ ba9e371; omnigent/server/scheduled/scheduler.py:1-24"
   # B7: Is execution synchronous or asynchronous from the caller's view?
   B7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Streaming is a declared capability (token-level deltas) verified live by the bench; SSE and WebSocket tunnels carry it."
+    evidence: "omnigent/harness_capabilities.py:134 @ ba9e371"
   # B8: Can in-flight work migrate between workers?
   B8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "Sessions are PINNED to a host_id/runner_id, so work does not float to any available worker (contrast Google AX, where actors resume onto any worker)."
+    evidence: "omnigent/entities/conversation.py:61-66 @ ba9e371"
   # B9: Can an agent survive a machine restart? Automatically, or with operator action?
   B9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Resume is per-harness and declared: WARM_REATTACH (reattach to a live vendor session) or COLD_ONLY (rebuild from Omnigent transcript). Recovery depends on which the harness supports; NONE means no resume at all."
+    evidence: "omnigent/harness_capabilities.py:40-45 @ ba9e371"
   # B10: Classify: worker/queue, durable actor, attached harness, or in-process library.
   B10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "meta_harness: a control plane over other people's agents, driving them through five declared integration modes."
+    evidence: "omnigent/harness_capabilities.py:24-31 @ ba9e371"
 
   # --- C. Durability and failure semantics ---
   # C1: What state is durable, and what is lost on crash?
   C1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "SQLAlchemy over SQLite or Postgres with Alembic migrations. Conversations, items, labels, session_state and session_usage all persisted."
+    evidence: "omnigent/db/db_models.py @ ba9e371"
   # C2: *When* is state persisted — every step, every tool call, on checkpoint, never?
   C2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "ConversationItem rows are appended as the turn progresses; session_usage is updated transactionally per completion."
+    evidence: "omnigent/stores/conversation_store/__init__.py:583 @ ba9e371"
   # C3: Checkpointing or event sourcing? Can state be rebuilt from a log?
   C3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "MUTABLE RELATIONAL ROWS, not an event log. Durability rests on transactions rather than replay. Its own observability design doc notes a durable append-only event log is 'complementary and tracked separately'."
+    evidence: "designs/OBSERVABILITY.md @ ba9e371; omnigent/db/db_models.py:882"
   # C4: Retry semantics, and at what granularity: run, step, tool call?
   C4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "ScheduledTaskRun.error_code is a queryable failure classification token ('timeout', 'rate_limited') explicitly stored 'for future retry logic' - so the data model anticipates retry but the policy is not implemented."
+    evidence: "omnigent/db/db_models.py:1573-1575 @ ba9e371"
   # C5: At-least-once or exactly-once? What do the docs claim versus what the code does?
   C5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "At-least-once in effect. Scheduler overlap policy is SKIP and misfires beyond 30s are dropped, but there is no cross-replica claim, so two server instances would double-fire."
+    evidence: "omnigent/server/scheduled/scheduler.py:15-20 @ ba9e371"
   # C6: Is there an idempotency model for tool side effects?
   C6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No idempotency key on tool calls. SIX FOR SIX absent across the study. Omnigent did find and fix a lost-update race on usage deltas (bug #9), which is adjacent but not the same problem."
+    evidence: "omnigent/stores/conversation_store/__init__.py:1041-1049 @ ba9e371"
   # C7: Process crash recovery: what resumes, and from where?
   C7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "State is read from the DB; resume behaviour is declared per harness (warm reattach vs cold rebuild from transcript). No single replay mechanism."
+    evidence: "omnigent/harness_capabilities.py:40-45 @ ba9e371"
   # C8: Node loss: is work re-dispatched, and how is it detected?
   C8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Suspend/resume of the host machine is detected by comparing wall-clock against monotonic-clock advance across a poll, so half-open WebSockets reconnect instead of waiting out a ~120s keepalive. Cannot false-fire on a GC pause because a blocked loop advances both clocks equally."
+    evidence: "omnigent/suspend_watch.py:1-30 @ ba9e371"
   # C9: Context-window overflow: truncation, summarisation, or failure?
   C9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "compaction is a declared capability AXIS but is None (no claim) for all 26 harnesses - designed and plumbed, unpopulated. Context-window management is otherwise the harness's business."
+    evidence: "omnigent/harness_capabilities.py:139 @ ba9e371; verified live against omnigent 0.11.0 (PyPI, 2026-08-26)"
   # C10: Timers, scheduled execution, long sleeps — durable across restart?
   C10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "RFC 5545 rrule with IANA timezone, self-rearming timers capped at 24 days and re-armed on wake so annual schedules don't depend on one multi-month timer."
+    evidence: "omnigent/server/scheduled/scheduler.py:21-23,54-56 @ ba9e371"
   # C11: Human-in-the-loop pause and resume: durable, or in-memory only?
   C11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Policy ASK parks for user approval and is durable server-side: pending_approvals with a server-side round-trip that applies state_updates only on accept. Five distinct elicitation surfaces are modelled."
+    evidence: "omnigent/runner/pending_approvals.py @ ba9e371; omnigent/harness_capabilities.py:34-40"
   # C12: Can a definition be upgraded while runs are in flight? What happens to them?
   C12:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Agent.version increments on every bundle update, BUT a conversation does not record the version it started on (searched entities/conversation.py - no version field), so resume cannot detect mid-flight upgrade. Versioning without pinning."
+    evidence: "omnigent/stores/agent_store/sqlalchemy_store.py:300 @ ba9e371; omnigent/entities/conversation.py:215-217"
 
   # --- D. Agent identity and lifecycle ---
   # D1: Is an agent globally addressable? By what identifier?
   D1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Agent id (ag_...) is stable and persisted; bundle_location is content-addressed so a version maps to an immutable artifact."
+    evidence: "omnigent/entities/agent.py:31-35 @ ba9e371"
   # D2: Does identity survive process restart?
   D2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Agents live in a SQL table with workspace-scoped composite PK, independent of any process."
+    evidence: "omnigent/db/db_models.py:272 @ ba9e371"
   # D3: Is identity distinct from runtime instance?
   D3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Agent (definition) vs Conversation (execution) are separate tables; Agent.session_id distinguishes template agents from session-scoped ones."
+    evidence: "omnigent/entities/agent.py:38 @ ba9e371"
   # D4: Are agents versioned? Immutable or mutable definitions?
   D4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "FIRST AGENT VERSIONING IN THE STUDY: monotonic version counter starting at 1, incremented on every bundle update (row.version = row.version + 1) alongside a new content-addressed bundle_location."
+    evidence: "omnigent/stores/agent_store/sqlalchemy_store.py:300 @ ba9e371; omnigent/entities/agent.py:35"
   # D5: Is there a registry or catalog?
   D5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Two registries. Agents: SQL-backed store with CRUD. Harnesses: Python entry-point plugin registry (omnigent.community.harness group) merging contributions, which REJECTS plugins that override builtin harness names or register flat packages."
+    evidence: "designs/harness-plugin-interface.md @ ba9e371; omnigent/harness_plugins.py"
   # D6: Can agents discover each other at runtime?
   D6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "GET /v1/harnesses publishes the harness catalog including serialized capabilities, so capability discovery is public API."
+    evidence: "omnigent/harness_capabilities.py:143-161 @ ba9e371; designs/harness-capabilities-bench-seam.md"
   # D7: Can agents advertise capabilities? In what format?
   D7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "HarnessCapabilities: 16 declared fields across typed enums and tri-state booleans, published on GET /v1/harnesses and verified live by a conformance bench that reports DRIFT when a declaration is false."
+    evidence: "omnigent/harness_capabilities.py:124-141 @ ba9e371; tests/harness_bench/bench.py:44-66; verified live against omnigent 0.11.0 (PyPI, 2026-08-26)"
   # D8: Is there an owner, team, or tenant on the agent record?
   D8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "workspace_id owns every row; Agent.created_by / Policy.created_by record the admin; SessionPermission binds users to sessions."
+    evidence: "omnigent/db/db_models.py:216-223 @ ba9e371"
   # D9: Can an agent be suspended, revoked, or deprecated?
   D9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "Agents are HARD DELETED - no deprecate, suspend or revoke lifecycle. SIX FOR SIX absent for agents. Note DeviceGrant DOES have real revocation (status lifecycle + per-request revocation check), so Omnigent revokes credentials but not agents."
+    evidence: "omnigent/stores/agent_store/sqlalchemy_store.py:308-320 @ ba9e371; omnigent/server/auth.py"
   # D10: Is there anything resembling a declarative agent manifest?
   D10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Agent image spec: a directory with config.yaml (required), AGENTS.md, skills/<dir>/SKILL.md, tools/{python,typescript,mcp}/, and recursive agents/ sub-agent images. Portable, self-contained, stored as a tarball, parsed into a typed AgentSpec."
+    evidence: "omnigent/spec/AGENTSPEC.md @ ba9e371"
 
   # --- E. Harness and runtime interoperability ---
   # E1: What is the minimum interface an agent implementation must satisfy?
   E1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Harness plugins declare a HarnessContribution (valid_harnesses, harness_modules, aliases, install_specs, capabilities, spawn_env_builders) via entry points. Runtime execution goes through Executor with supports_streaming()/interrupt_session()."
+    evidence: "designs/harness-plugin-interface.md @ ba9e371; omnigent/harness_plugins.py"
   # E2: Transport: stdin/stdout, HTTP, gRPC, WebSocket, in-process, ACP, A2A?
   E2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Five transports named in one enum: in-process SDK, CLI subprocess, ACP subprocess, native TUI (tmux/file-inject), native server (HTTP/SSE bridge). Plus WebSocket tunnels between runner and server."
+    evidence: "omnigent/harness_capabilities.py:24-31 @ ba9e371"
   # E3: Can it host a foreign agent (Claude Code, Codex, OpenHands, LangGraph, ADK)?
   E3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "26 harnesses declared, including Claude Code, Codex, Cursor, OpenCode, Hermes, Pi, Kimi, Qwen, Kiro, Goose, Antigravity, and generic ACP."
+    evidence: "omnigent/harness_plugins.py:324 @ ba9e371; verified live against omnigent 0.11.0 (PyPI, 2026-08-26)"
   # E4: Is there an event stream out of a running agent? What granularity?
   E4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Typed transcript items streamed over SSE/WS, including routing_decision items that persist gate verdicts."
+    evidence: "omnigent/runner/subagent_routing.py:14-16 @ ba9e371"
   # E5: Are tool calls externally observable, or internal to the agent?
   E5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Tool calls pass through policy phases (PHASE_TOOL_CALL, PHASE_TOOL_RESULT) with a shell_tool_name declared per harness so the bench can provoke and verify tool calling."
+    evidence: "omnigent/policies/types.py:80 @ ba9e371; omnigent/harness_capabilities.py:118-122"
   # E6: How is context injected at start?
   E6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Agent spec is an opaque portable image (tarball) parsed into AgentSpec; per-harness config comes from declared model_env_keys and spawn_env_builders rather than the core understanding each harness."
+    evidence: "omnigent/spec/AGENTSPEC.md @ ba9e371; designs/harness-plugin-interface.md"
   # E7: Is cancellation supported? Cooperative or forced? Does it propagate to subagents?
   E7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "interrupt is a declared per-harness capability, live-verified by the bench's interrupt probe with DRIFT reported when a harness does not honour it."
+    evidence: "omnigent/harness_capabilities.py:132 @ ba9e371; tests/harness_bench/bench.py:44-66"
   # E8: Can a run be checkpointed and restored by the platform, or only by the agent?
   E8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Resume is declared per harness (WARM_REATTACH | COLD_ONLY | NONE) and ForkHistory declares how history is carried (none | rebuild | preamble), but there is no checkpoint/restore in the adapter contract."
+    evidence: "omnigent/harness_capabilities.py:40-45,76-82 @ ba9e371"
   # E9: Which of these would be hard to adapt, and why?
   E9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "designs/harness-plugin-interface.md documents the full package contract, field semantics, runtime flow, import rules, a minimal-harness checklist, and required tests. Also rejects plugins declaring lifecycle hooks that are not wired end to end."
+    evidence: "designs/harness-plugin-interface.md @ ba9e371"
 
   # --- F. Agent-to-agent communication ---
   # F1: Direct messages between agents?
   F1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent-to-agent messaging. SIX FOR SIX absent - and this from a product built for multi-agent supervision. Agents relate through parentage and shared session state, never by sending messages. comments.py:send_to_agent is human>agent (formats review notes for a person to send)."
+    evidence: "omnigent/server/routes/comments.py:343-360 @ ba9e371"
   # F2: Channels, topics, or pub/sub?
   F2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No channels or pub/sub between agents."
+    evidence: "omnigent/entities/ @ ba9e371"
   # F3: Task delegation as a distinct mechanism from messaging?
   F3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Sub-agent spawn is a first-class gated operation: a PreToolUse hook calls back to resolve which model the spawn runs on, and every decision persists as a routing_decision transcript item. Deliberately ADVISORY - every transport failure, unreachable endpoint, unparseable verdict or timeout allows the spawn unchanged."
+    evidence: "omnigent/runner/subagent_routing.py:1-20 @ ba9e371"
   # F4: Synchronous RPC between agents?
   F4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No inter-agent RPC."
+    evidence: "omnigent/entities/ @ ba9e371"
   # F5: Asynchronous inbox or mailbox?
   F5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No mailbox."
+    evidence: "omnigent/entities/ @ ba9e371"
   # F6: Is delivery durable? Survives restart of sender and receiver?
   F6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No inter-agent delivery layer."
+    evidence: "omnigent/entities/ @ ba9e371"
   # F7: Is message ordering guaranteed? Per what scope?
   F7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Transcript items are ordered per conversation with updated_at in microseconds for mutation ordering; no cross-agent ordering because there is no cross-agent messaging."
+    evidence: "omnigent/entities/comment.py:49 @ ba9e371"
   # F8: Acknowledgement or delivery receipts?
   F8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No acknowledgement between agents."
+    evidence: "omnigent/entities/ @ ba9e371"
   # F9: Correlation ids for request/response pairing?
   F9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "conversation_id, parent_conversation_id and root_conversation_id correlate a sub-agent tree; ScheduledTaskRun.conversation_id links a run to its execution with a reverse index for the completion hook."
+    evidence: "omnigent/db/db_models.py:1560-1562,1590-1595 @ ba9e371"
   # F10: Conversation threading?
   F10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Conversations can be FORKED, with ForkHistory declaring how prior history is carried into the new harness (none | rebuild the vendor session file | replay as a text preamble)."
+    evidence: "omnigent/harness_capabilities.py:76-82 @ ba9e371"
   # F11: Capability-based routing — address by what an agent *can do* rather than who it is?
   F11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Sub-agent spawns are routed to a model by server-side policy (smart routing), and harness_override allows per-session harness selection - but this routes to MODELS and HARNESSES, not to agents by capability."
+    evidence: "omnigent/runner/subagent_routing.py:14-16 @ ba9e371"
 
   # --- G. Human-agent collaboration ---
   # G1: Is a human modelled as a special kind of agent, a distinct principal type, or not modelled?
   G1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Users and accounts are first-class, with SessionPermission(user_id, conversation_id, level), a __public__ sentinel grant for link sharing, admin flags, and ResolvedAccess composing them."
+    evidence: "omnigent/entities/permission.py:9-46 @ ba9e371"
   # G2: Shared rooms, channels, or workspaces?
   G2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Workspace (tenant) and Project (first-class session grouping) both exist, plus shared sessions as the collaboration unit."
+    evidence: "omnigent/db/db_models.py:690 @ ba9e371"
   # G3: Task threads humans can read and post into?
   G3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Share a session so teammates chat with a running agent and watch it work live, co-drive it, or fork the conversation to continue separately. Multi-device: terminal, browser, phone, native desktop app."
+    evidence: "README.md @ ba9e371; omnigent/entities/permission.py:20-22"
   # G4: Mentions or directed addressing?
   G4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Comments are addressed to a file range (path, start_index, end_index, anchor_content) rather than to a participant; no @-mention addressing."
+    evidence: "omnigent/entities/comment.py:41-49 @ ba9e371"
   # G5: Approval gates. Blocking or advisory? Durable while pending?
   G5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Policy ASK parks for approval, with FIVE declared elicitation surfaces: NONE, HOOK (vendor PreToolUse posts to Omnigent), JSONRPC (app-server elicitation), APPROVAL_MIRROR (poll the TUI approval pane and mirror it to web), SSE_PERMISSION."
+    evidence: "omnigent/harness_capabilities.py:34-40 @ ba9e371"
   # G6: Mid-run intervention: can a human redirect without restarting?
   G6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Interrupt (declared, bench-verified), steering/live_queue axes exist, approve or decline an ASK, /model to switch models, resume from any device."
+    evidence: "omnigent/harness_capabilities.py:132-137 @ ba9e371"
   # G7: Agent status and presence visible to humans?
   G7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Session status edges carry a blocked_on reason so a session that stays 'running' while parked on a dialog still reports why, deduped on the (status, blocked_on) pair."
+    evidence: "omnigent/runner/resource_registry.py:480-496 @ ba9e371"
   # G8: Notifications or escalation when an agent is blocked?
   G8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Slack integration delivers agent activity to a human channel, and the desktop app surfaces sessions; no escalation policy or on-call routing."
+    evidence: "integrations/slack/ @ ba9e371"
   # G9: Shared scratchpad or working surface?
   G9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Comments are a shared human review surface anchored to file ranges with draft|addressed status, plus ConversationLabel for session-scoped guardrail labels."
+    evidence: "omnigent/entities/comment.py:41-49 @ ba9e371"
   # G10: Can a human see the context an agent is operating on?
   G10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Full transcript with pagination and full-text search, plus routing_decision and policy verdict items, viewable from web, terminal, phone or desktop."
+    evidence: "omnigent/stores/conversation_store/__init__.py:316 @ ba9e371"
 
   # --- H. Context and memory ---
   # H1: Which of these exist as *separate* concepts: prompt context, working state, session history, ...
   H1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No memory subsystem. Knowledge is skills as directories inside the agent image plus AGENTS.md instructions. FOURTH CONSECUTIVE PROJECT to choose filesystem/git-backed skills over a memory store."
+    evidence: "omnigent/spec/AGENTSPEC.md @ ba9e371"
   # H2: Who owns memory: agent, human, workspace, task, or tenant?
   H2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Skills are owned by the agent image (and recursively by sub-agent images); no separate ownership model."
+    evidence: "omnigent/spec/AGENTSPEC.md @ ba9e371"
   # H3: Can memory be shared between agents? At what granularity?
   H3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Skill sources can be shared/fetched (spec/skill_sources.py) but there is no cross-agent shared memory store."
+    evidence: "omnigent/spec/skill_sources.py @ ba9e371"
   # H4: Are there permissions on memory?
   H4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No memory permissions, because there is no memory store. Session ACLs exist but govern sessions, not knowledge."
+    evidence: "omnigent/entities/permission.py @ ba9e371"
   # H5: Is provenance tracked — where a memory came from?
   H5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Skills carry provenance through their source declaration and the agent bundle version; no per-item provenance."
+    evidence: "omnigent/spec/skill_sources.py @ ba9e371"
   # H6: Expiry, TTL, or forgetting?
   H6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No TTL or expiry on knowledge."
+    evidence: "omnigent/spec/AGENTSPEC.md @ ba9e371"
   # H7: Summarisation or compaction. Automatic or explicit?
   H7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "compaction is a declared capability axis but None (no claim) for all 26 harnesses; actual compaction is the vendor harness's business."
+    evidence: "omnigent/harness_capabilities.py:139 @ ba9e371; verified live against omnigent 0.11.0 (PyPI, 2026-08-26)"
   # H8: Retrieval mechanism: vector, keyword, structured, agent-driven?
   H8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Skills are directories with SKILL.md loaded from the agent image; full-text search exists over the transcript, not over knowledge. No vector store."
+    evidence: "omnigent/spec/AGENTSPEC.md @ ba9e371"
   # H9: Can an agent mutate its own memory mid-run?
   H9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "session_state is agent-writable via ordered StateUpdate ops (SET/INCREMENT/DELETE/APPEND) applied by policies, and ConversationLabel persists guardrail labels - but this is control state, not knowledge."
+    evidence: "omnigent/spec/types.py:1184-1198 @ ba9e371"
   # H10: Conflict resolution on concurrent writes?
   H10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "session_state and labels are shared across a session including its sub-agents; no shared knowledge store."
+    evidence: "omnigent/entities/conversation.py:74-88 @ ba9e371"
   # H11: Is memory in the same store as execution state, or separate?
   H11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Execution state (SQL: conversations, items, session_state) is entirely separate from knowledge (skills/ and AGENTS.md inside a versioned agent image tarball)."
+    evidence: "omnigent/spec/AGENTSPEC.md @ ba9e371; omnigent/db/db_models.py:882"
 
   # --- I. Tools and capabilities ---
   # I1: Are tools bound to agents statically, or resolved dynamically?
   I1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Tools declared in the agent image: local Python and TypeScript tools auto-discovered from tools/python and tools/typescript, plus MCP server declarations in tools/mcp/*.yaml."
+    evidence: "omnigent/spec/AGENTSPEC.md @ ba9e371"
   # I2: Is there a capability abstraction distinct from tool implementation?
   I2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "HarnessCapabilities is exactly this: a declarative capability model with 16 axes, published on GET /v1/harnesses and reconciled against live probes."
+    evidence: "omnigent/harness_capabilities.py:124-141 @ ba9e371"
   # I3: Is there a registry of available tools?
   I3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Tools come from the agent image and MCP declarations, managed by an MCP manager and a proxying MCP manager, with a server-side MCP pool."
+    evidence: "omnigent/runner/mcp_manager.py, omnigent/runner/proxy_mcp_manager.py @ ba9e371"
   # I4: Tool scoping — can an agent be restricted to a subset?
   I4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Policies limit which tools an agent reaches, scoped server-wide, per-agent or per-chat; working_dir and safety builtins constrain tool reach."
+    evidence: "omnigent/policies/builtins/working_dir.py, safety.py @ ba9e371; README.md"
   # I5: Are tools versioned?
   I5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Tools are versioned with the agent bundle (monotonic Agent.version over a content-addressed tarball); no independent tool versioning."
+    evidence: "omnigent/entities/agent.py:35 @ ba9e371"
   # I6: How are credentials supplied to a tool?
   I6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "AuthModel declares where each harness's credentials come from: OMNIGENT_CREDENTIAL (gateway/provider config), OWN_AUTH (vendor login, not Omnigent-managed), SESSION_SCOPED_CONFIG (per-session synthesized vendor config)."
+    evidence: "omnigent/harness_capabilities.py:68-74 @ ba9e371"
   # I7: OAuth or delegated user credentials?
   I7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "RFC 8628 device authorization grant issues scope-limited delegated tokens with per-request revocation checks; the requesting app names itself with a client_id. Default-off, and consent routes never mount in OIDC mode."
+    evidence: "designs/DEVICE_AUTH.md @ ba9e371; omnigent/server/auth.py:70-81"
   # I8: Can policy intercept a tool call before execution?
   I8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "STRONGEST POLICY LAYER IN THE STUDY: ALLOW|ASK|DENY evaluated per phase, builtins for cost, safety, risk_score, working_dir, github, google, prompt, routing, orchestration, cel. Handlers are Python callables or HTTPS endpoints, scoped server-wide or per-session, individually enabled."
+    evidence: "omnigent/policies/builtins/ @ ba9e371; omnigent/spec/types.py:1168-1181"
   # I9: Approval gates on specific tools?
   I9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "ASK parks for user approval; on approve > ALLOW, on refuse/timeout > DENY. Cost thresholds ASK at checkpoints and remember the highest approved level in session_state."
+    evidence: "omnigent/spec/types.py:1172-1176 @ ba9e371; omnigent/policies/builtins/cost.py:8-22"
   # I10: Do tools execute inside or outside the agent's sandbox?
   I10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Tools run inside the sandbox (bwrap/seatbelt locally, or one of ten cloud sandbox providers) behind a mandatory L7 egress proxy."
+    evidence: "omnigent/sandbox/ @ ba9e371; omnigent/inner/egress/"
 
   # --- J. Security and identity ---
   # J1: What identity does an agent authenticate as?
   J1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Users authenticate (accounts mode or OIDC); delegated apps authenticate via RFC 8628 grants bound to a user_id. Agents act within a session bound to a user, not as independent principals."
+    evidence: "designs/DEVICE_AUTH.md @ ba9e371; omnigent/server/auth.py"
   # J2: Authentication mechanism for agent-to-platform?
   J2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Two auth modes (accounts and OIDC), bearer tokens, account_tokens table, device grants, an explicit single-user local marker that deployed multi-user servers never set."
+    evidence: "omnigent/server/auth.py:84-88 @ ba9e371; omnigent/db/db_models.py:430"
   # J3: Authorisation model: RBAC, ABAC, capability tokens, none?
   J3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "SessionPermission levels (read/edit/owner), admin flag, __public__ sentinel grants, ResolvedAccess, and _require_session_access(LEVEL_EDIT)-style gates on every route."
+    evidence: "omnigent/entities/permission.py:9-46 @ ba9e371; omnigent/server/routes/comments.py:334-338"
   # J4: Secret storage and injection?
   J4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "BEST SECRET HANDLING IN THE STUDY: a secretless credential proxy. The unsandboxed parent resolves the real secret and holds it in the egress proxy's rewrite table; the L7 MITM injects Authorization on the way out so nothing credential-shaped enters the sandbox."
+    evidence: "designs/SANDBOX_CREDENTIAL_PROXY.md @ ba9e371; omnigent/inner/credential_proxy.py"
   # J5: Per-agent credentials, or shared platform credentials?
   J5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Per-harness AuthModel plus session-scoped synthesized vendor configs; Slack tokens are Fernet-encrypted at rest."
+    evidence: "omnigent/harness_capabilities.py:68-74 @ ba9e371; designs/DEVICE_AUTH.md"
   # J6: Can an agent act as a user? Is that impersonation or delegation?
   J6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "FIRST DELEGATION MODEL IN THE STUDY: RFC 8628 device grants mint delegated tokens with a DELEGATED_SCOPE, enforced fail-closed against a path allow-list (delegated_path_allowed rejects everything not matched; /v1/hosts/h1/runners passes, /v1/hostsX does not) with revocation checked per request."
+    evidence: "omnigent/server/auth.py:70-81 @ ba9e371; designs/DEVICE_AUTH.md"
   # J7: Tenant isolation: logical, or enforced at runtime?
   J7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "FIRST REAL TENANT ISOLATION IN THE STUDY: workspace_id is part of EVERY table's composite primary key, defaulted from a ContextVar bound per request, so 'every primary-key lookup, filter, and insert scopes to that workspace'. workspace_scope() resets on exit 'so nested / concurrent contexts don't leak'."
+    evidence: "omnigent/db/db_models.py:216-238 @ ba9e371"
   # J8: Network and filesystem isolation?
   J8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "bwrap (Linux) and seatbelt (macOS) filesystem/process isolation plus a MANDATORY L7 egress MITM proxy with an allow-list for all HTTP(S) leaving the sandbox."
+    evidence: "omnigent/sandbox/bwrap.py, seatbelt.py @ ba9e371; omnigent/inner/egress/"
   # J9: Is there an audit log? Is it tamper-evident?
   J9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Transcript items record every turn, tool call, routing_decision and policy verdict; created_by on policies and comments; device grants record approval and polling times."
+    evidence: "omnigent/runner/subagent_routing.py:14-16 @ ba9e371"
   # J10: Where are policy decisions enforced — control plane, runtime, or tool gateway?
   J10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Enforced at explicit phases with a per-phase fail-closed set defined once so enforcement sites cannot drift; PHASE_TOOL_CALL and PHASE_REQUEST fail CLOSED, PHASE_TOOL_RESULT deliberately fails OPEN."
+    evidence: "omnigent/policies/types.py:59-80 @ ba9e371"
 
   # --- K. Sandbox and isolation ---
   # K1: Is there a workspace or sandbox concept? What is its lifecycle?
   K1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Local sandboxes (bwrap/seatbelt) or one of ten cloud providers (Modal, Daytona, Blaxel, Islo, E2B, CoreWeave, Kubernetes, OpenShell, Boxlite, Databricks), launched from the CLI or provisioned per session as managed hosts."
+    evidence: "omnigent/sandbox/ @ ba9e371; README.md"
   # K2: Persistent filesystem across runs?
   K2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Sessions have a workspace path the runner cd's into, a git_branch, and an environment_filesystem entity; managed hosts persist for the session."
+    evidence: "omnigent/entities/conversation.py:181-192 @ ba9e371; omnigent/entities/environment_filesystem.py"
   # K3: Snapshot and restore?
   K3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Host-level suspend/resume is detected and reconnected; cloud providers may support pause, but Omnigent does not expose a uniform sandbox suspend/resume capability."
+    evidence: "omnigent/suspend_watch.py:1-14 @ ba9e371"
   # K4: Network egress rules?
   K4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A mandatory L7 egress MITM proxy with an allow-list governs all HTTP(S) leaving the sandbox - the same interception point the credential proxy uses."
+    evidence: "omnigent/inner/egress/proxy.py @ ba9e371; designs/SANDBOX_CREDENTIAL_PROXY.md"
   # K5: Container, microVM, or none?
   K5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "bwrap and seatbelt locally; ten cloud sandbox backends; container_image configurable per spec."
+    evidence: "omnigent/sandbox/ @ ba9e371; omnigent/spec/types.py:798"
   # K6: Resource quotas: CPU, memory, disk, wall clock?
   K6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Cost budgets are enforced per session, per user per day, and per scheduled-task firing, but there are no CPU/memory/disk quotas expressed by Omnigent (those belong to the cloud backend)."
+    evidence: "omnigent/policies/builtins/cost.py @ ba9e371; omnigent/db/db_models.py:1351"
   # K7: How are secrets injected without landing in the image or logs?
   K7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "BEST ANSWER IN THE STUDY: swap-on-access means nothing credential-shaped enters the sandbox. For credential-gating clients (gh short-circuits before touching the network) the parent mints a random single-use oa_cred_ placeholder bound to one host; the proxy swaps it, rejects it with 403 if presented for another host or if unknown, and never clobbers an Authorization header the client set itself."
+    evidence: "designs/SANDBOX_CREDENTIAL_PROXY.md @ ba9e371; omnigent/inner/egress/proxy.py:714,1125-1128"
   # K8: Arbitrary code execution? Browser execution?
   K8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The whole point: 26 vendor harnesses run arbitrary code inside the sandbox, including resident TUIs driven via tmux."
+    evidence: "omnigent/harness_capabilities.py:24-31 @ ba9e371"
   # K9: Is the sandbox pluggable, or a fixed implementation?
   K9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Most pluggable sandbox layer in the study, and unlike Google AX it ships local implementations too (bwrap/seatbelt) alongside ten cloud backends."
+    evidence: "omnigent/sandbox/ @ ba9e371; README.md"
 
   # --- L. Orchestration and scheduling ---
   # L1: Does it distinguish agent coordination from workflow orchestration?
   L1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Clean split: policy and routing decisions on the server, turn execution in the runner, timing in a dedicated scheduler module that is 'the timing engine only' and delegates session creation to an injected callback."
+    evidence: "omnigent/server/scheduled/scheduler.py:1-8 @ ba9e371"
   # L2: Topology: DAG, cyclic graph, supervisor, planner, event-driven, queue?
   L2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Sequential turns per conversation with sub-agent trees; no DAG or graph engine."
+    evidence: "omnigent/entities/conversation.py:49-57 @ ba9e371"
   # L3: Cron or scheduled triggers?
   L3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "FIRST SCHEDULED TRIGGERS IN THE STUDY: RFC 5545 rrule + IANA timezone, lifecycle state, misfire grace of 30s, SKIP overlap policy, and timers capped at 24 days then re-armed."
+    evidence: "omnigent/server/scheduled/scheduler.py:9-23 @ ba9e371"
   # L4: Dynamic task spawning at runtime?
   L4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Sub-agent spawns are dynamic, intercepted by a PreToolUse hook, routed to a model by server-side policy, and recorded as routing_decision items."
+    evidence: "omnigent/runner/subagent_routing.py:1-16 @ ba9e371"
   # L5: Fan-out / fan-in?
   L5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Multiple sub-agents can run under one root conversation, but there is no declarative fan-out/fan-in or join primitive."
+    evidence: "omnigent/entities/conversation.py:49-57 @ ba9e371"
   # L6: Subagents. Are they first-class, or just nested calls?
   L6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Sub-agents are conversations (kind='sub_agent') with parent/root ids, their own transcript, and recursive sub-agent images in the agent spec."
+    evidence: "omnigent/spec/AGENTSPEC.md @ ba9e371; omnigent/entities/conversation.py:49-57"
   # L7: Retry and backoff policy — declarative or hand-rolled?
   L7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "ScheduledTaskRun.error_code is stored as a queryable classification token 'for future retry logic' and status='skipped' exists, but retry policy itself is not implemented."
+    evidence: "omnigent/db/db_models.py:1573-1575 @ ba9e371"
   # L8: Compensation or rollback on failure?
   L8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No compensation or rollback. SIX FOR SIX absent."
+    evidence: "omnigent/policies/ @ ba9e371"
   # L9: Does cancellation propagate through the whole tree?
   L9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "interrupt is declared and bench-verified per harness, but no documented propagation of cancellation down a sub-agent conversation tree."
+    evidence: "omnigent/harness_capabilities.py:132 @ ba9e371"
   # L10: Could this be replaced by Temporal or Restate, or is orchestration inseparable from the agent...
   L10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "No workflow engine embedded; orchestration is sub-agents plus an rrule scheduler, with policy as the cross-cutting control. Consistent with keeping workflow engines external."
+    evidence: "omnigent/server/scheduled/scheduler.py:1-8 @ ba9e371"
 
   # --- M. Observability ---
   # M1: Which of these are modelled as telemetry objects: trace, run, step, LLM call, tool call, mess...
   M1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Transcript items (turns, tool calls, routing decisions, policy verdicts), session_usage (tokens and cost, per model), scheduled run status and error_code, session status edges with blocked_on reasons, plus OTel spans."
+    evidence: "omnigent/entities/conversation.py:88-99 @ ba9e371"
   # M2: Is telemetry keyed to agent, run, model, task, user, or tenant?
   M2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Keyed to workspace_id, conversation_id, agent_id, user_id, host_id, runner_id, project_id - the richest correlation set in the study."
+    evidence: "omnigent/db/db_models.py:777 @ ba9e371"
   # M3: OpenTelemetry, proprietary, or none?
   M3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "SECOND PROJECT WITH REAL OTEL, and the most thorough: opentelemetry-api and sdk, BOTH OTLP exporters (gRPC and HTTP), plus FastAPI, httpx and SQLAlchemy instrumentation. Only project instrumenting its database. Caveat: its own design doc audits gaps - propagation was 'never propagated over the wire', HTTPXClientInstrumentor 'never wired', FastAPIInstrumentor 'gated off by default', get_traceparent_env 'dead code'. Verified current state: inject_trace_context now has two real call sites, so propagation is partially wired."
+    evidence: "pyproject.toml:93,145-150 @ ba9e371; designs/OBSERVABILITY.md; omnigent/host/frames.py:927; omnigent/server/routes/sessions/routes_core.py:1267"
   # M4: Is there a documented, stable event schema?
   M4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Typed transcript items with a converter layer, enums stored as stable int codes with codecs, CompressedText for opaque blobs, 72-path OpenAPI schema."
+    evidence: "omnigent/db/enum_codecs.py, converters.py @ ba9e371; openapi.json"
   # M5: Cost and token accounting. Per what unit?
   M5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "FIRST COST ACCOUNTING IN THE STUDY: session_usage carries cumulative tokens and total_cost_usd broken down by_model, maintained transactionally; user_daily_cost table for per-user spend."
+    evidence: "omnigent/entities/conversation.py:88-98 @ ba9e371; omnigent/db/db_models.py:1351"
   # M6: Latency breakdown by phase?
   M6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "ScheduledTaskRun records scheduled_at, fired_at and finished_at; comment updated_at is microsecond-resolution; OTel spans give phase timing."
+    evidence: "omnigent/db/db_models.py:1567-1569 @ ba9e371"
   # M7: Error taxonomy?
   M7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "ScheduledTaskRun carries both a compressed free-text error blob AND a bounded queryable error_code token ('timeout', 'rate_limited'); OmnigentError carries an ErrorCode enum."
+    evidence: "omnigent/db/db_models.py:1570-1575 @ ba9e371; omnigent/errors.py"
   # M8: Can the event stream reconstruct a run after the fact — replay or audit?
   M8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "The transcript is complete and searchable, and routing/policy decisions persist as items, but state lives in mutable rows rather than an append-only log, so reconstruction is not replay."
+    evidence: "designs/OBSERVABILITY.md @ ba9e371"
 
   # --- N. Multi-tenancy and enterprise ---
   # N1: Resource hierarchy: org, workspace, project, environment?
   N1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Workspace (tenant, in every PK) > Project (first-class session grouping) > Conversation. Plus Host as a deployment-target dimension."
+    evidence: "omnigent/db/db_models.py:216-223,690 @ ba9e371"
   # N2: RBAC model and its granularity?
   N2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Numeric permission levels (read/edit/owner) per session, a global admin flag, a __public__ sentinel for link sharing, and route-level _require_session_access gates."
+    evidence: "omnigent/entities/permission.py:9-46 @ ba9e371"
   # N3: Quotas and cost limits. Enforced or advisory?
   N3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "FIRST QUOTAS/COST LIMITS IN THE STUDY: cost_budget policy with soft ask_thresholds_usd checkpoints and a hard max_cost_usd downgrade gate, a user_daily_cost table, and per-firing max_cost_usd on scheduled tasks. Fails CLOSED when token usage is present but total_cost_usd is absent, so unpriced models cannot silently bypass the cap."
+    evidence: "omnigent/policies/builtins/cost.py:8-45 @ ba9e371; omnigent/db/db_models.py:1351"
   # N4: dev / staging / prod separation?
   N4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Workspaces separate tenants and hosts separate execution targets, but there is no declared dev/staging/prod environment dimension."
+    evidence: "omnigent/db/db_models.py:216-223 @ ba9e371"
   # N5: Deployment promotion path?
   N5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Agent bundles are versioned content-addressed artifacts that could underpin promotion, but no promotion workflow exists."
+    evidence: "omnigent/entities/agent.py:21-35 @ ba9e371"
   # N6: Agent catalog scoped to a tenant?
   N6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "GET /v1/harnesses is a capability catalog; agents are listed per workspace; template agents (session_id=None) are the reusable catalog entries."
+    evidence: "omnigent/entities/agent.py:38 @ ba9e371"
   # N7: Audit retention controls?
   N7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Sessions can be archived and comments have lifecycle status, but there is no configurable audit retention policy."
+    evidence: "omnigent/entities/conversation.py:199-203 @ ba9e371"
   # N8: Is multi-tenancy in the OSS core, or reserved for a commercial tier?
   N8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Multi-tenancy is in the OSS code, not withheld: OSS runs as workspace 0 and 'multi-tenant deployments set it per request', so the single-tenant path IS the multi-tenant path with one value."
+    evidence: "omnigent/db/db_models.py:216-223 @ ba9e371"
 
   # --- O. API and protocol surface ---
   # O1: List the actual primary endpoints or SDK entry points. Verbatim.
   O1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "72-path OpenAPI surface with REST, SSE and WebSocket tunnels; SDKs in sdks/, editor integrations in editors/, a Slack bot in integrations/slack/."
+    evidence: "openapi.json @ ba9e371"
   # O2: Is the API resource-oriented or RPC-flavoured?
   O2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Resource-oriented: /v1/sessions, /v1/agents, /v1/policies, /v1/hosts, /v1/harnesses, /v1/projects, /v1/scheduled-tasks, with cursor pagination."
+    evidence: "openapi.json @ ba9e371"
   # O3: Streaming: SSE, WebSocket, long-poll, gRPC stream?
   O3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "SSE for transcript streaming and WebSocket tunnels between server, host daemon and runners, with a keepalive-aware reconnect path."
+    evidence: "omnigent/runner/transports/ @ ba9e371; omnigent/suspend_watch.py:5-12"
   # O4: Webhooks or outbound callbacks?
   O4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Policies can be HTTPS endpoints (type='url'), which is an outbound call-out, and hooks post back to loopback relays; no general webhook subscription surface."
+    evidence: "omnigent/entities/policy.py:36-40 @ ba9e371"
   # O5: Which standards are implemented: MCP, A2A, ACP, OTel, OpenAI-compatible?
   O5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "MCP (declarations, manager, proxying manager, server-side pool), ACP (ACP_SUBPROCESS mode and acp_cli_harnesses), OTel, RFC 8628 device grants, RFC 5545 rrules, W3C trace context, gRPC health via harnesses."
+    evidence: "omnigent/harness_capabilities.py:27 @ ba9e371; omnigent/runner/mcp_manager.py; designs/DEVICE_AUTH.md"
   # O6: Is the API versioned? Stability commitment?
   O6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "/v1 path versioning across all 72 paths; alpha status declared in the README; Alembic migrations version the schema."
+    evidence: "openapi.json @ ba9e371"
   # O7: Is there a separate northbound (client) and southbound (runtime) API?
   O7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Northbound: the /v1 REST+SSE API used by CLI, web, desktop, phone, Slack and SDKs. Southbound: the harness plugin contribution contract plus five integration modes. Capabilities are published northbound on GET /v1/harnesses."
+    evidence: "designs/harness-plugin-interface.md @ ba9e371; openapi.json"
 
   # --- P. Storage ---
   # P1: What datastores are required to run it?
   P1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "SQLAlchemy over SQLite or Postgres with Alembic migrations, plus an artifact store for agent bundle tarballs and a file store for session files."
+    evidence: "omnigent/db/db_models.py @ ba9e371"
   # P2: What is treated as authoritative, strongly consistent state?
   P2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The SQL store is authoritative. Notably NO database foreign keys ('Rule R032; cascade is app-owned'), so referential integrity is deliberately application-owned."
+    evidence: "omnigent/db/db_models.py:1558-1559 @ ba9e371"
   # P3: What is event-stream or append-only?
   P3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "ConversationItem rows are appended, but the model is mutable relational rows rather than an append-only log; conversations, agents and session_state are updated in place."
+    evidence: "omnigent/db/db_models.py:882 @ ba9e371"
   # P4: Where do large artifacts go?
   P4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Artifact store for agent bundle tarballs, file store for session files, CompressedText columns for opaque blobs never queried by SQL."
+    evidence: "omnigent/stores/artifact_store/, file_store/ @ ba9e371; omnigent/db/compression.py"
   # P5: Is there a vector store? Required or optional?
   P5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No vector store. Search over the transcript is SQL full-text."
+    evidence: "omnigent/stores/conversation_store/__init__.py:316 @ ba9e371"
   # P6: Is storage pluggable, or hardcoded?
   P6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A store interface per aggregate (agent, conversation, policy, permission, project, scheduled_task, artifact, file, comment, host) with SQLAlchemy implementations behind each."
+    evidence: "omnigent/stores/ @ ba9e371"
 
   # --- Q. Licensing and commercial ---
   # Q1: Exact license, including any per-directory variation.
   Q1:
     verdict: first_class
-    note: "Apache-2.0."
-    evidence: "https://github.com/omnigent-ai/omnigent (GitHub API, read 2026-08-26; 9290★, pushed 2026-08-26)"
+    note: "Apache-2.0 with a DCO and a NOTICE file."
+    evidence: "LICENSE, NOTICE, DCO @ ba9e371"
   # Q2: Are there enterprise-only components missing from the OSS repo?
   Q2:
-    verdict: first_class
-    note: "Hosted Omnigent Cloud is commercial; harness layer is open."
-    evidence: "https://github.com/omnigent-ai/omnigent (GitHub API, read 2026-08-26; 9290★, pushed 2026-08-26)"
+    verdict: absent
+    note: "No enterprise-only components withheld from the repo; multi-tenancy, policy, cost control and the credential proxy are all in the OSS tree. Optional HARNESS support ships as separate PyPI packages (omnigent-kimi) via entry points, which is modularity rather than a paywall."
+    evidence: "designs/harness-plugin-interface.md @ ba9e371"
   # Q3: SaaS or hosted-service restrictions?
   Q3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No SaaS restriction under Apache-2.0."
+    evidence: "LICENSE @ ba9e371"
   # Q4: Trademark constraints on derived works?
   Q4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Omnigent naming and logo; Apache-2.0 grants no trademark rights."
+    evidence: "LICENSE, NOTICE @ ba9e371"
   # Q5: Network copyleft (AGPL, SSPL) implications for a hosted product?
   Q5:
     verdict: absent
-    note: "No network copyleft. Apache-2.0/MIT only across the whole study."
-    evidence: "https://github.com/omnigent-ai/omnigent (GitHub API, read 2026-08-26; 9290★, pushed 2026-08-26)"
+    note: "No network copyleft."
+    evidence: "LICENSE @ ba9e371"
   # Q6: Verdict: `USE` / `INTEGRATE` / `REFERENCE_ONLY` / `AVOID`, with reasoning.
   Q6:
     verdict: first_class
-    note: "INTEGRATE — Apache-2.0, closest precedent for our adapter thesis (ADR-0004)."
-    evidence: "https://github.com/omnigent-ai/omnigent (GitHub API, read 2026-08-26; 9290★, pushed 2026-08-26)"
+    note: "REFERENCE_ONLY, but two components are worth porting: the secretless credential proxy and the declared-capability + conformance-bench pattern. Apache-2.0 and Python (our stack) make embedding legally and technically possible, but this is a 111MB alpha PRODUCT - desktop app, web UI, Slack bot, 26 harnesses - far more product than platform, and its own docs call it 'heavily vibe-coded'."
+    evidence: "LICENSE @ ba9e371; designs/OBSERVABILITY.md"
 
   # --- R. Developer experience ---
   # R1: Time from clone to a running agent. Actual elapsed minutes.
   R1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "VERIFIED: python -m venv, pip install omnigent, omni --version -> 'omnigent 0.11.0 (built 2026-08-25T17:27:41Z)'. Clean first try, no system dependencies. omnigent run spawns a managed local server so there is nothing to stand up."
+    evidence: "verified live against omnigent 0.11.0 (PyPI, 2026-08-26)"
   # R2: How many concepts before "hello world"?
   R2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A basic run needs few concepts (session, harness, prompt), but the full model is the largest in the study: workspace, project, agent, policy, host, runner, scheduled task, permission, comment, harness capability."
+    evidence: "omnigent/entities/ @ ba9e371"
   # R3: Is there a local dev loop? Hot reload?
   R3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Local-first is a real mode: SQLite, a managed local server spawned by omnigent run, an explicit single-user marker gating a local header-auth fallback that deployed servers never set, plus a REPL and a TUI."
+    evidence: "omnigent/server/auth.py:84-88 @ ba9e371; omnigent/repl/"
   # R4: How do you debug a stuck run?
   R4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Full searchable transcript, persisted routing and policy decisions, deciding_policies naming what drove a verdict, session status edges with blocked_on reasons, cli_diagnostics and a diagnostics module, plus OTel with a locally runnable Jaeger backend in the design."
+    evidence: "omnigent/cli_diagnostics.py @ ba9e371; designs/OBSERVABILITY.md"
   # R5: Can an agent be unit tested? Is there a test harness?
   R5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Strong and unusual: a harness conformance bench (tests/harness_bench/) that live-probes each harness and reconciles declared capabilities against observed behaviour, reporting DRIFT. Scheduler timing seams (now/schedule_call/cancel_call) are injectable so tests drive a fake clock."
+    evidence: "tests/harness_bench/bench.py:44-66 @ ba9e371; omnigent/server/scheduled/scheduler.py:25-26"
   # R6: Deployment story?
   R6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Railway, Render, Docker (deploy/), Kubernetes as a sandbox backend, plus a packaged macOS desktop app."
+    evidence: "railway.toml, render.yaml, deploy/ @ ba9e371"
   # R7: CLI ergonomics — try the equivalent of `init`, `agent add`, `run`.
   R7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Rich CLI: omni run, resume (with a cross-agent picker), server, sandbox, auth, diagnostics, plus a documented CLI contract in designs/CLI_CONTRACT.md."
+    evidence: "omnigent/cli.py @ ba9e371; designs/CLI_CONTRACT.md"
 
   # --- S. Hard scenarios ---
   # S1: Delegated authority
   S1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class_answer
+    note: "FIRST ANSWER IN THE STUDY. RFC 8628 device authorization grant mints a delegated token carrying DELEGATED_SCOPE and a grant_id; delegated_path_allowed fails CLOSED against an allow-list of path prefixes (and handles prefix confusion: /v1/hosts/h1/runners passes, /v1/hostsX does not); revocation is checked per request via set_grant_revocation_check. Default-off, and consent routes never mount in OIDC mode."
+    evidence: "omnigent/server/auth.py:70-81 @ ba9e371; designs/DEVICE_AUTH.md"
   # S2: Torn side effect
   S2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "Omnigent found and fixed a real lost-update race: concurrent usage-delta writes silently dropped each other's cost/token deltas (bug #9), fixed with SELECT FOR UPDATE on Postgres and BEGIN IMMEDIATE on SQLite (a plain deferred SELECT-then-UPDATE raises SQLITE_BUSY_SNAPSHOT). But there is still no idempotency key on tool side effects."
+    evidence: "omnigent/stores/conversation_store/__init__.py:1035-1049 @ ba9e371"
   # S3: Upgrade mid-flight
   S3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "Agent.version increments on every bundle update over a content-addressed artifact - the only agent versioning in the study - but a conversation never records the version it started on, so resume cannot detect the change. VERSIONING WITHOUT PINNING. Contrast Google AX, which pins identity without versions."
+    evidence: "omnigent/stores/agent_store/sqlalchemy_store.py:300 @ ba9e371; omnigent/entities/conversation.py:215-217"
   # S4: Concurrent memory write
   S4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No memory store. session_state mutations are ordered StateUpdate ops (SET/INCREMENT/DELETE/APPEND) applied transactionally, but there is no conflict resolution for concurrent semantic writes."
+    evidence: "omnigent/spec/types.py:1184-1198 @ ba9e371"
   # S5: Cancellation tree
   S5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "interrupt is a declared per-harness capability, live-verified by the bench for 4 of 26 harnesses. No documented propagation down a sub-agent conversation tree, and no typed cancel reason."
+    evidence: "omnigent/harness_capabilities.py:132 @ ba9e371"
   # S6: Silent context loss
   S6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "compaction is a declared axis but None (no claim) for all 26 harnesses, so Omnigent neither performs nor detects context loss. VERIFIED live."
+    evidence: "omnigent/harness_capabilities.py:139 @ ba9e371; verified live against omnigent 0.11.0 (PyPI, 2026-08-26)"
   # S7: Poison message
   S7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "Closest thing to a DLQ so far: ScheduledTaskRun.error_code is a bounded queryable classification token ('timeout', 'rate_limited') stored explicitly 'for future retry logic', and status='skipped' exists. Retry/quarantine logic itself is not implemented, and the scheduler does not replay missed fires."
+    evidence: "omnigent/db/db_models.py:1570-1575 @ ba9e371; omnigent/server/scheduled/scheduler.py:11-16"
   # S8: Tenant leak
   S8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class_answer
+    note: "FIRST ANSWER IN THE STUDY. workspace_id is part of every table's COMPOSITE PRIMARY KEY and is defaulted from a ContextVar bound per request, so a query that forgets to scope fails to find the row rather than returning another tenant's data. workspace_scope() resets to the prior value on exit 'so nested / concurrent contexts don't leak'. OSS runs as workspace 0, so the single-tenant path is the multi-tenant path with one value."
+    evidence: "omnigent/db/db_models.py:216-238 @ ba9e371"
   # S9: Runaway spend
   S9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class_answer
+    note: "FIRST ANSWER IN THE STUDY. cost_budget policy gates the request phase (so text-only turns are budgeted) and the tool-call phase: soft ask_thresholds_usd checkpoints park for approval and remember the highest approved level, hard max_cost_usd acts as a model-DOWNGRADE gate rather than a hard stop. Plus per-user user_daily_cost and per-firing max_cost_usd on scheduled tasks. Fails CLOSED when usage is present but total_cost_usd is absent so unpriced models cannot bypass the cap. Honest documented limit: 'a single very expensive turn can still overshoot before the next check.'"
+    evidence: "omnigent/policies/builtins/cost.py:8-52 @ ba9e371; omnigent/db/db_models.py:1351"
   # S10: Zombie sandbox
   S10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "Host suspend/resume is detected by comparing wall-clock against monotonic-clock advance across a single poll (the monotonic clock freezes during sleep), so half-open WebSockets reconnect promptly instead of waiting out a ~120s keepalive - and it cannot false-fire on a GC pause because a blocked loop advances both clocks equally. Sessions are pinned to hosts with runner registries. No explicit reaping of an orphaned sandbox."
+    evidence: "omnigent/suspend_watch.py:1-30 @ ba9e371"
 
 object_model: |
-  # ASCII tree of resources that actually exist
+  Workspace (workspace_id)          tenant partition; part of EVERY composite PK
+   |-- User / Account
+   |    `-- DeviceGrant             RFC 8628 delegated auth, revocable
+   |-- Project                      first-class grouping of sessions
+   |-- Agent                        id, name, bundle_location, VERSION (monotonic)
+   |-- Policy                       scope: "default" (server) | "session"
+   |-- Host                         a connected machine that can run sessions
+   |-- ScheduledTask                name, prompt, rrule, timezone, state,
+   |    |                           max_cost_usd, host_id
+   |    `-- ScheduledTaskRun        status, scheduled_at, fired_at, finished_at,
+   |                                error, error_code, -> conversation_id
+   `-- Conversation                 the session; parent/root ids for sub-agents
+        |-- ConversationItem        the transcript (append)
+        |-- ConversationLabel       session-scoped guardrail labels
+        |-- SessionPermission       (user_id, conversation_id, level)
+        `-- Comment                 human review note anchored to a file range
 
-strongest_ideas: []
+strongest_ideas:
+  - "Declared capabilities VERIFIED BY AN EXECUTABLE BENCH: reconcile() compares declared against live-probed and emits DRIFT when a declaration is false, making the capability table self-enforcing - you cannot lie in _BUILTIN_CAPABILITIES without the bench catching it."
+  - "None means 'makes no claim' and is reported as UNKNOWN, never assumed unsupported. The absent-vs-unknown discipline, implemented inside a capability model."
+  - "Verified vs asserted capabilities tracked separately: only 4 of 26 harnesses are probe-verified and the docs warn the bench 'must not treat those 19 as ground truth'."
+  - "Fail-closed decided per ENFORCEMENT PHASE with stated reasoning, and PHASE_TOOL_RESULT deliberately failing OPEN because by then the side effect already happened."
+  - "The secretless credential proxy: swap-on-access at the egress MITM so nothing credential-shaped enters the sandbox, host-bound single-use oa_cred_ placeholders for credential-gating clients, 403 leak guard on cross-host replay, and no clobbering of a client-set Authorization header."
+  - "workspace_id in the COMPOSITE PRIMARY KEY, so forgetting to scope a query finds nothing rather than leaking another tenant's rows."
+  - "Task/Run separation for scheduled work, with a bounded queryable error_code on the run for retry classification."
+  - "Monotonic Agent.version over content-addressed bundle artifacts."
+  - "Template agents vs session-scoped agents distinguished by Agent.session_id."
+  - "The strictly-decreasing timeout ladder: each hop's budget must EXCEED the hop it waits on, never equal, or an inner hop's fail-open branch can never run (12s > 8s > 7s > 6s > 5s)."
+  - "Advisory gates that fail open by design, with the tradeoff stated: 'a spawn that dies on routing infrastructure is worse than a spawn on the inherited model'."
+  - "PolicyResult.deciding_policies names every policy that drove a composed verdict - one on DENY, all ASKing policies in YAML order on ASK."
+  - "Policies that TRANSFORM content, chained so each sees the previous policy's output, which makes PII redaction a policy rather than a special case."
+  - "Resume and ForkHistory as declared enums naming the real behaviours (warm-reattach vs cold-only; none vs rebuild vs preamble) instead of pretending harnesses are uniform."
+  - "trace_id_from_response_id: the response id IS the W3C trace id, so an operator jumps from id to trace by stripping a prefix - no lookup table, no search query."
+  - "Suspend detection by monotonic-vs-wall-clock divergence, which cannot false-fire on a GC pause because a blocked loop advances both clocks equally."
+  - "Optional harnesses as separate PyPI packages via entry points, with core still emitting a targeted 'pip install omnigent-foo' hint for known-but-uninstalled harness ids."
+  - "Plugin registry that rejects builtin overrides, rejects flat package namespaces, and rejects plugins declaring lifecycle hooks that are not yet wired end to end."
+  - "NATIVE_TUI / APPROVAL_MIRROR: bring an agent with NO integration surface under one policy layer by wrapping its terminal and mirroring its approval pane to the web."
+  - "A design doc that audits its own dead code, naming the gap between intent and implementation (dead propagation helper, disabled instrumentor, never-wired dependency)."
 
-weakest_choices: []
+weakest_choices:
+  - "No event log. State lives in mutable relational rows, so durability rests on transactions rather than replay - weaker than Google AX's fold-the-log model, and its own docs note a durable append-only log is 'tracked separately'."
+  - "Agent versioning WITHOUT pinning: version increments but a conversation never records which version it started on, so resume cannot detect a mid-flight change."
+  - "Task/Run separation exists only for scheduled work, not for interactive sessions, so it is not a universal spine."
+  - "All four optional capability axes are entirely unpopulated - 26 of 26 harnesses make no claim on steering, live_queue, images or compaction. Mechanism proven, data absent."
+  - "19 of 26 harnesses' interrupt/streaming values are declared best-effort by integration mode rather than probe-verified. Honestly documented, still a correctness risk for anything trusting the table."
+  - "No agent-to-agent messaging despite being a multi-agent supervision product."
+  - "Agents are hard-deleted, with no deprecation or revocation lifecycle (though device grants DO have one)."
+  - "No database foreign keys ('cascade is app-owned') - defensible for sharding, but referential integrity now depends on application discipline."
+  - "The scheduler is IN-PROCESS with no cross-replica claim, so two server instances would each arm timers and double-fire. Correct for one instance, unsafe horizontally."
+  - "Enormous surface for an alpha: 111MB, 72 API paths, desktop app, web UI, Slack bot, 26 harnesses. Its own docs call it 'heavily vibe-coded' and lacking 'a clear mental map'."
+  - "Sessions pinned to hosts/runners, so work does not float to any available worker."
 
-reusable_components: []
-  # - component: 
-  #   decision: INTEGRATE   # BUILD|INTEGRATE|ADOPT_AS_STANDARD|REUSE|DEFER
-  #   note: 
+reusable_components:
+  - component: "Secretless credential proxy (swap-on-access + host-bound placeholder + 403 leak guard)"
+    decision: REUSE
+    note: "Best answer to J4/K7 in the study. Port the pattern directly."
+  - component: "Declared capabilities + conformance bench + DRIFT reconciliation"
+    decision: ADOPT_AS_STANDARD
+    note: "Closes the loop ADR-0012 only opened."
+  - component: "None = no claim, reported UNKNOWN, never assumed unsupported"
+    decision: ADOPT_AS_STANDARD
+    note: "The absent/unknown discipline inside a capability model."
+  - component: "Verified vs asserted capability confidence tracking"
+    decision: ADOPT_AS_STANDARD
+    note: "Prevents trusting best-effort declarations as ground truth."
+  - component: "Per-phase fail-closed set, defined once, with stated reasoning"
+    decision: ADOPT_AS_STANDARD
+    note: "Sharper than my category-based ADR-0012 amendment; supersedes it."
+  - component: "workspace_id in the composite primary key"
+    decision: ADOPT_AS_STANDARD
+    note: "Unscoped queries find nothing instead of leaking."
+  - component: "Task -> Run tables with a queryable error_code"
+    decision: REUSE
+    note: "First real Task/Run separation; direct ADR-0002 evidence."
+  - component: "deciding_policies on a composed verdict"
+    decision: ADOPT_AS_STANDARD
+    note: "First implementation of ADR-0013 traceability."
+  - component: "Strictly-decreasing timeout ladder"
+    decision: ADOPT_AS_STANDARD
+    note: "Required for any layered fail-open path to actually fail open."
+  - component: "Resume / ForkHistory as declared enums"
+    decision: REUSE
+    note: "Name the real behaviours instead of assuming uniformity."
+  - component: "Response id IS the trace id"
+    decision: REUSE
+    note: "Free operator jump from response id to trace."
+  - component: "Template vs session-scoped agents"
+    decision: REUSE
+    note: "A distinction our domain model lacks and needs."
+  - component: "Entry-point harness plugins in separate packages"
+    decision: REUSE
+    note: "Keeps core install small; targeted install hints for known ids."
+  - component: "Suspend detection by clock divergence"
+    decision: REUSE
+    note: "Cheap, and cannot false-fire on GC pauses."
+  - component: "Cost policy (soft checkpoints + hard downgrade gate)"
+    decision: INTEGRATE
+    note: "First real cost control; fails closed on unpriced models."
+  - component: "Mutable-rows-as-truth (no event log)"
+    decision: BUILD
+    note: "Reject; prefer AX's derived-from-log model."
+  - component: "Hard-delete agents"
+    decision: BUILD
+    note: "Reject; we need deprecate/revoke."
+  - component: "In-process scheduler with no cross-replica claim"
+    decision: BUILD
+    note: "Reject; our control plane must scale out, so runs need a durable claim."
 
-lessons: []
+lessons:
+  - "Durable identity is the Conversation, and agents are versioned DEFINITIONS bound to it. Adds a distinction I lacked: template agents vs session-scoped agents (Agent.session_id). Our Agent needs both. (amends ADR-0001)"
+  - "FIRST REAL TASK/RUN SEPARATION: scheduled_tasks (intent) and scheduled_task_runs (attempt, with status/timestamps/error_code) are separate tables, so intent survives failed attempts. The queryable error_code 'for future retry logic' is the field my strawman Run was missing. Caveat: only for scheduled work. (confirms ADR-0002)"
+  - "No agent-to-agent messaging - SIX FOR SIX, and this from a product built for multi-agent supervision. Agents relate through parentage and shared session state. This is now decisive: durable agent messaging must not be in v0.1. (confirms ADR-0003)"
+  - "IntegrationMode's five values are the clearest statement of the adapter problem I have found, and NATIVE_TUI extends the space I had considered: you can adapt an agent with NO integration surface by wrapping its TUI and mirroring its approval pane. Our adapter taxonomy should carry this enum. (confirms ADR-0004)"
+  - "The fullest principal model in the study - users, accounts, permission levels, a __public__ sentinel, admin flags, and RFC 8628 delegated grants with per-request revocation. First answer to S1 anywhere, proving delegated authority is tractable. (confirms ADR-0007)"
+  - "FOURTH CONSECUTIVE PROJECT with filesystem/git-backed skills and no memory store. I consider this settled for v0.1. (confirms ADR-0008)"
+  - "Most pluggable sandbox layer in the study - bwrap + seatbelt locally, ten cloud providers, mandatory L7 egress proxy - and unlike AX it ships local implementations too. (confirms ADR-0009)"
+  - "Second real OTel and more thorough than AX (FastAPI + httpx + SQLAlchemy). But also a caution: its own design doc found the propagation bespoke, FastAPIInstrumentor gated off, and a propagation helper that was dead code. ADOPTING OTEL IS NOT THE SAME AS WIRING IT - our exit criteria need a propagation test, not a dependency check. (confirms ADR-0010)"
+  - "MOST USEFUL CHALLENGE IN PHASE 3: Omnigent has what no other project has - a monotonic Agent.version over content-addressed bundles - and STILL cannot detect an upgrade mid-flight, because a conversation never pins the version it started on. Versioning is necessary but not sufficient; the PIN is the mechanism and it must live on the run. AX pins identity without versions, Omnigent versions without pinning; we need both. (challenges ADR-0011)"
+  - "Strongest confirmation in the study, and it goes further: capabilities are published on GET /v1/harnesses (public API), an executable bench reconciles declared against observed and reports DRIFT, None means no-claim and is reported UNKNOWN, and verified is tracked separately from asserted. ALSO SUPERSEDES MY OWN AMENDMENT: Omnigent splits fail-closed by POSITION IN THE ENFORCEMENT PATH (PHASE_TOOL_RESULT fails open because the side effect already happened), which is sharper than my safety-vs-liveness categories. (confirms and extends ADR-0012)"
+  - "First implementation of policy traceability: PolicyResult.deciding_policies names every policy that drove a composed verdict. Policies also transform content in a chain, so PII redaction is a policy. No shadow-comparison mode, so that half of the ADR remains unprecedented. (confirms ADR-0013)"
+  - "NEW: fail-closed should be POSITIONAL, not categorical. Fail closed where the decision is the last enforcement point; fail open where the harm is already incurred. Define the set once, in one constant, so enforcement sites cannot drift."
+  - "NEW: the strictly-decreasing timeout ladder. In any layered fail-open path, each hop's budget must strictly exceed the hop it waits on, or the inner hop's fail-open branch never runs."
+  - "NEW: scheduling needs a durable cross-replica claim. Omnigent's in-process scheduler is correct for one instance and would double-fire across replicas - a trap for our scale-out control plane."
 
-adr_impact: []
-  # - adr: ADR-0001
-  #   effect: confirms      # confirms|amends|challenges|neutral
-  #   note: 
+adr_impact:
+  - adr: ADR-0001
+    effect: amends
+    note: "Durable identity is the Conversation; agents are versioned definitions. Adds template vs session-scoped agents."
+  - adr: ADR-0002
+    effect: confirms
+    note: "First real Task/Run separation (scheduled_tasks / scheduled_task_runs) with a queryable error_code."
+  - adr: ADR-0003
+    effect: confirms
+    note: "No agent-to-agent messaging - six for six, from a multi-agent supervision product. Decisive."
+  - adr: ADR-0004
+    effect: confirms
+    note: "Five declared integration modes; NATIVE_TUI adapts an agent with no integration surface at all."
+  - adr: ADR-0005
+    effect: confirms
+    note: "MCP as declarations plus a proxying manager, with capabilities modelled separately."
+  - adr: ADR-0006
+    effect: confirms
+    note: "ACP is one integration mode among five - interop, not the internal contract."
+  - adr: ADR-0007
+    effect: confirms
+    note: "Fullest principal model in the study; RFC 8628 delegated grants with per-request revocation."
+  - adr: ADR-0008
+    effect: confirms
+    note: "Fourth consecutive project with filesystem skills and no memory store."
+  - adr: ADR-0009
+    effect: confirms
+    note: "bwrap + seatbelt + ten cloud backends + mandatory L7 egress proxy."
+  - adr: ADR-0010
+    effect: confirms
+    note: "Second real OTel, most thorough yet - but its own audit shows adopting is not wiring. Need a propagation test."
+  - adr: ADR-0011
+    effect: challenges
+    note: "Has agent versioning and STILL cannot detect mid-flight upgrade, because the run never pins the version. The pin is the mechanism, not the version."
+  - adr: ADR-0012
+    effect: confirms
+    note: "Strongest confirmation: capabilities as public API, bench-verified with DRIFT, None=no-claim=UNKNOWN, verified tracked apart from asserted. Its per-phase fail-closed rule supersedes my amendment."
+  - adr: ADR-0013
+    effect: confirms
+    note: "First implementation of traceability via deciding_policies; content-transforming policy chain. No shadow mode."

@@ -87,6 +87,52 @@ definition version, the decision is unimplementable as stated and must weaken to
 
 `C12`, `S3`, `D4`, `C11`
 
+## Amendment — 2026-08-26 (Phase 3, Omnigent): the pin is the mechanism, not the version
+
+Omnigent challenged this ADR usefully. It has the only agent versioning in the
+study — `Agent.version`, a monotonic counter incremented on every bundle update
+over a content-addressed tarball (`stores/agent_store/sqlalchemy_store.py:300 @
+ba9e371`) — and it **still cannot detect a mid-flight upgrade**, because a
+`Conversation` never records the version it started on. I searched
+`entities/conversation.py` for a version field; there is none.
+
+So versioning a definition is necessary but not sufficient. Across six projects:
+
+| Project | Versions the definition | Pins it on the run | Detects mid-flight change |
+|---|---|---|---|
+| LangGraph | no | no | **no** (verified: renamed node → resume returns `[]`, silent work loss) |
+| OpenHands | no | no | no |
+| Letta | no | no | no |
+| Google AX | **no** | **yes** (harness *identity*) | **yes** (verified: rejects resume) |
+| Omnigent | **yes** (monotonic) | **no** | **no** |
+| — | — | — | — |
+
+**Nobody does both.** AX pins identity without versions, so it catches
+substitution but not upgrade. Omnigent versions without pinning, so it has an
+audit trail but no guard.
+
+**Amended decision.** The run record captures, at start:
+
+```text
+run.pinned = {
+  agent_id,
+  agent_version,        # monotonic, from the definition
+  agent_digest,         # content hash of the resolved bundle
+  adapter_id,           # which adapter (AX's harness identity)
+  adapter_version,      # and its version
+  checkpoint_schema_version,
+}
+```
+
+On resume, every field is compared. A mismatch is `INCOMPATIBLE` and refuses to
+resume with a message naming *which* field changed and both values — following
+AX's example, whose error names the old and new harness id and is pinned by a
+test.
+
+The distinction that matters: **the version lives on the definition, the pin
+lives on the run.** A version counter alone answers "what changed?" after the
+fact; only the pin answers "may this resume?" before work is lost.
+
 ## Evidence log
 
 | Project | Effect | Evidence | Note |
@@ -95,6 +141,7 @@ definition version, the decision is unimplementable as stated and must weaken to
 | OpenHands | confirms | `openhands-sdk/.../conversation/state.py @ 760eea2` | Conversation state stores agent config but carries no version pin and performs no compatibility check on resume. Two of two projects share the hazard. |
 | Letta | confirms | `src/agent/system-prompt-versioning.test.ts @ 852ca24` | No version pin on a suspended conversation, despite system-prompt-versioning tests existing. Three for three on this hazard. |
 | Google AX | confirms | `internal/controller/controller.go:82-85 @ b777313`; test `TestExec_ResumeExplicitDifferentHarnessRejected` | **Only project that fails loudly**, verified by running its tests: resuming with a different harness is rejected — "resumption not allowed: harness ID changed from harness-a to harness-b". Refines the ADR: AX pins harness *identity* but not *version*, so substitution is caught and upgrade is not. Our pin must cover both. |
+| Omnigent | challenges | `omnigent/stores/agent_store/sqlalchemy_store.py:300 @ ba9e371`; `omnigent/entities/conversation.py:215-217` | **The most useful challenge in Phase 3.** Omnigent has what no other project has — a monotonic `Agent.version` incremented on every bundle update over a content-addressed artifact — and **still cannot detect a mid-flight upgrade**, because a `Conversation` never records the version it started on (searched `entities/conversation.py`; no version field). So versioning is *necessary but not sufficient*: **the pin is the mechanism, and it must live on the run.** Google AX pins harness identity without versions; Omnigent versions without pinning. Nobody does both. Our run record must capture `(agent_id, agent_version, adapter_identity)` at start and compare on resume. |
 
 ## Open questions
 

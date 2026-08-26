@@ -41,6 +41,12 @@ vocabularies:
     - worker_queue      # control plane dispatches to pooled workers
     - durable_actor     # addressable identity with durable state, wakes on event
     - attached_harness  # adapts an external agent process it did not author
+    - meta_harness      # control plane over MANY third-party harnesses, each
+                        # adapted through a different integration mode, with
+                        # capability heterogeneity as a first-class concern.
+                        # Distinct from attached_harness: that adapts an
+                        # external agent, this normalises a fleet of them.
+                        # Added 2026-08-26 (Phase 3, Omnigent).
     - in_process        # library inside the caller's process
     - hybrid            # justify in notes
     - unknown
