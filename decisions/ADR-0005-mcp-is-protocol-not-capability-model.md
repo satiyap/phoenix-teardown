@@ -51,6 +51,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | Omnigent | confirms | `omnigent/runner/proxy_mcp_manager.py @ ba9e371`; `omnigent/harness_capabilities.py:124-141` | MCP appears as declarations in the agent image plus a manager and a proxying manager, while capabilities are modelled in a completely separate 16-axis type. The clearest separation of protocol from capability model in the study. |
 | Cloudflare Agents | confirms | `design/retries.md @ 2f957bc`; `packages/agents/src/mcp/` | MCP as protocol, and extended in a way no other project manages: connection state is **persisted** in a `server_options` JSON column "so it persists across hibernation", with per-server retry config and OAuth re-establishment on reconnect. If MCP servers are long-lived resources, their connection state belongs in durable storage. |
 | AG2 | confirms | `ag2/acp/tool_gateway.py @ 90f490a`; `ag2/network/identity.py:144-160` | MCP appears as `mcp/`, `mcp_ui/`, and an ACP `tool_gateway`, while the capability model is the `Resume` — an entirely separate structure with claimed and observed capabilities. Protocol and capability model cleanly distinct. |
+| Pydantic AI | confirms | `pydantic_ai_slim/pydantic_ai/capabilities/native_or_local.py @ b48ee38` | MCP as both a capability and a toolset, with `NativeOrLocalTool` resolving to a provider-native implementation where one exists and a local one otherwise. Protocol distinct from capability model, and the provider-native/local distinction handled explicitly. |
 
 ## Open questions
 

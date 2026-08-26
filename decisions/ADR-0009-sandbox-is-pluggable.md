@@ -38,6 +38,61 @@ If no provider supports a capability we consider mandatory (e.g. fast snapshot f
 
 `K1`, `K5`, `K9`, `K7`, `S10`
 
+## Amendment — 2026-08-26 (Phase 3, Pydantic AI): egress is part of the sandbox
+
+This ADR treated sandboxing as *process* isolation. Pydantic AI, which has no
+process isolation at all, identifies a threat the ADR missed entirely:
+
+**An agent with a URL-fetching tool is an SSRF primitive pointed at your own
+infrastructure.** A prompt-injected agent asked to "fetch this URL" can reach
+`169.254.169.254` and read the instance's IAM credentials. No amount of process
+isolation prevents this, because the request is exactly what the tool is for.
+
+`_ssrf.py @ b48ee38` is the most thorough answer found in this study:
+
+- Protocol validation, hostname→IP resolution, and blocking of private ranges,
+  link-local (`169.254.0.0/16`), and CGNAT (`100.64.0.0/10`, noted as including
+  Alibaba's metadata service).
+- **Teredo prefix decoding** (`2001::/32`) because obfuscated IPv6 forms would
+  otherwise slip through: "the raw low-32 bytes are meaningless, so it needs its
+  own decode".
+- An **enumerated cloud credential blocklist**: `169.254.169.254` (AWS IMDS, GCP,
+  Azure, OCI, DigitalOcean, Hetzner, IBM, OpenStack), `169.254.170.2` (**AWS ECS
+  task IAM role credentials**), `169.254.170.23` (**AWS EKS Pod Identity Agent**),
+  `168.63.129.16` (Azure WireServer), `100.100.100.200` (Alibaba),
+  `192.0.0.192` (Oracle Classic), `169.254.42.42` (Scaleway), plus IPv6 forms.
+- **Bounded downloads** with `Accept-Encoding` restricted to `identity, gzip`,
+  rejecting brotli/zstd/deflate even when returned, because they "can expand a few
+  compressed bytes into multi-MiB output in one decoder step" and `deflate` "has to
+  be buffered whole" before its framing can be determined.
+
+**The design principle, and the reason this is an amendment rather than a note:**
+
+> Cloud metadata / credential endpoints — always blocked, **even with
+> `allow_local=True`**. When `allow_local=True` we skip the private-IP check, so
+> these must be caught explicitly. Most are also covered by the private ranges
+> above, but `168.63.129.16` (Azure) is a **public IP**, so the metadata guard is
+> the only thing that blocks it.
+
+**An escape hatch must be scoped so it cannot open the worst hole.** The local-access
+option exists for legitimate development, and deliberately does not grant access to
+credential endpoints. Most escape hatches are all-or-nothing; this one is not.
+
+**Amended decision.** The sandbox provider interface covers three boundaries, not
+one:
+
+1. **Process/filesystem isolation** — as originally specified (bwrap, seatbelt,
+   containers, isolates, external actor systems).
+2. **Egress control** — a mandatory guard on every outbound request an agent can
+   cause, including tool fetches. Blocks private ranges, link-local, CGNAT, and an
+   enumerated cloud-metadata list that no configuration option can disable. Bounded
+   response sizes with size-limitable encodings only.
+3. **Storage boundary** — from Cloudflare Agents: if the LLM can write SQL, a
+   policy enforced in the same database is a convention rather than a control.
+
+All three are required. A sandbox that isolates the process but lets a tool read
+IMDS has not isolated anything that matters.
+
 ## Evidence log
 
 Append one row per project as evidence lands. Keep the reasoning, not just the verdict.
@@ -51,6 +106,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | Omnigent | confirms | `omnigent/sandbox/ @ ba9e371`; `omnigent/inner/egress/proxy.py` | **Most pluggable sandbox layer in the study**: bwrap (Linux) and seatbelt (macOS) locally, ten cloud providers (Modal, Daytona, Blaxel, Islo, E2B, CoreWeave, Kubernetes, OpenShell, Boxlite, Databricks), and a mandatory L7 egress MITM proxy with an allow-list. Unlike Google AX it ships local implementations as well as the provider interface. |
 | Cloudflare Agents | challenges | `design/rfc-sub-agents.md @ 2f957bc` | No pluggable sandbox provider, because the Durable Object *is* the isolate — the only project where the agent runtime is itself the isolation unit. The insight worth keeping is sharper than the challenge: a child DO's private SQLite makes a policy **structural** rather than conventional, because otherwise "the LLM can bypass the queue by writing SQL" and enforcement degrades to "a convention (*don't call `this.sql` directly*)". **Our sandbox interface should therefore also be a storage boundary, not only a process boundary.** |
 | AG2 | neutral | `ag2/ @ 90f490a` | No sandbox or isolation model at all; code execution is treated as a tool concern. |
+| Pydantic AI | amends | `pydantic_ai_slim/pydantic_ai/_ssrf.py:98-120 @ b48ee38` | **Adds a threat this ADR does not mention.** No process sandbox, but `_ssrf.py` is *egress* sandboxing and it identifies the hazard directly: **an agent that fetches URLs is an SSRF primitive aimed at your own infrastructure and your cloud credential endpoints.** Cloud metadata is "always blocked, **even with `allow_local=True`**", enumerating AWS IMDS, **AWS ECS task IAM role credentials**, **AWS EKS Pod Identity**, Azure WireServer (a *public* IP no private-range check would catch), Alibaba, Oracle, Scaleway, plus IPv6 and Teredo-obfuscated forms. Also a decompression-bomb defence: `Accept-Encoding` restricted to `identity, gzip` because brotli/zstd "can expand a few compressed bytes into multi-MiB output in one decoder step". **The principle to adopt: an escape hatch must be scoped so it cannot open the worst hole.** |
 
 ## Open questions
 

@@ -14,935 +14,1078 @@ project:
   evidence_class: A
   read_on: 2026-08-26
   repo: "https://github.com/pydantic/pydantic-ai"
-  commit:                  # SHA the claims were read against
+  commit: b48ee3808631ea8796a7c3b6941863bde47e10be
   docs: "https://ai.pydantic.dev"
-  version:
+  version: "pydantic_ai 2.35.0 (Phase 1 recon said 1.0 - stale)"
   license: MIT
   license_verdict: INTEGRATE
-  runtime_class: unknown
+  runtime_class: in_process
   one_line: Type-driven agent framework in the Pydantic idiom.
-  thesis:                  # the core architectural bet
+  thesis: "Cross-cutting behaviour belongs in composable, ordered capabilities rather than constructor arguments, and durability belongs to a workflow engine that already solved it - Temporal, DBOS and Prefect as first-class compatibility targets, not peripheral adapters."
 
 probes:
 
   # --- A. Core abstraction and object model ---
   # A1: What does this system think an agent *is*? State it in one sentence, in their vocabulary.
   A1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Agent[DepsT, OutputT] is a typed Python object, not a persisted resource. Identity is the variable that holds it."
+    evidence: "pydantic_ai_slim/pydantic_ai/agent/ @ b48ee38"
   # A2: What is the root resource — the thing everything else hangs off?
   A2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No session or conversation resource; message history is a value the caller passes in and gets back."
+    evidence: "pydantic_ai_slim/pydantic_ai/_history_processor.py @ b48ee38"
   # A3: Is `Agent` persistent or ephemeral? Can it exist while not executing?
   A3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "Nothing persists between runs unless the caller or a durable engine persists it."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/ @ b48ee38"
   # A4: Is `Task` a separate resource from `Run`? If not, which concept is missing and what fills the...
   A4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No Task or Run resource. A run is a function call; under a durable engine the ENGINE's workflow is the durable run - itself an argument that Run belongs to whoever owns durability."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/_base.py @ b48ee38"
   # A5: What is a `Session` attached to: user, agent, task, or execution?
   A5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No session model."
+    evidence: "pydantic_ai_slim/pydantic_ai/agent/ @ b48ee38"
   # A6: Are messages first-class durable resources, or transient function arguments?
   A6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Typed message parts (TextPart, ToolCallPart, ToolReturn, RetryPromptPart) are values, not durable resources."
+    evidence: "pydantic_ai_slim/pydantic_ai/_deferred.py:20-24 @ b48ee38"
   # A7: Are artifacts (files, outputs, deliverables) first-class?
   A7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No artifact resource."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # A8: Can multiple agents participate in one task? How is that represented?
   A8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No multi-agent participation model; agents call agents as functions or tools."
+    evidence: "pydantic_ai_slim/pydantic_ai/agent/ @ b48ee38"
   # A9: Draw the object model as a tree. Only nodes that exist in their code or API.
   A9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Agent[DepsT, OutputT] > {Capability (63 exported, ordered), Toolset, Model, RunContext, DeferredToolRequests{calls, approvals, metadata}}; pydantic_graph and pydantic_evals as separate packages. Deliberately thin - a library, not a platform."
+    evidence: "pydantic_ai_slim/pydantic_ai/capabilities/__init__.py @ b48ee38; verified live against pydantic_ai 2.35.0 (PyPI, 2026-08-26)"
 
   # --- B. Runtime model ---
   # B1: Does the platform launch agents, host them, or attach to external ones?
   B1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "In-process: agent.run() executes a graph inside the caller's process. Under a durable engine the same agent runs inside a Temporal workflow, DBOS step or Prefect flow."
+    evidence: "pydantic_ai_slim/pydantic_ai/_agent_graph.py @ b48ee38"
   # B2: Execution substrate: process, container, microVM, serverless, in-process library, remote HTTP?
   B2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No process or container isolation; it is a library in your process."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # B3: Who owns the event loop — platform or agent?
   B3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The library owns the agent loop as a graph (_agent_graph.py), with typed wrap points at every stage."
+    evidence: "pydantic_ai_slim/pydantic_ai/_agent_graph.py @ b48ee38"
   # B4: Who decides when an agent wakes?
   B4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "The caller decides; there is no placement or scheduling layer."
+    evidence: "pydantic_ai_slim/pydantic_ai/agent/ @ b48ee38"
   # B5: Can an agent run indefinitely? What is the actual ceiling?
   B5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A run lives as long as the call, or as long as the durable engine's workflow when one is used."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/ @ b48ee38"
   # B6: Are there background or unattended agents?
   B6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No scheduling in the library; Prefect or Temporal would provide it."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/ @ b48ee38"
   # B7: Is execution synchronous or asynchronous from the caller's view?
   B7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Streaming via run_stream, ProcessEventStream capability, typed AgentStreamEvent and ModelResponseStreamEvent unions, and a sync bridge."
+    evidence: "pydantic_ai_slim/pydantic_ai/_sync_stream.py @ b48ee38"
   # B8: Can in-flight work migrate between workers?
   B8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Not by the library, but a durable engine can resume a workflow on another worker - which is exactly why the library forbids same-process handles across the boundary."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/_runtime_toolsets.py:38-49 @ b48ee38"
   # B9: Can an agent survive a machine restart? Automatically, or with operator action?
   B9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Delegated: recovery is the durable engine's, and the integration guidelines require run context, deps, history and retries to survive the boundary."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/AGENTS.md @ b48ee38"
   # B10: Classify: worker/queue, durable actor, attached harness, or in-process library.
   B10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "in_process library, with durability deliberately delegated to Temporal, DBOS and Prefect as 'first-class compatibility targets, not peripheral adapters'."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/AGENTS.md @ b48ee38"
 
   # --- C. Durability and failure semantics ---
   # C1: What state is durable, and what is lost on crash?
   C1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "The library persists nothing. Durability is the engine's or the caller's."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/ @ b48ee38"
   # C2: *When* is state persisted — every step, every tool call, on checkpoint, never?
   C2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No checkpointing of its own."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/ @ b48ee38"
   # C3: Checkpointing or event sourcing? Can state be rebuilt from a log?
   C3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Delegated to Temporal / DBOS / Prefect, each with its own model (event history, steps, flow runs). The library owns the boundary crossing, not the log."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/_base.py:38-45 @ b48ee38"
   # C4: Retry semantics, and at what granularity: run, step, tool call?
   C4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Model-level retries and ModelRetry exist, and the durable guidelines require retries to be preserved across the boundary, but there is no declarative backoff policy in the library."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/AGENTS.md @ b48ee38"
   # C5: At-least-once or exactly-once? What do the docs claim versus what the code does?
   C5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Whatever the durable engine provides; the library makes no delivery claim of its own."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/AGENTS.md @ b48ee38"
   # C6: Is there an idempotency model for tool side effects?
   C6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No effect ledger or idempotency key - idempotency is the durable engine's job. A legitimate answer for a library, but it means two idempotency mechanisms must not fight if we run inside Temporal."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/ @ b48ee38"
   # C7: Process crash recovery: what resumes, and from where?
   C7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A Model cannot be serialized across the boundary, so a model_id string crosses and is resolved through a registry on the far side - the identifier-not-object pattern."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/_base.py:38-45 @ b48ee38"
   # C8: Node loss: is work re-dispatched, and how is it detected?
   C8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No lost-worker detection in the library; the engine owns it."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/ @ b48ee38"
   # C9: Context-window overflow: truncation, summarisation, or failure?
   C9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "_history_processor.py and a ProcessHistory capability allow message-history transformation, which is where compaction would live, but no compaction strategy ships (contrast AG2's CompactStrategy plus four policies)."
+    evidence: "pydantic_ai_slim/pydantic_ai/_history_processor.py @ b48ee38"
   # C10: Timers, scheduled execution, long sleeps — durable across restart?
   C10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No timers or sleeps; the durable engine provides them."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/ @ b48ee38"
   # C11: Human-in-the-loop pause and resume: durable, or in-memory only?
   C11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "HITL AS A TYPED OUTPUT: DeferredToolRequests{calls, approvals, metadata} is returned as the run's output when the model calls a deferred tool, and DeferredToolResults (matched by tool_call_id) feeds the next run. Pending state is the CALLER's value, so durability is free at that scale. Alternatively HandleDeferredToolCalls resolves inline, and a handler may decline (return None) so the next handler in the chain tries and unhandled calls bubble up as output."
+    evidence: "pydantic_ai_slim/pydantic_ai/_deferred.py:27-61 @ b48ee38; docs/capabilities/handle-deferred-tool-calls.md; verified live against pydantic_ai 2.35.0 (PyPI, 2026-08-26)"
   # C12: Can a definition be upgraded while runs are in flight? What happens to them?
   C12:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "No agent version, but the durable boundary forces the adjacent discipline: an unserializable Model crosses as a model_id resolved by registry. Agent Specs are declarative and could be versioned, but nothing pins a spec to an in-flight run."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/_base.py:38-45 @ b48ee38; docs/agent-spec.md"
 
   # --- D. Agent identity and lifecycle ---
   # D1: Is an agent globally addressable? By what identifier?
   D1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent id; an Agent is a Python object."
+    evidence: "pydantic_ai_slim/pydantic_ai/agent/ @ b48ee38"
   # D2: Does identity survive process restart?
   D2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No persisted agent identity."
+    evidence: "pydantic_ai_slim/pydantic_ai/agent/ @ b48ee38"
   # D3: Is identity distinct from runtime instance?
   D3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Agent Specs (YAML/JSON) are the definition; a constructed Agent is the execution. Loaded via Agent.from_file / Agent.from_spec."
+    evidence: "docs/agent-spec.md @ b48ee38"
   # D4: Are agents versioned? Immutable or mutable definitions?
   D4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No version field on a spec or an agent."
+    evidence: "docs/agent-spec.md @ b48ee38"
   # D5: Is there a registry or catalog?
   D5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "_spec.py provides NamedSpec plus registry/loading utilities shared by the evaluator and capability systems, so capabilities resolve by name from a registry - but there is no agent registry."
+    evidence: "pydantic_ai_slim/pydantic_ai/_spec.py:1-5 @ b48ee38"
   # D6: Can agents discover each other at runtime?
   D6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No runtime discovery."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # D7: Can agents advertise capabilities? In what format?
   D7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No declared metadata about what an agent or runtime CAN do. 'Capability' here means installed behaviour, not a claim - see the two-meanings finding in lessons."
+    evidence: "pydantic_ai_slim/pydantic_ai/capabilities/AGENTS.md @ b48ee38"
   # D8: Is there an owner, team, or tenant on the agent record?
   D8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No owner or tenant."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # D9: Can an agent be suspended, revoked, or deprecated?
   D9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No revocation lifecycle."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # D10: Is there anything resembling a declarative agent manifest?
   D10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "AGENT SPECS: declarative YAML/JSON defining model, instructions, model_settings and CAPABILITIES, loaded with Agent.from_file('agent.yaml'). Motivated by 'separating agent configuration from application code' and 'letting non-developers configure agents'. A declared agent carries its declared extensions."
+    evidence: "docs/agent-spec.md @ b48ee38"
 
   # --- E. Harness and runtime interoperability ---
   # E1: What is the minimum interface an agent implementation must satisfy?
   E1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Not an agent adapter - a DURABILITY-ENGINE adapter. BaseDurabilityCapability owns the model registry and the model round-trip across the durable boundary, with Temporal, DBOS and Prefect implementations and Restate named as a target."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/_base.py:38-45 @ b48ee38"
   # E2: Transport: stdin/stdout, HTTP, gRPC, WebSocket, in-process, ACP, A2A?
   E2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "In-process function calls; the durable engines supply their own transports. MCP over its own transports for tools."
+    evidence: "pydantic_ai_slim/pydantic_ai/_mcp.py @ b48ee38"
   # E3: Can it host a foreign agent (Claude Code, Codex, OpenHands, LangGraph, ADK)?
   E3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Three durable engines integrated (Temporal, DBOS, Prefect) and many model providers; no third-party AGENT adapters."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/ @ b48ee38"
   # E4: Is there an event stream out of a running agent? What granularity?
   E4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Typed event stream unions (AgentStreamEvent, ModelResponseStreamEvent) with a ProcessEventStream capability to intercept them."
+    evidence: "pydantic_ai_slim/pydantic_ai/capabilities/process_event_stream.py @ b48ee38"
   # E5: Are tool calls externally observable, or internal to the agent?
   E5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Tool calls are typed parts with named wrap points (WrapToolExecuteHandler, WrapToolValidateHandler) and _tool_execution.py."
+    evidence: "pydantic_ai_slim/pydantic_ai/capabilities/abstract.py @ b48ee38"
   # E6: How is context injected at start?
   E6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Agent Specs are declarative YAML/JSON config including capabilities; _spec.py resolves named specs from a registry."
+    evidence: "docs/agent-spec.md @ b48ee38"
   # E7: Is cancellation supported? Cooperative or forced? Does it propagate to subagents?
   E7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "_cancel.py provides cancellation tokens, AND the durable boundary REJECTS them with an explanation: 'cancellation_token cannot be used with {engine} durable execution because it is a same-process handle and cannot cross the durable execution boundary. Cancel the durable workflow or flow instead.'"
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/_runtime_toolsets.py:38-49 @ b48ee38"
   # E8: Can a run be checkpointed and restored by the platform, or only by the agent?
   E8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "No checkpoint API of its own; the durable engine's step/activity boundary is the checkpoint. The library's job is making state crossable (identifier not object)."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/_base.py:38-45 @ b48ee38"
   # E9: Which of these would be hard to adapt, and why?
   E9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Per-package AGENTS.md files stating design rules (capabilities/, durable_exec/), seven named Wrap*Handler types for every interception point, and extensive docs including extensibility.md and hooks.md."
+    evidence: "pydantic_ai_slim/pydantic_ai/capabilities/AGENTS.md @ b48ee38; pydantic_ai_slim/pydantic_ai/durable_exec/AGENTS.md"
 
   # --- F. Agent-to-agent communication ---
   # F1: Direct messages between agents?
   F1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent-to-agent messaging; agents call agents as functions or tools. AG2 remains the sole answer."
+    evidence: "pydantic_ai_slim/pydantic_ai/agent/ @ b48ee38"
   # F2: Channels, topics, or pub/sub?
   F2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No channels."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # F3: Task delegation as a distinct mechanism from messaging?
   F3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "An agent can be exposed as a tool to another agent, which is delegation by function call, not a delegation primitive."
+    evidence: "pydantic_ai_slim/pydantic_ai/toolsets/ @ b48ee38"
   # F4: Synchronous RPC between agents?
   F4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No inter-agent RPC."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # F5: Asynchronous inbox or mailbox?
   F5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No mailbox."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # F6: Is delivery durable? Survives restart of sender and receiver?
   F6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No inter-agent delivery layer."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # F7: Is message ordering guaranteed? Per what scope?
   F7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Message history is an ordered list the caller holds; ordering within a run is sequential by construction."
+    evidence: "pydantic_ai_slim/pydantic_ai/_history_processor.py @ b48ee38"
   # F8: Acknowledgement or delivery receipts?
   F8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No acknowledgement model."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # F9: Correlation ids for request/response pairing?
   F9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "tool_call_id correlates a DeferredToolRequest with its DeferredToolResult, and OTel spans correlate a run end to end."
+    evidence: "pydantic_ai_slim/pydantic_ai/_deferred.py:44-56 @ b48ee38"
   # F10: Conversation threading?
   F10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Message history is a value, so branching is just keeping two lists - simple but unmodelled."
+    evidence: "pydantic_ai_slim/pydantic_ai/_history_processor.py @ b48ee38"
   # F11: Capability-based routing — address by what an agent *can do* rather than who it is?
   F11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "SelectModel / ModelSelector capabilities route to a MODEL by criteria, and ToolSearch selects tools, but there is no routing to agents by capability."
+    evidence: "pydantic_ai_slim/pydantic_ai/capabilities/select_model.py @ b48ee38"
 
   # --- G. Human-agent collaboration ---
   # G1: Is a human modelled as a special kind of agent, a distinct principal type, or not modelled?
   G1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No principals."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # G2: Shared rooms, channels, or workspaces?
   G2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No shared workspace."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # G3: Task threads humans can read and post into?
   G3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "The caller drives the loop and can inspect or alter message history between runs; clai provides an interactive CLI."
+    evidence: "pydantic_ai_slim/pydantic_ai/_cli/ @ b48ee38"
   # G4: Mentions or directed addressing?
   G4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No addressing."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # G5: Approval gates. Blocking or advisory? Durable while pending?
   G5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "DeferredToolRequests.approvals with ToolApproved / ToolDenied results, build_results(approvals=..., approve_all=...), and a HandleDeferredToolCalls capability chain where a handler may decline so the next one tries."
+    evidence: "pydantic_ai_slim/pydantic_ai/_deferred.py:37-61 @ b48ee38; docs/capabilities/handle-deferred-tool-calls.md"
   # G6: Mid-run intervention: can a human redirect without restarting?
   G6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The caller controls everything between runs: approve or deny per tool call, edit history, cancel via a cancellation token in-process."
+    evidence: "pydantic_ai_slim/pydantic_ai/_cancel.py @ b48ee38"
   # G7: Agent status and presence visible to humans?
   G7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A run either returns a result or returns DeferredToolRequests, so 'waiting for a human' is visible as an output TYPE rather than a status field."
+    evidence: "pydantic_ai_slim/pydantic_ai/_deferred.py:27-35 @ b48ee38"
   # G8: Notifications or escalation when an agent is blocked?
   G8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No notification or escalation."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # G9: Shared scratchpad or working surface?
   G9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No shared scratchpad."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # G10: Can a human see the context an agent is operating on?
   G10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Full typed message history plus OTel spans following GenAI semconv, with message parts typed against a pinned spec commit."
+    evidence: "pydantic_ai_slim/pydantic_ai/_otel_messages.py:1-4 @ b48ee38"
 
   # --- H. Context and memory ---
   # H1: Which of these exist as *separate* concepts: prompt context, working state, session history, ...
   H1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No memory subsystem. SEVENTH CONSECUTIVE PROJECT with no memory service - only a history-processing hook."
+    evidence: "pydantic_ai_slim/pydantic_ai/_history_processor.py @ b48ee38"
   # H2: Who owns memory: agent, human, workspace, task, or tenant?
   H2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No memory ownership model."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # H3: Can memory be shared between agents? At what granularity?
   H3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No shared memory."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # H4: Are there permissions on memory?
   H4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No memory permissions."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # H5: Is provenance tracked — where a memory came from?
   H5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No provenance model."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # H6: Expiry, TTL, or forgetting?
   H6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No TTL."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # H7: Summarisation or compaction. Automatic or explicit?
   H7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "ProcessHistory and HistoryProcessor are the hook where summarisation would live; docs cover history processors, but no strategy ships."
+    evidence: "pydantic_ai_slim/pydantic_ai/_history_processor.py @ b48ee38"
   # H8: Retrieval mechanism: vector, keyword, structured, agent-driven?
   H8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "ToolSearch with local and native strategies retrieves TOOLS by relevance, and embeddings are supported, but there is no document retrieval subsystem."
+    evidence: "pydantic_ai_slim/pydantic_ai/native_tools/_tool_search.py @ b48ee38"
   # H9: Can an agent mutate its own memory mid-run?
   H9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent-writable memory."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # H10: Conflict resolution on concurrent writes?
   H10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No shared mutable memory."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # H11: Is memory in the same store as execution state, or separate?
   H11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Nothing is stored, so the distinction does not arise; docs/coding-agent-skills.md indicates filesystem skills as the knowledge pattern."
+    evidence: "docs/coding-agent-skills.md @ b48ee38"
 
   # --- I. Tools and capabilities ---
   # I1: Are tools bound to agents statically, or resolved dynamically?
   I1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Toolsets (FunctionToolset, MCPToolset, DynamicToolset), native provider tools, common_tools, and PrepareTools / PrefixTools capabilities for shaping the exposed set."
+    evidence: "pydantic_ai_slim/pydantic_ai/toolsets/ @ b48ee38"
   # I2: Is there a capability abstraction distinct from tool implementation?
   I2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "63 composable Capability objects with explicit ordering and position - but note this is capability-as-INSTALLED-BEHAVIOUR, a different concept from capability-as-DECLARED-METADATA (Omnigent, AG2)."
+    evidence: "pydantic_ai_slim/pydantic_ai/capabilities/__init__.py @ b48ee38; verified live against pydantic_ai 2.35.0 (PyPI, 2026-08-26)"
   # I3: Is there a registry of available tools?
   I3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Toolsets are the registry abstraction, with DynamicToolset resolving lazily per run or run step, and _spec.py resolving named capabilities from a registry."
+    evidence: "pydantic_ai_slim/pydantic_ai/toolsets/ @ b48ee38"
   # I4: Tool scoping — can an agent be restricted to a subset?
   I4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "PrepareTools / PrepareOutputTools filter per run, DynamicToolset scopes per step, and prefix_tools namespaces them."
+    evidence: "pydantic_ai_slim/pydantic_ai/capabilities/prepare_tools.py @ b48ee38"
   # I5: Are tools versioned?
   I5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No tool versioning."
+    evidence: "pydantic_ai_slim/pydantic_ai/toolsets/ @ b48ee38"
   # I6: How are credentials supplied to a tool?
   I6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Provider credentials come from environment or explicit clients; there is no credential broker."
+    evidence: "pydantic_ai_slim/pydantic_ai/models/ @ b48ee38"
   # I7: OAuth or delegated user credentials?
   I7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No OAuth or delegated credentials in the library."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # I8: Can policy intercept a tool call before execution?
   I8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Seven typed wrap points (WrapToolExecuteHandler, WrapToolValidateHandler, WrapModelRequestHandler, WrapRunHandler, WrapNodeRunHandler, WrapOutputProcessHandler, WrapOutputValidateHandler) plus Hooks give real interception seams, and RaiseContentFilterError is a shipped guard - but there is no policy ENGINE with rules and decisions."
+    evidence: "pydantic_ai_slim/pydantic_ai/capabilities/abstract.py @ b48ee38; pydantic_ai_slim/pydantic_ai/capabilities/hooks.py"
   # I9: Approval gates on specific tools?
   I9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Per-tool-call approval via DeferredToolRequests.approvals, resolved by the caller or by a HandleDeferredToolCalls handler chain that can decline per call."
+    evidence: "docs/capabilities/handle-deferred-tool-calls.md @ b48ee38"
   # I10: Do tools execute inside or outside the agent's sandbox?
   I10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "Tools run in-process with no isolation, except that URL fetching goes through the SSRF guard."
+    evidence: "pydantic_ai_slim/pydantic_ai/_ssrf.py @ b48ee38"
 
   # --- J. Security and identity ---
   # J1: What identity does an agent authenticate as?
   J1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent identity for authentication."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # J2: Authentication mechanism for agent-to-platform?
   J2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No authentication; it is a library in your process."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # J3: Authorisation model: RBAC, ABAC, capability tokens, none?
   J3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No authorisation model."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # J4: Secret storage and injection?
   J4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "No secret management, but the SSRF guard blocks cloud CREDENTIAL endpoints so a fetch tool cannot steal instance credentials."
+    evidence: "pydantic_ai_slim/pydantic_ai/_ssrf.py:101-118 @ b48ee38"
   # J5: Per-agent credentials, or shared platform credentials?
   J5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No per-agent credentials."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # J6: Can an agent act as a user? Is that impersonation or delegation?
   J6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No impersonation or delegation."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # J7: Tenant isolation: logical, or enforced at runtime?
   J7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No tenancy."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # J8: Network and filesystem isolation?
   J8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "MOST SECURITY-AWARE CODE IN THE STUDY for the threat it addresses: _ssrf.py blocks private ranges, link-local, CGNAT and Teredo-obfuscated addresses, and blocks cloud metadata/credential endpoints UNCONDITIONALLY - 'always blocked, even with allow_local=True' - enumerating AWS IMDS, AWS ECS task IAM role creds, AWS EKS Pod Identity, Azure WireServer (a PUBLIC IP no private-range check would catch), Alibaba, Oracle, Scaleway, plus IPv6. Also a decompression-bomb defence: Accept-Encoding restricted to 'identity, gzip' because brotli/zstd 'can expand a few compressed bytes into multi-MiB output in one decoder step'."
+    evidence: "pydantic_ai_slim/pydantic_ai/_ssrf.py:24-30,98-120 @ b48ee38"
   # J9: Is there an audit log? Is it tamper-evident?
   J9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "OTel spans are the record; there is no audit log resource."
+    evidence: "pydantic_ai_slim/pydantic_ai/models/instrumented.py @ b48ee38"
   # J10: Where are policy decisions enforced — control plane, runtime, or tool gateway?
   J10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Enforcement happens at typed wrap points and in the SSRF guard, both explicit locations - but there is no policy decision object."
+    evidence: "pydantic_ai_slim/pydantic_ai/_ssrf.py @ b48ee38"
 
   # --- K. Sandbox and isolation ---
   # K1: Is there a workspace or sandbox concept? What is its lifecycle?
   K1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No sandbox."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # K2: Persistent filesystem across runs?
   K2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No workspace."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # K3: Snapshot and restore?
   K3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No suspend/resume of compute."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # K4: Network egress rules?
   K4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "EGRESS CONTROL IS REAL, even though process isolation is absent: safe_download validates protocol, resolves hostnames to IPs, blocks private/internal networks and cloud metadata, bounds download size, and restricts content encodings to those it can size-limit while streaming."
+    evidence: "pydantic_ai_slim/pydantic_ai/_ssrf.py:1-6,24-30 @ b48ee38"
   # K5: Container, microVM, or none?
   K5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No isolation technology."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # K6: Resource quotas: CPU, memory, disk, wall clock?
   K6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Download size limits and usage limits exist; there are no compute quotas."
+    evidence: "pydantic_ai_slim/pydantic_ai/_ssrf.py:24 @ b48ee38"
   # K7: How are secrets injected without landing in the image or logs?
   K7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No secret injection."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # K8: Arbitrary code execution? Browser execution?
   K8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No code-execution sandbox in the library."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # K9: Is the sandbox pluggable, or a fixed implementation?
   K9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No sandbox abstraction."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
 
   # --- L. Orchestration and scheduling ---
   # L1: Does it distinguish agent coordination from workflow orchestration?
   L1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Explicit and principled: the library owns the agent loop, pydantic_graph owns graph execution, and DURABLE ORCHESTRATION IS DELEGATED to Temporal / DBOS / Prefect as first-class compatibility targets."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/AGENTS.md @ b48ee38"
   # L2: Topology: DAG, cyclic graph, supervisor, planner, event-driven, queue?
   L2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "pydantic_graph is a separate package, and _agent_graph.py runs the agent loop as a graph with typed nodes."
+    evidence: "pydantic_ai_slim/pydantic_ai/_agent_graph.py @ b48ee38; pydantic_graph/"
   # L3: Cron or scheduled triggers?
   L3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No scheduled triggers in the library."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # L4: Dynamic task spawning at runtime?
   L4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Deferred calls let a run hand external work back to the caller, and DynamicToolset resolves per step, but there is no task-spawning primitive."
+    evidence: "pydantic_ai_slim/pydantic_ai/_deferred.py:37-38 @ b48ee38"
   # L5: Fan-out / fan-in?
   L5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "concurrency.py and thread_executor support parallel tool execution; no declarative fan-out/join."
+    evidence: "pydantic_ai_slim/pydantic_ai/concurrency.py @ b48ee38"
   # L6: Subagents. Are they first-class, or just nested calls?
   L6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "An agent can be a tool of another agent - composition by function call rather than a subagent resource."
+    evidence: "pydantic_ai_slim/pydantic_ai/toolsets/ @ b48ee38"
   # L7: Retry and backoff policy — declarative or hand-rolled?
   L7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "ModelRetry and model-level retries, with the durable guidelines requiring retries to be preserved; no declarative policy object."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/AGENTS.md @ b48ee38"
   # L8: Compensation or rollback on failure?
   L8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No compensation in the library - though under Temporal, saga compensation is the ENGINE's job, which is arguably the right answer to this gap."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/ @ b48ee38"
   # L9: Does cancellation propagate through the whole tree?
   L9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "_cancel.py cancellation tokens in-process, and an explicit refusal at the durable boundary that names the correct alternative ('Cancel the durable workflow or flow instead')."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/_runtime_toolsets.py:38-49 @ b48ee38"
   # L10: Could this be replaced by Temporal or Restate, or is orchestration inseparable from the agent...
   L10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "THE STRONGEST EVIDENCE IN THE STUDY FOR KEEPING ORCHESTRATION EXTERNAL: it does not build a workflow engine, it integrates Temporal, DBOS and Prefect (Restate named next) and treats them as 'first-class compatibility targets, not peripheral adapters' with their own guidelines and workflow-level tests."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/AGENTS.md @ b48ee38"
 
   # --- M. Observability ---
   # M1: Which of these are modelled as telemetry objects: trace, run, step, LLM call, tool call, mess...
   M1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "OTel spans over models and agents, typed GenAI message parts, usage and cost on RunUsage, and an Instrumentation capability."
+    evidence: "pydantic_ai_slim/pydantic_ai/models/instrumented.py:63-75 @ b48ee38"
   # M2: Is telemetry keyed to agent, run, model, task, user, or tenant?
   M2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Keyed to run and tool_call_id via spans; there is no agent, tenant or session id to key to."
+    evidence: "pydantic_ai_slim/pydantic_ai/_otel_messages.py @ b48ee38"
   # M3: OpenTelemetry, proprietary, or none?
   M3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "BEST SEMCONV STORY IN THE STUDY: follows OTel GenAI semantic conventions 'specifically version 1.37.0', configurable via InstrumentationSettings.version, with versions 2-4 as DEPRECATED compatibility formats that emit PydanticAIDeprecationWarning. _otel_messages.py pins its message-part types to a specific spec commit. So a telemetry pipeline built on an older convention keeps working with a migration path."
+    evidence: "docs/logfire.md:294-298 @ b48ee38; pydantic_ai_slim/pydantic_ai/_otel_messages.py:1-4"
   # M4: Is there a documented, stable event schema?
   M4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Typed OTel message parts (TextPart, ToolCallPartOtelMetadata and friends) as TypedDicts, versioned instrumentation formats, and otel_metadata for rendering hints."
+    evidence: "pydantic_ai_slim/pydantic_ai/_otel_messages.py:14-22 @ b48ee38"
   # M5: Cost and token accounting. Per what unit?
   M5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "REAL COST ACCOUNTING from a SEPARATELY MAINTAINED dataset: _cost.py uses genai-prices with calc_price, a deferred data snapshot preloaded at Model construction to keep the one-time load off the event loop, and CostCalculationFailedWarning when a price cannot be determined. Only project sourcing prices externally rather than from a local table."
+    evidence: "pydantic_ai_slim/pydantic_ai/_cost.py:1-27 @ b48ee38"
   # M6: Latency breakdown by phase?
   M6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Span timings via OTel instrumentation across model requests, tool calls and run nodes."
+    evidence: "pydantic_ai_slim/pydantic_ai/models/instrumented.py @ b48ee38"
   # M7: Error taxonomy?
   M7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A typed exception hierarchy (ModelRetry, ToolFailed, UserError, HookTimeoutError, CostCalculationFailedWarning) with errors distinguished by cause rather than by string."
+    evidence: "pydantic_ai_slim/pydantic_ai/exceptions.py @ b48ee38"
   # M8: Can the event stream reconstruct a run after the fact — replay or audit?
   M8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Message history plus spans reconstruct a run, but there is no durable log unless the engine keeps one."
+    evidence: "pydantic_ai_slim/pydantic_ai/_history_processor.py @ b48ee38"
 
   # --- N. Multi-tenancy and enterprise ---
   # N1: Resource hierarchy: org, workspace, project, environment?
   N1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No org or project hierarchy."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # N2: RBAC model and its granularity?
   N2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No RBAC."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # N3: Quotas and cost limits. Enforced or advisory?
   N3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "UsageLimits caps requests and tokens per run, and cost is CALCULATED accurately from genai-prices - but cost is measured, not enforced; there is no budget gate. Omnigent remains the only enforcement answer."
+    evidence: "pydantic_ai_slim/pydantic_ai/usage.py @ b48ee38; pydantic_ai_slim/pydantic_ai/_cost.py"
   # N4: dev / staging / prod separation?
   N4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No environment model."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # N5: Deployment promotion path?
   N5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Agent Specs are declarative files that could underpin promotion between environments, but no promotion workflow exists."
+    evidence: "docs/agent-spec.md @ b48ee38"
   # N6: Agent catalog scoped to a tenant?
   N6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Agent Specs stored 'alongside other config files' form a de facto catalog; there is no catalog service."
+    evidence: "docs/agent-spec.md @ b48ee38"
   # N7: Audit retention controls?
   N7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No audit retention."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # N8: Is multi-tenancy in the OSS core, or reserved for a commercial tier?
   N8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No multi-tenancy anywhere; the commercial product (Logfire) is an observability backend, not a tenancy layer."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
 
   # --- O. API and protocol surface ---
   # O1: List the actual primary endpoints or SDK entry points. Verbatim.
   O1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A typed Python API plus a clai CLI, MCP client and server compat, and UI protocol adapters (AG-UI, Vercel AI)."
+    evidence: "pydantic_ai_slim/pydantic_ai/_mcp.py @ b48ee38; docs/ui/ag-ui.md"
   # O2: Is the API resource-oriented or RPC-flavoured?
   O2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "Not resource-oriented; it is a library API."
+    evidence: "pydantic_ai_slim/pydantic_ai/agent/ @ b48ee38"
   # O3: Streaming: SSE, WebSocket, long-poll, gRPC stream?
   O3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Streaming with typed event unions, a ProcessEventStream capability, and a sync bridge that rejects a running event loop."
+    evidence: "pydantic_ai_slim/pydantic_ai/_sync_stream.py @ b48ee38"
   # O4: Webhooks or outbound callbacks?
   O4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No webhooks."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # O5: Which standards are implemented: MCP, A2A, ACP, OTel, OpenAI-compatible?
   O5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "MCP (client and compat), OTel GenAI semconv 1.37.0 with versioned formats, AG-UI and Vercel AI protocols, and durable-engine integrations. No A2A or ACP."
+    evidence: "docs/logfire.md:294 @ b48ee38; docs/ui/ag-ui.md"
   # O6: Is the API versioned? Stability commitment?
   O6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Semantic package versioning (2.35.0), VERSIONED instrumentation formats with deprecation warnings, and PydanticAIDeprecationWarning as a first-class type."
+    evidence: "docs/logfire.md:296-298 @ b48ee38; verified live against pydantic_ai 2.35.0 (PyPI, 2026-08-26)"
   # O7: Is there a separate northbound (client) and southbound (runtime) API?
   O7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No northbound/southbound split; there is one library API."
+    evidence: "pydantic_ai_slim/pydantic_ai/agent/ @ b48ee38"
 
   # --- P. Storage ---
   # P1: What datastores are required to run it?
   P1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "The library persists nothing."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # P2: What is treated as authoritative, strongly consistent state?
   P2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "The caller's message history is the source of truth, or the durable engine's event history."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/ @ b48ee38"
   # P3: What is event-stream or append-only?
   P3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No log of its own."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # P4: Where do large artifacts go?
   P4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Binary content types exist for images and documents, with size-bounded safe downloads, but no blob store."
+    evidence: "pydantic_ai_slim/pydantic_ai/_ssrf.py:24 @ b48ee38"
   # P5: Is there a vector store? Required or optional?
   P5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Embeddings are supported and ToolSearch has a local strategy, but there is no vector store abstraction."
+    evidence: "pydantic_ai_slim/pydantic_ai/native_tools/_tool_search.py @ b48ee38"
   # P6: Is storage pluggable, or hardcoded?
   P6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Storage is entirely the caller's or the engine's, which is pluggability by omission."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/ @ b48ee38"
 
   # --- Q. Licensing and commercial ---
   # Q1: Exact license, including any per-directory variation.
   Q1:
     verdict: first_class
-    note: "MIT."
-    evidence: "https://github.com/pydantic/pydantic-ai (GitHub API, read 2026-08-26; 19505★, pushed 2026-08-26)"
+    note: "MIT throughout."
+    evidence: "LICENSE @ b48ee38"
   # Q2: Are there enterprise-only components missing from the OSS repo?
   Q2:
-    verdict: first_class
-    note: "Pydantic Logfire (hosted observability) is commercial."
-    evidence: "https://github.com/pydantic/pydantic-ai (GitHub API, read 2026-08-26; 19505★, pushed 2026-08-26)"
+    verdict: absent
+    note: "No enterprise-only components; the commercial product (Logfire) is an observability BACKEND, and instrumentation is plain OTel that works with any backend. A clean way to monetise adjacent to an open core without holding the core hostage."
+    evidence: "docs/logfire.md @ b48ee38"
   # Q3: SaaS or hosted-service restrictions?
   Q3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No SaaS restriction under MIT."
+    evidence: "LICENSE @ b48ee38"
   # Q4: Trademark constraints on derived works?
   Q4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Pydantic naming and marks; MIT grants no trademark rights."
+    evidence: "LICENSE @ b48ee38"
   # Q5: Network copyleft (AGPL, SSPL) implications for a hosted product?
   Q5:
     verdict: absent
-    note: "No network copyleft. Apache-2.0/MIT only across the whole study."
-    evidence: "https://github.com/pydantic/pydantic-ai (GitHub API, read 2026-08-26; 19505★, pushed 2026-08-26)"
+    note: "No network copyleft."
+    evidence: "LICENSE @ b48ee38"
   # Q6: Verdict: `USE` / `INTEGRATE` / `REFERENCE_ONLY` / `AVOID`, with reasoning.
   Q6:
     verdict: first_class
-    note: "INTEGRATE — MIT."
-    evidence: "https://github.com/pydantic/pydantic-ai (GitHub API, read 2026-08-26; 19505★, pushed 2026-08-26)"
+    note: "REUSE (targeted). MIT and Python, so genuinely usable. Two components worth taking almost verbatim: _ssrf.py's guard list and reasoning, and the versioned-semconv instrumentation pattern. genai-prices is worth INTEGRATE for cost data. The capability composition model is worth copying as a design, though ours must cross a network boundary theirs does not."
+    evidence: "LICENSE @ b48ee38; pydantic_ai_slim/pydantic_ai/_ssrf.py"
 
   # --- R. Developer experience ---
   # R1: Time from clone to a running agent. Actual elapsed minutes.
   R1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "VERIFIED: python -m venv, pip install pydantic-ai-slim, import and inspect - clean first try, 2.35.0. pydantic_ai_slim keeps the dependency surface small with per-provider extras."
+    evidence: "verified live against pydantic_ai 2.35.0 (PyPI, 2026-08-26)"
   # R2: How many concepts before "hello world"?
   R2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Very few: an Agent, a model string, and an output type. Agent('openai:gpt-5.2') and agent.run() is the whole hello-world."
+    evidence: "docs/index.md @ b48ee38"
   # R3: Is there a local dev loop? Hot reload?
   R3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Nothing to stand up - it is a library. TestModel and FunctionModel allow running without a provider, and clai gives an interactive loop."
+    evidence: "pydantic_ai_slim/pydantic_ai/models/test.py @ b48ee38"
   # R4: How do you debug a stuck run?
   R4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "OTel spans following GenAI semconv, Logfire integration, typed message history, and pydantic_evals for systematic evaluation with online evals."
+    evidence: "docs/logfire.md @ b48ee38; pydantic_evals/"
   # R5: Can an agent be unit tested? Is there a test harness?
   R5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Best-in-study for a library: TestModel and FunctionModel for provider-free tests, plus pydantic_evals as a whole package with datasets, evaluators, online evaluation and OTel emission."
+    evidence: "pydantic_evals/pydantic_evals/ @ b48ee38"
   # R6: Deployment story?
   R6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A library plus a CLI; deployment is your Python host, or a Temporal / DBOS / Prefect worker."
+    evidence: "pyproject.toml @ b48ee38"
   # R7: CLI ergonomics — try the equivalent of `init`, `agent add`, `run`.
   R7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "clai is a real CLI with an interactive mode, and Agent.from_file makes YAML-defined agents runnable without Python."
+    evidence: "pydantic_ai_slim/pydantic_ai/_cli/ @ b48ee38; docs/agent-spec.md"
 
   # --- S. Hard scenarios ---
   # S1: Delegated authority
   S1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No principals or authentication, so the delegated-authority question cannot be posed."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # S2: Torn side effect
   S2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "No ledger of its own - and it does not pretend to: idempotency is the durable engine's job, and the integration guidelines require retries to survive the boundary. Delegated rather than solved, which is the honest answer for a library. Note for us: if a caller runs our platform inside Temporal, two idempotency mechanisms must not fight."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/AGENTS.md @ b48ee38"
   # S3: Upgrade mid-flight
   S3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "No agent version, but the durable boundary forces the same discipline our pin needs: an unserializable Model crosses as a model_id string resolved through a registry on the far side. A pin should be an identifier plus a resolver, never a serialized object."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/_base.py:38-45 @ b48ee38"
   # S4: Concurrent memory write
   S4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No memory store."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # S5: Cancellation tree
   S5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class_answer
+    note: "Not tree propagation, but something no other project does: it REFUSES a same-process cancellation token at a durable boundary with an error explaining the mechanism and naming the alternative - 'it is a same-process handle and cannot cross the durable execution boundary. Cancel the durable workflow or flow instead.' Recognising that a cancellation primitive is scope-bound, and failing at configuration time rather than with a serialization error at runtime."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/_runtime_toolsets.py:38-49 @ b48ee38"
   # S6: Silent context loss
   S6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "ProcessHistory allows history transformation, but no compaction strategy ships and no loss signal is emitted."
+    evidence: "pydantic_ai_slim/pydantic_ai/_history_processor.py @ b48ee38"
   # S7: Poison message
   S7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No queue; poison handling is delegated to the durable engine."
+    evidence: "pydantic_ai_slim/pydantic_ai/durable_exec/ @ b48ee38"
   # S8: Tenant leak
   S8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No tenancy."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
   # S9: Runaway spend
   S9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "UsageLimits caps requests and tokens per run, and cost is calculated accurately from the maintained genai-prices dataset with a warning when pricing fails - but it MEASURES rather than ENFORCES. No budget gate stops a run mid-flight on spend."
+    evidence: "pydantic_ai_slim/pydantic_ai/usage.py @ b48ee38; pydantic_ai_slim/pydantic_ai/_cost.py:1-27"
   # S10: Zombie sandbox
   S10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No sandbox or compute lifecycle."
+    evidence: "pydantic_ai_slim/pydantic_ai/ @ b48ee38"
 
 object_model: |
-  # ASCII tree of resources that actually exist
+  Agent[DepsT, OutputT]        typed agent; output_type drives validation
+   |-- Capability              63 exported; composable, ORDERED
+   |    `-- CapabilityPosition  Literal['outermost', 'innermost']
+   |-- Toolset                 FunctionToolset | MCPToolset | DynamicToolset
+   |-- Model                   provider abstraction; resolved by model_id
+   |-- RunContext[DepsT]       deps + usage + run state
+   `-- DeferredToolRequests    HITL / external work, as an OUTPUT TYPE
+        |-- calls              tool calls needing external execution
+        |-- approvals          tool calls needing human approval
+        `-- metadata           keyed by tool_call_id
 
-strongest_ideas: []
+  AgentSpec                    declarative YAML/JSON: model, instructions,
+                               settings, capabilities. Agent.from_file(...)
+  pydantic_graph               separate package: graph execution
+  pydantic_evals               separate package: datasets, evaluators, online
 
-weakest_choices: []
+strongest_ideas:
+  - "Cloud credential endpoints blocked even when the local-access escape hatch is open: 'always blocked, even with allow_local=True'. An escape hatch deliberately scoped so it cannot open the worst hole."
+  - "A per-provider enumerated metadata blocklist including AWS ECS task IAM role credentials, AWS EKS Pod Identity, and Azure WireServer - a PUBLIC IP that no private-range check would catch."
+  - "Teredo obfuscated-address decoding as an SSRF bypass defence: 'the raw low-32 bytes are meaningless, so it needs its own decode'."
+  - "Decompression-bomb defence by restricting Accept-Encoding to what can be size-limited while streaming, and rejecting other encodings even if a server returns them."
+  - "VERSIONED OTel semantic-convention adherence: pinned to GenAI semconv 1.37.0 with versions 2-4 as deprecated compatibility formats that emit a warning, so a telemetry pipeline gets a migration path instead of a break."
+  - "OTel message-part types pinned to a specific spec commit for traceability."
+  - "Refusing an impossible composition at CONFIGURATION time with an error that explains the mechanism and names the alternative: 'cancellation_token cannot be used with {engine} durable execution because it is a same-process handle... Cancel the durable workflow or flow instead.'"
+  - "HITL as a typed OUTPUT (DeferredToolRequests), making pending state the caller's value and therefore durable for free."
+  - "A HandleDeferredToolCalls handler chain where a handler may DECLINE (return None) so the next one tries, and unhandled calls bubble up as output - policy auto-approves what it recognises, humans see the rest."
+  - "Explicit, load-bearing composition order: CapabilityPosition ('outermost' | 'innermost'), CapabilityOrdering, CombinedCapability, with a written warning to check interactions with adjacent capabilities."
+  - "Every interception point has a named type - seven Wrap*Handler types - so a capability author knows exactly what can be hooked and what shape it has."
+  - "NativeOrLocalTool: one capability that resolves to a provider-native implementation where it exists and a local one otherwise."
+  - "Treating durable engines as 'first-class compatibility targets, not peripheral adapters', with their own guidelines and workflow-level tests."
+  - "Crossing a serialization boundary with an IDENTIFIER, not an object: a Model cannot be serialized, so a model_id string crosses and is resolved through a registry on the far side."
+  - "A project rule that new features must not break serializability, checked against durable execution and agent specs."
+  - "Cost from a separately maintained pricing dataset (genai-prices) rather than a hardcoded table, with an explicit warning when calculation fails and a preload to keep the snapshot load off the event loop."
+  - "A shared spec system (NamedSpec) reused by both the evaluator and capability systems."
+  - "Agent Specs: declarative YAML/JSON agents including their capabilities, so non-developers can configure agents and definitions live alongside other config."
+  - "Evaluation as a first-class package (pydantic_evals) with datasets, evaluators, online evaluation and OTel emission."
+  - "Per-package AGENTS.md files stating the design rules for that directory."
 
-reusable_components: []
-  # - component: 
-  #   decision: INTEGRATE   # BUILD|INTEGRATE|ADOPT_AS_STANDARD|REUSE|DEFER
-  #   note: 
+weakest_choices:
+  - "No durability of its own, so every durability property depends on adopting Temporal, DBOS or Prefect. Correct for a library, insufficient for a platform."
+  - "No agent identity, registry, versioning or revocation."
+  - "No principals, authentication, authorization, policy engine or tenancy."
+  - "No agent-to-agent messaging."
+  - "HITL works only while the caller holds the value, unless a durable engine persists it."
+  - "No memory or compaction, only a history-processing hook."
+  - "Cost is measured accurately but never enforced - no budget gate."
+  - "63 capabilities is a large surface for a composition system whose ordering is load-bearing; the guidelines acknowledge the interaction risk."
+  - "No process isolation at all; the SSRF guard covers egress but tools run in-process."
 
-lessons: []
+reusable_components:
+  - component: "_ssrf.py guard list and reasoning"
+    decision: REUSE
+    note: "Most security-aware code in the study; the threat applies to us too."
+  - component: "Escape hatch that cannot open the worst hole"
+    decision: ADOPT_AS_STANDARD
+    note: "allow_local never grants credential-endpoint access."
+  - component: "Restricted Accept-Encoding for bounded downloads"
+    decision: ADOPT_AS_STANDARD
+    note: "Decompression-bomb defence."
+  - component: "Versioned semconv adherence with a deprecation window"
+    decision: ADOPT_AS_STANDARD
+    note: "Amends ADR-0010: telemetry consumers are downstream dependencies."
+  - component: "Pinning message types to a spec commit"
+    decision: REUSE
+    note: "Makes convention drift traceable."
+  - component: "Refuse impossible composition at config time, with reason and alternative"
+    decision: ADOPT_AS_STANDARD
+    note: "Best fail-closed error message in the study."
+  - component: "HITL as a typed output"
+    decision: REUSE
+    note: "Free durability at small scale; caller owns pending state."
+  - component: "Handler chain with decline-and-fallthrough"
+    decision: ADOPT_AS_STANDARD
+    note: "Policy handles what it recognises, humans get the remainder."
+  - component: "Explicit composition position and ordering"
+    decision: ADOPT_AS_STANDARD
+    note: "Ordering must be declared, not discovered by debugging."
+  - component: "Named types for every wrap point"
+    decision: REUSE
+    note: "Makes extension points discoverable and typed."
+  - component: "NativeOrLocalTool resolution"
+    decision: ADOPT_AS_STANDARD
+    note: "Correct abstraction for provider-native features."
+  - component: "Identifier-not-object across a boundary"
+    decision: ADOPT_AS_STANDARD
+    note: "Reinforces ADR-0011: a pin is an identifier plus a resolver."
+  - component: "Serializability as a project rule"
+    decision: ADOPT_AS_STANDARD
+    note: "Our capabilities and specs cross a network boundary."
+  - component: "genai-prices external pricing dataset"
+    decision: INTEGRATE
+    note: "Cost data is a maintenance burden worth outsourcing."
+  - component: "Durable engines as compatibility targets"
+    decision: REUSE
+    note: "Direct ADR-0004 / L10 evidence."
+  - component: "Declarative agent specs including capabilities"
+    decision: REUSE
+    note: "D10 answer; a declared agent carries its declared extensions."
+  - component: "Per-package AGENTS.md design rules"
+    decision: REUSE
+    note: "Keeps a large surface coherent."
+  - component: "Library-owned durability (i.e. none)"
+    decision: BUILD
+    note: "Reject; a platform must own durability. Delegation is not available to us."
 
-adr_impact: []
-  # - adr: ADR-0001
-  #   effect: confirms      # confirms|amends|challenges|neutral
-  #   note: 
+lessons:
+  - "Confirms ADR-0004 FROM THE OTHER DIRECTION: every other project adapts agents, this one adapts DURABILITY ENGINES, treating Temporal/DBOS/Prefect/Restate as 'first-class compatibility targets, not peripheral adapters' with rules requiring run context, deps, history, retries, model selection and toolset lifecycle to survive the boundary. (confirms ADR-0004)"
+  - "Cross a serialization boundary with an identifier, not an object: a Model is unserializable, so model_id crosses and resolves through a registry. A pin should be an identifier plus a resolver, never a serialized object - which also makes pins comparable across versions. (confirms ADR-0011)"
+  - "AMENDS ADR-0009 with a threat it does not mention: an agent that fetches URLs is an SSRF primitive aimed at your own infrastructure and your cloud credential endpoints. Any URL-fetching capability needs a guard blocking private ranges, link-local, CGNAT, Teredo and an enumerated cloud-metadata list - and the local-development escape hatch must not open the credential hole. (amends ADR-0009)"
+  - "AMENDS ADR-0010: semantic conventions MOVE, and a telemetry consumer is a downstream dependency you cannot break. Declare the semconv version emitted, support one deprecation window with a warning, and pin message types to a spec commit. Cloudflare taught us to follow conventions; this teaches us to version our adherence. (amends ADR-0010)"
+  - "AMENDS ADR-0012 with the most conceptually useful finding of the pass: THERE ARE TWO MEANINGS OF 'CAPABILITY'. Omnigent and AG2 mean declared, queryable metadata about what a thing can do (for routing and fail-closed decisions). Pydantic AI means an installed object that changes behaviour, composed with explicit ordering. Both belong in our design and MUST NOT share a name. Proposal: Capability = declared verified metadata; Extension = installable composed behaviour with declared position. (amends ADR-0012)"
+  - "Confirms ADR-0014 by honest delegation: no effect ledger, because idempotency is the durable engine's job. A reminder that our ledger must interoperate - if a caller runs us inside Temporal, two idempotency mechanisms must not fight. (confirms ADR-0014)"
+  - "Seventh consecutive project with no memory service - only a history-processing hook. (confirms ADR-0008)"
+  - "The strongest evidence in the study for keeping orchestration external: it is the only project treating workflow-engine integration as a first-class compatibility contract with its own guidelines and workflow-level tests, rather than reimplementing one. (confirms L10)"
+  - "NEW PRACTICE: refuse impossible compositions at configuration time with an error that explains the mechanism AND names the alternative. Best fail-closed message in the study, and a model for every capability rejection we emit."
+  - "NEW PRACTICE: make serializability a project rule with a written check, because a spec that cannot round-trip silently diverges from the running agent."
+
+adr_impact:
+  - adr: ADR-0001
+    effect: neutral
+    note: "No agent identity; an Agent is a Python object. Appropriate for a library."
+  - adr: ADR-0002
+    effect: neutral
+    note: "No Task or Run resource. Under a durable engine the engine's workflow IS the run - an argument that Run belongs to whoever owns durability."
+  - adr: ADR-0003
+    effect: confirms
+    note: "No agent-to-agent messaging; AG2 remains the sole answer."
+  - adr: ADR-0004
+    effect: confirms
+    note: "Adapts durability ENGINES rather than agents, as first-class compatibility targets. Identifier-not-object across the boundary."
+  - adr: ADR-0005
+    effect: confirms
+    note: "MCP as capability and toolset, with NativeOrLocalTool distinguishing provider-native features."
+  - adr: ADR-0006
+    effect: neutral
+    note: "No A2A."
+  - adr: ADR-0007
+    effect: neutral
+    note: "No principals."
+  - adr: ADR-0008
+    effect: confirms
+    note: "Seventh consecutive project with no memory service."
+  - adr: ADR-0009
+    effect: amends
+    note: "Adds egress guarding: a fetch tool is an SSRF primitive aimed at cloud credential endpoints. Escape hatches must not open that hole."
+  - adr: ADR-0010
+    effect: amends
+    note: "Version your semconv adherence; support one deprecation window; pin message types to a spec commit."
+  - adr: ADR-0011
+    effect: confirms
+    note: "A pin should be an identifier plus a resolver, never a serialized object."
+  - adr: ADR-0012
+    effect: amends
+    note: "Two meanings of capability - declared metadata vs installed behaviour. Split them: Capability and Extension."
+  - adr: ADR-0013
+    effect: neutral
+    note: "No policy engine, though typed wrap points are real interception seams."
+  - adr: ADR-0014
+    effect: confirms
+    note: "Delegates idempotency to the durable engine, honestly. Our ledger must not fight the engine's."

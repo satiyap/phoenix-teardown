@@ -281,6 +281,70 @@ Omnigent's optional axes (`steering`, `live_queue`, `images`, `compaction`) are
 A tri-state nobody fills is a tri-state that buys nothing, so our conformance
 bench must also report *declaration coverage*.
 
+## Amendment 3 — 2026-08-26 (Phase 3, Pydantic AI): two meanings of "capability"
+
+This ADR has been using one word for two different things, and five projects
+disagreed about which they meant without any of them being wrong.
+
+| Project | "capability" means | Used for |
+|---|---|---|
+| LangGraph | declared enum of supported store operations | deciding what a caller may attempt |
+| Letta | probed `SandboxAvailability{backend \| null, reason}` | fail-closed safety decision |
+| Google AX | (nothing declared) | — |
+| Omnigent | 16 typed axes, published on `GET /v1/harnesses`, bench-verified | routing, degradation, drift detection |
+| AG2 | `claimed_capabilities` + hub-observed `ObservedStat` | peer discovery and ranking |
+| **Pydantic AI** | **an installed object that changes agent behaviour** | **extension and composition** |
+
+The first five are *metadata*: claims about what a thing can do, consumed by
+something deciding whether to attempt it. Pydantic AI's are *behaviour*: 63
+composable objects (`MCP`, `WebSearch`, `Thinking`, `Instrumentation`,
+`ProcessHistory`, `PrefixTools`…) installed onto an agent, with a project rule
+saying "prefer a capability over a new `Agent` constructor kwarg".
+
+Conflating them is a real design hazard: a *declared capability* must be
+serializable, queryable, and verifiable against observed behaviour, while an
+*installed behaviour* needs composition order, wrap points, and lifecycle hooks.
+Those are different types with different invariants.
+
+**Amended decision — split the concept:**
+
+- **`Capability`** — declared, queryable metadata about what an adapter or agent
+  can do. Tri-state (`true | false | unknown`), classified by enforcement position
+  (Amendment 2), carrying a confidence (`verified | asserted`), published on the
+  API, verified by the conformance bench, and optionally accumulating observed
+  statistics (AG2's contribution). This is this ADR as originally written.
+- **`Extension`** — installable behaviour composed onto a run. Carries a declared
+  **position** and **ordering**, hooks typed **wrap points**, and must be
+  serializable so it can appear in an agent spec and cross a durability boundary.
+
+Three implementation rules taken from Pydantic AI for the `Extension` half:
+
+1. **Composition order is declared, not discovered.** `CapabilityPosition =
+   Literal['outermost', 'innermost']` plus an explicit ordering type, and a written
+   instruction to check interactions with adjacent extensions. Most middleware
+   systems leave ordering implicit and are debugged by surprise.
+2. **Every interception point is a named type.** Seven `Wrap*Handler` types
+   (model request, node run, output process, output validate, run, tool execute,
+   tool validate), so an extension author can see what is hookable and its shape.
+3. **Serializability is a project rule, not a hope.** From
+   `capabilities/AGENTS.md`: "Check durable execution, agent specs, and serialized
+   configuration before adding non-serializable state or hidden runtime
+   dependencies." An extension that cannot round-trip through a spec silently
+   diverges from the running agent.
+
+And one on error quality, which belongs to this ADR because capability rejection is
+where users meet it. When a composition is impossible, Pydantic AI refuses at
+*configuration* time with a message that explains the mechanism and names the
+alternative:
+
+> `cancellation_token` cannot be used with {engine} durable execution because it is
+> a same-process handle and cannot cross the durable execution boundary. **Cancel
+> the durable workflow or flow instead.**
+
+*Adopted:* every capability or composition rejection must state what was refused,
+why it is impossible, and what to do instead. A fail-closed decision that a user
+cannot act on is a bug report waiting to be filed.
+
 ## Evidence log
 
 | Project | Effect | Evidence | Note |
@@ -293,6 +357,7 @@ bench must also report *declaration coverage*.
 | Omnigent | confirms | `omnigent/harness_capabilities.py:124-141 @ ba9e371`; `tests/harness_bench/bench.py:44-66`; `omnigent/policies/types.py:59-80` | **Strongest confirmation in the study, and it extends the ADR in four ways.** (a) Capabilities are published on `GET /v1/harnesses` — public API, not an internal detail. (b) An **executable conformance bench** reconciles declared against live-probed and emits **DRIFT** when a declaration is false, so the table is self-enforcing: "you can't lie in `_BUILTIN_CAPABILITIES` without the bench catching it on the next live run." (c) **`None` means "makes no claim" and is reported as UNKNOWN, never assumed unsupported** — the `absent` ≠ `unknown` discipline, inside a capability model. (d) **Verified** is tracked separately from **asserted**: only 4 of 26 harnesses are probe-verified and the docs warn the bench "must not treat those 19 as ground truth." **It also supersedes my own amendment**: `FAIL_CLOSED_PHASES = (PHASE_TOOL_CALL, PHASE_REQUEST)` splits fail-closed by *position in the enforcement path* — `PHASE_TOOL_RESULT` fails open because "by the time the result phase runs the tool has already executed" — which is sharper than my safety-vs-liveness categories. |
 | Cloudflare Agents | neutral | `packages/agents/src/agent-tools.ts @ 2f957bc` | No declared capability model for runtimes or agents. "Capability" here means which tools an agent has, not what the runtime can do. |
 | AG2 | confirms | `ag2/network/identity.py:132-160 @ 90f490a`; `ag2/network/hub/core.py:1337-1352`; `ag2/network/client/tools/peers.py:29-40` | **Extends this ADR in two directions.** From harnesses to **agents**: `Resume.claimed_capabilities` is the declaration. And from a test-run to a **continuous signal**: the hub maintains `observed[capability] = ObservedStat{n, completed, failed, expired, p50_latency_ms}`, updated on every terminal task event, with `task_id` dedupe so one task cannot double-count. `peers(action="find")` exposes claim *and* `observed_success_rate` *and* cost to the calling LLM. Observation even **expands** the index — an agent appears under a capability "even if it wasn't in their original `claimed_capabilities`", so capabilities can be *discovered*. **Omnigent verifies claims in a bench, AG2 verifies them in production; both belong — bench for correctness, observation for reliability.** Caveat: `ObservedStat` is a lifetime counter with no decay and `p50_latency_ms` is really the last sample, so reputation-based routing needs a window we would have to add. |
+| Pydantic AI | amends | `pydantic_ai_slim/pydantic_ai/capabilities/AGENTS.md @ b48ee38`; `capabilities/abstract.py` | **Two meanings of "capability", and this ADR conflates them.** Omnigent and AG2 mean *declared, queryable metadata about what a thing can do*, used for routing and fail-closed decisions. Pydantic AI means *an installed object that changes behaviour* — 63 of them, composed with explicit `CapabilityPosition` (`'outermost' | 'innermost'`) and `CapabilityOrdering`, with the rule "prefer a capability over a new `Agent` constructor kwarg". **Both belong in our design and must not share a name.** Proposal: `Capability` = declared verified metadata (this ADR as written); `Extension` = installable composed behaviour with declared position. Also adopt: every interception point gets a named type (seven `Wrap*Handler` types here), and composition order is declared rather than discovered by debugging. |
 
 ## Open questions
 

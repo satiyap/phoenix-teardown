@@ -78,6 +78,41 @@ attribute what the protocol already models as state.
 Exit criteria change accordingly: the OTel question is answered by a passing
 propagation test, not by an inventory of dependencies.
 
+## Amendment 2 — 2026-08-26 (Phase 3, Pydantic AI): version the adherence
+
+Amendment 1 required following GenAI semantic conventions. Pydantic AI shows what
+that omits: **the conventions themselves change, and a telemetry consumer is a
+downstream dependency you cannot break.**
+
+Its answer (`docs/logfire.md:294-298 @ b48ee38`):
+
+> Pydantic AI follows the OpenTelemetry Semantic Conventions for Generative AI
+> systems, specifically **version 1.37.0** of the conventions. The instrumentation
+> format can be configured using the `version` parameter of
+> `InstrumentationSettings`.
+>
+> Versions 2, 3, and 4 are **deprecated compatibility formats**. Passing one of
+> these versions emits a `PydanticAIDeprecationWarning`; use version 5 unless you
+> are temporarily preserving an older telemetry pipeline.
+
+Plus `_otel_messages.py`, which pins its message-part TypedDicts to a **specific
+spec commit** rather than to "the conventions" in the abstract.
+
+**Amended requirement.** Adopting OTel now means five things:
+
+1. Follow GenAI semantic conventions where a `gen_ai.*` key exists.
+2. Declare one vendor namespace for everything else; never bare keys, never another
+   tool's prefix.
+3. Propagate context across every boundary, asserted by a test.
+4. Bind span lifetimes to the invocation that owns them.
+5. **Declare the semconv version we emit, make it selectable, support exactly one
+   deprecation window with a warning, and pin our message-part types to a spec
+   commit.**
+
+Rule 5 is what makes rule 1 survivable. Following a moving standard without
+declaring which version you follow means every convention update is a silent
+breaking change for whoever consumes your telemetry.
+
 ## Evidence log
 
 Append one row per project as evidence lands. Keep the reasoning, not just the verdict.
@@ -91,6 +126,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | Omnigent | confirms | `pyproject.toml:93,145-150 @ ba9e371`; `designs/OBSERVABILITY.md` | Second real OTel and the most thorough: both OTLP exporters plus FastAPI, httpx and **SQLAlchemy** instrumentation — the only project tracing its own database. **But a caution that changes our exit criteria**: its own design doc audits the gaps — trace context "never propagated over the wire", `HTTPXClientInstrumentor` "never wired", `FastAPIInstrumentor` "gated off by default", `get_traceparent_env()` "dead code — zero call sites". Adopting OTel is not the same as wiring it. **Our criterion must be a propagation test asserting one trace id spans client → control plane → adapter, not a dependency check.** Also worth stealing: `trace_id_from_response_id`, where the response id *is* the trace id. |
 | Cloudflare Agents | confirms | `packages/agents/src/observability/genai/attributes.ts:1-9 @ 2f957bc`; `packages/agents/src/observability/tracing/tracer.ts:24-31,298` | **Third real OTel, and the best on convention adherence.** `gen_ai.*` keys follow OpenTelemetry GenAI semantic conventions where they exist; keys with no semconv home live under `cloudflare.agents.*`, "**never bare top-level keys, never `ai.*`**" (the Vercel AI SDK's de-facto namespace). Span lifetimes can be `boundToInvocation` so a span "cannot outlive the native invocation that owns its tracing context". And it declines to invent an `otel.status_code` attribute because "status is span state in OTel". **Raises this ADR's bar from *uses OTel* to *follows the conventions and declares a vendor namespace*.** |
 | AG2 | amends | `pyproject.toml:107,196 @ 90f490a`; `ag2/network/hub/core.py:1861-1866` | OTel is an **optional extra** (`tracing = ["opentelemetry-sdk>=1.20"]`), which is weaker than AX or Cloudflare shipping it by default. But `HubListener` contributes something they lack: **`on_envelope_rejected` fires for every attempt** on any pre-WAL failure, so *refusals* are observable, not just successes — plus `on_inbox_pressure` for backpressure and `envelope.trace_id` as a first-class field so trace context rides the message. **Amend: rejected operations must be as observable as successful ones.** Most systems tell you what happened, not what was refused. |
+| Pydantic AI | amends | `docs/logfire.md:294-298 @ b48ee38`; `pydantic_ai_slim/pydantic_ai/_otel_messages.py:1-4` | **Best semconv story in the study.** Pinned to GenAI semantic conventions "specifically version 1.37.0", selectable via `InstrumentationSettings.version`, with versions 2–4 as **deprecated compatibility formats** that emit `PydanticAIDeprecationWarning`. Message-part types are pinned to a specific spec commit. Cloudflare taught us to *follow* conventions; this shows conventions **move**, and a telemetry consumer is a downstream dependency you cannot break. **Amend: declare the semconv version emitted, support exactly one deprecation window with a warning, and pin message types to a spec commit.** |
 
 ## Open questions
 
