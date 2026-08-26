@@ -7,7 +7,7 @@ help:
 	@echo "make status    coverage, ADR state, deliverable progress"
 	@echo "make validate  check every facts.yaml against the schema"
 	@echo "make matrix    regenerate synthesis/capability-matrix.md"
-	@echo "make check     validate --strict + matrix + status"
+	@echo "make check     validate --strict + matrix + status (must exit 0)"
 	@echo "make probes    print probe set summary"
 	@echo "make llm       gateway health check"
 

@@ -53,12 +53,23 @@ cp .env.example .env      # then add LLM_API_KEY
 make status        # coverage, ADR state, deliverable progress
 make validate      # check every facts.yaml against the schema
 make matrix        # regenerate synthesis/capability-matrix.md
-make check         # validate --strict + matrix + status
+make check         # validate --strict + matrix + status — MUST exit 0
 make probes        # print the probe set summary
 
 ./.venv/bin/python tools/new_project.py <slug> "<Name>" [deep|targeted|recon]
 ./.venv/bin/python tools/llm.py       # gateway health check
 ```
+
+**On `unknown` verdicts.** `make check` exits non-zero for an `unknown` probe that
+is *not* accounted for in [`open-questions.md`](open-questions.md), because an
+untracked `unknown` is indistinguishable from a probe nobody examined. An `unknown`
+that names its reason in the log — closed source, undocumented semantics, a
+non-inspectable managed surface — is a legitimate finding and reported as
+informational. Three exist today (`langgraph/C8`, `letta/C5`, `openhands/C5`) and
+`make check` exits 0 with them present.
+
+This is the `absent` ≠ `unknown` distinction the study is built on, enforced by
+tooling rather than by discipline.
 
 ## Evidence rules
 

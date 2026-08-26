@@ -10,6 +10,7 @@ legitimately incomplete, and a validator that blocks progress gets bypassed.
 
 from __future__ import annotations
 
+import re
 import sys
 
 from probes import (PROJECTS_DIR, REPO_ROOT, load_facts, load_probes,
@@ -18,19 +19,51 @@ from probes import (PROJECTS_DIR, REPO_ROOT, load_facts, load_probes,
 DATE_RE = r"^\d{4}-\d{2}-\d{2}$"
 
 
-def validate(slug: str, schema: dict, probes: dict, scenarios: dict,
-             ) -> tuple[list[str], list[str], float]:
-    import re
+_OQ_CACHE: set | None = None
 
+
+def _tracked_unknowns() -> set[tuple[str, str]]:
+    """Return {(slug, probe_id)} pairs that open-questions.md accounts for.
+
+    An `unknown` verdict is legitimate when the log explains why it could not be
+    determined (closed source, undocumented semantics, not-inspectable surface).
+    A row counts as tracking a probe when it names the probe id in backticks and
+    names the project slug anywhere in the row.
+    """
+    global _OQ_CACHE
+    if _OQ_CACHE is not None:
+        return _OQ_CACHE
+    tracked: set[tuple[str, str]] = set()
+    oq = REPO_ROOT / "open-questions.md"
+    if oq.exists():
+        slugs = [d.name for d in PROJECTS_DIR.iterdir() if d.is_dir()]
+        for line in oq.read_text().splitlines():
+            if not line.startswith("| OQ-"):
+                continue
+            ids = re.findall(r"`([A-S]\d{1,2})`", line)
+            if not ids:
+                continue
+            low = line.lower()
+            for slug in slugs:
+                if slug.lower() in low or slug.replace("-", " ").lower() in low:
+                    for pid in ids:
+                        tracked.add((slug, pid))
+    _OQ_CACHE = tracked
+    return tracked
+
+
+def validate(slug: str, schema: dict, probes: dict, scenarios: dict,
+             ) -> tuple[list[str], list[str], list[str], float]:
     errors: list[str] = []
     warnings: list[str] = []
+    notes: list[str] = []
     unknowns: list[str] = []
     vocabs = schema["vocabularies"]
 
     try:
         facts = load_facts(slug)
     except Exception as exc:
-        return [f"{slug}: unparseable YAML: {exc}"], [], 0.0
+        return [f"{slug}: unparseable YAML: {exc}"], [], [], 0.0
 
     for field in schema["required_top_level"]:
         if field not in facts:
@@ -118,14 +151,24 @@ def validate(slug: str, schema: dict, probes: dict, scenarios: dict,
     total = len(probes) + len(scenarios)
     coverage = 100.0 * answered / total if total else 0.0
 
-    # One aggregated warning beats 140 individual ones.
+    # An `unknown` is legitimate when it is tracked in open-questions.md — that is
+    # the whole point of the absent/unknown distinction. Only UNTRACKED unknowns are
+    # a defect, because they are indistinguishable from unexamined probes.
     if unknowns:
-        preview = ", ".join(unknowns[:12])
-        more = f" +{len(unknowns) - 12} more" if len(unknowns) > 12 else ""
-        warnings.append(
-            f"{slug}: {len(unknowns)} probe(s) still unknown "
-            f"({preview}{more}) — each needs an open-questions.md entry"
-        )
+        tracked = _tracked_unknowns()
+        untracked = [pid for pid in unknowns if (slug, pid) not in tracked]
+        if untracked:
+            preview = ", ".join(untracked[:12])
+            more = f" +{len(untracked) - 12} more" if len(untracked) > 12 else ""
+            warnings.append(
+                f"{slug}: {len(untracked)} probe(s) unknown and UNTRACKED "
+                f"({preview}{more}) — add an open-questions.md entry naming the probe"
+            )
+        else:
+            notes.append(
+                f"{slug}: {len(unknowns)} tracked unknown(s) "
+                f"({', '.join(unknowns)}) — accounted for in open-questions.md"
+            )
 
     # Cross-file consistency: teardown.md should exist for anything deep.
     if depth == "deep" and not (PROJECTS_DIR / slug / "teardown.md").exists():
@@ -143,7 +186,7 @@ def validate(slug: str, schema: dict, probes: dict, scenarios: dict,
             if d not in vocabs["build_decision"]:
                 errors.append(f"{slug}: reusable_components decision {d!r} invalid")
 
-    return errors, warnings, coverage
+    return errors, warnings, notes, coverage
 
 
 def _safe_order(pid: str) -> tuple[str, int]:
@@ -165,10 +208,11 @@ def main() -> int:
 
     all_errors: list[str] = []
     all_warnings: list[str] = []
+    all_notes: list[str] = []
     print(f"{'project':<26} {'depth':<9} {'cov':>6}  status")
     print("-" * 60)
     for slug in slugs:
-        errors, warnings, coverage = validate(slug, schema, probes, scenarios)
+        errors, warnings, notes, coverage = validate(slug, schema, probes, scenarios)
         facts = {}
         try:
             facts = load_facts(slug)
@@ -180,6 +224,12 @@ def main() -> int:
               f"{f' ({len(errors)}e/{len(warnings)}w)' if errors or warnings else ''}")
         all_errors += errors
         all_warnings += warnings
+        all_notes += notes
+
+    if all_notes:
+        print(f"\n{len(all_notes)} tracked unknown(s) — informational, not a failure:")
+        for note in all_notes:
+            print(f"  i {note}")
 
     if all_warnings:
         print(f"\n{len(all_warnings)} warning(s):")
