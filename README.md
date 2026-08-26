@@ -87,22 +87,61 @@ exercise.
 
 ## Status
 
-**Phases 0–2 complete.** Phase 3 (seven falsification passes) is next, starting
-with Google AX and Omnigent.
+**Phases 0–3 complete.** Nine deep teardowns, all at 100% probe coverage
+(173/173, zero `unknown`). Phase 4 is four targeted passes.
 
 | Phase | State |
 |---|---|
 | 0 Scaffold | 14 projects, 173 probes, locked schema, tooling verified |
-| 1 Recon | 13/14 inspectable; no copyleft anywhere; depth budget revised |
-| 2 Deep probes | LangGraph, OpenHands, Letta — all at 99.4% coverage |
+| 1 Recon | 13/14 inspectable; no copyleft anywhere; depth budget set |
+| 2 Deep probes | LangGraph, OpenHands, Letta — the three anchors |
+| 3 Falsification | + Google AX, Omnigent, Cloudflare Agents, AG2, Pydantic AI, Google Agent Platform |
+| 4 Targeted | next: Microsoft Agent Framework, AWS AgentCore, HumanLayer, Agent Control |
 
-13 ADRs, three of which did not exist before the evidence (0011 version-pinned
-checkpoints, 0012 declared capabilities, 0013 traced policy).
+**14 ADRs**, four of which did not exist before the evidence: 0011 (version-pinned
+checkpoints), 0012 (declared capabilities), 0013 (traced policy), 0014 (effect
+ledger). Recorded impact across 9 projects × 14 ADRs: 70 confirms, 16 amends,
+7 challenges, 21 neutral. **No ADR was abandoned**, though ADR-0003 came within one
+project of being deleted.
 
-Read [`synthesis/phase2-findings.md`](synthesis/phase2-findings.md) for the
-cross-anchor comparison. Headline: **the entire agent-to-agent messaging section
-is absent in all three projects**, as are Task/Run separation, side-effect
-idempotency, agent revocation, tenant isolation and cost quotas.
+### The gap picture
+
+Phase 2 ended with **16 probes absent in all three anchors**. Phase 3 closed 13 of
+them, and the closures came from the projects I had ranked lowest:
+
+| Closed by | What |
+|---|---|
+| **AG2** | The entire agent-to-agent messaging section (`F1 F2 F5 F6 F8`) plus capability routing |
+| **Omnigent** | Delegated authority, tenant isolation, cost limits |
+| **Cloudflare Agents** | Side-effect idempotency — verified by running its tests |
+| **Google AX** | Refusing to resume across a definition change |
+| **Google Agent Platform** | The only real memory service, with event-time provenance |
+
+**`L8` (compensation/rollback) is the only genuine design gap absent in all nine
+projects.** `Q3`/`Q5` are licensing artefacts of permissive licences, not gaps.
+
+### The strongest differentiator
+
+**Nobody versions *and* pins.** Ten projects: Google AX pins harness identity
+without versions, Omnigent versions agents without pinning, ADK versions its storage
+*and* telemetry schemas but not its agents. Every one of them can silently hand a
+pre-upgrade checkpoint to post-upgrade code. That is ADR-0011, and it survived the
+whole study as a gap rather than a misunderstanding.
+
+### A methodological correction
+
+Three of six Phase 3 passes found substantially more than recon predicted, each
+because I trusted a cheap signal over the source — a stale version string, a README
+shape, and worst, my own running tally. After seven projects with no agent messaging
+I had drafted an ADR rewrite abandoning it; the eighth implements it better than my
+strawman did. **A convergence across N projects is evidence about what is common,
+not proof about what is possible.** Recorded in full in
+[`synthesis/phase3-findings-final.md`](synthesis/phase3-findings-final.md) §5.
+
+Read [`synthesis/phase3-findings-final.md`](synthesis/phase3-findings-final.md) for
+the cross-project synthesis, and
+[`synthesis/phase2-findings.md`](synthesis/phase2-findings.md) for the earlier
+anchor comparison.
 
 ## Success condition
 
