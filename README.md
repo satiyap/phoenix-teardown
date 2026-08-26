@@ -163,6 +163,7 @@ the evidence behind it.
 | [`synthesis/domain-model.md`](synthesis/domain-model.md) | The canonical model, its invariants, and the strawman nodes deleted |
 | [`synthesis/build-reuse-map.md`](synthesis/build-reuse-map.md) | 203 component decisions: integrate, port, build, reject |
 | [`synthesis/exit-criteria.md`](synthesis/exit-criteria.md) | All 25 questions, answered with citations |
+| [`synthesis/capability-map.md`](synthesis/capability-map.md) | The condensed 11-capability view, one page |
 | [`synthesis/capability-matrix.md`](synthesis/capability-matrix.md) | 173 probes × 13 projects, generated from `facts.yaml` |
 
 ## Success condition
