@@ -56,6 +56,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | HumanLayer | neutral | `hld/store/sqlite.go:95-100 @ 99abe67` | No agent resource — the agent is Claude Code. Sessions and runs carry ids; the agent does not. |
 | AWS AgentCore | confirms | `src/bedrock_agentcore/services/identity.py:140-155 @ 826416a` | **The best vindication of this ADR's *rebased* rationale.** Phase 2 concluded that agent identity is required for **delegation, policy attachment and audit** rather than for durability, after two projects delivered durable execution with no agent identity at all. AgentCore is precisely that case in the affirmative: the agent is a **workload** with its own identity whose entire purpose is obtaining scoped tokens and being nameable as a Cedar `principal`. Nothing about its durability needs it; everything about its authorization does. |
 | Microsoft Agent Framework | neutral | `python/packages/core/agent_framework/_agents.py @ e34bf48` | Agents are objects with names; no identity, registry or lifecycle. Note the asymmetry with §durability: MAF versions and pins *workflows* rigorously and does nothing for agent identity — the same split as ADK. |
+| Agent Control | confirms | `server/src/agent_control_server/models.py:66-80 @ 7cb21af` | Agents are registered with the control plane so that controls can be **bound** to them (`agent_policies`, `ControlBinding.target_id`). The rebased rationale seen from the policy side: identity exists so policy can attach to it and decisions can be attributed. |
 
 ## Open questions
 

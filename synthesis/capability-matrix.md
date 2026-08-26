@@ -17,7 +17,7 @@ Derived from `projects/*/facts.yaml`. Regenerate with `./.venv/bin/python tools/
 | `omnigent` | Omnigent | deep | A | meta_harness |
 | `openhands` | OpenHands | deep | A | attached_harness |
 | `pydantic-ai` | Pydantic AI | deep | A | in_process |
-| `AC` | Agent Control | targeted | A | unknown |
+| `AC` | Agent Control | targeted | A | hybrid |
 | `AA` | AWS AgentCore | targeted | A | hybrid |
 | `humanlayer` | HumanLayer Agent Control Plane | targeted | A | attached_harness |
 | `MAF` | Microsoft Agent Framework | targeted | A | hybrid |
@@ -25,46 +25,46 @@ Derived from `projects/*/facts.yaml`. Regenerate with `./.venv/bin/python tools/
 
 | Capability                | ag2   | CA    | GAP   | google-ax | langgraph | letta | omnigent | openhands | pydantic-ai | AC    | AA    | humanlayer | MAF   | groupmind | Our decision |
 |---------------------------|-------|-------|-------|-----------|-----------|-------|----------|-----------|-------------|-------|-------|------------|-------|-----------|---|
-| Stable agent identity     | ●     | ●     | ◐     | ◐         | ○         | ●     | ●        | ◐         | ○           | ?     | ●     | ○          | ◐     | ?         |  |
-| Identity survives restart | ●     | ●     | ○     | ○         | ◐         | ●     | ●        | ○         | ○           | ?     | ●     | ○          | ○     | ?         |  |
-| Agent versioning          | ○     | ○     | ○     | ○         | ●         | ○     | ●        | ○         | ○           | ?     | ○     | ○          | ◐     | ?         |  |
-| Agent registry            | ●     | ◐     | ◐     | ◐         | ◐         | ●     | ●        | ●         | ◐           | ?     | ●     | ○          | ?     | ?         |  |
-| Agent discovery           | ●     | ○     | ○     | ○         | ○         | ◐     | ●        | ○         | ○           | ?     | ●     | ○          | ?     | ?         |  |
-| Declarative manifest      | ●     | ○     | ◐     | ◐         | ○         | ◐     | ●        | ●         | ●           | ?     | ?     | ○          | ●     | ?         |  |
-| Task separate from Run    | ●     | ◐     | ◐     | ◐         | ○         | ○     | ●        | ○         | ○           | ?     | ?     | ◐          | ◐     | ?         |  |
-| Messages first-class      | ●     | ●     | ●     | ◐         | ○         | ◐     | ●        | ●         | ◐           | ?     | ?     | ●          | ●     | ?         |  |
-| Artifacts first-class     | ◐     | ○     | ●     | ○         | ○         | ◐     | ●        | ◐         | ○           | ?     | ●     | ○          | ?     | ?         |  |
-| Durable execution         | ●     | ●     | ●     | ●         | ●         | ●     | ●        | ●         | ○           | ?     | ?     | ●          | ●     | ?         |  |
-| Checkpoint / resume       | ●     | ◐     | ◐     | ●         | ●         | ●     | ◐        | ●         | ◐           | ?     | ?     | ◐          | ◐     | ?         |  |
-| Crash recovery            | ●     | ●     | ●     | ●         | ●         | ●     | ◐        | ◐         | ◐           | ?     | ?     | ●          | ●     | ?         |  |
-| Durable timers            | ●     | ●     | ○     | ○         | ◐         | ●     | ●        | ●         | ○           | ?     | ?     | ●          | ?     | ?         |  |
-| Mid-flight upgrade        | ○     | ◐     | ◐     | ●         | ○         | ○     | ◐        | ○         | ◐           | ?     | ○     | ○          | ●     | ?         |  |
-| Foreign agent hosting     | ●     | ○     | ●     | ●         | ○         | ○     | ●        | ●         | ●           | ?     | ◐     | ○          | ◐     | ?         |  |
-| Observable tool calls     | ●     | ●     | ●     | ●         | ●         | ●     | ●        | ●         | ●           | ?     | ?     | ●          | ●     | ?         |  |
-| Cancellation              | ●     | ●     | ○     | ●         | ◐         | ●     | ●        | ●         | ●           | ?     | ?     | ●          | ?     | ?         |  |
-| Agent mailbox             | ●     | ○     | ○     | ○         | ○         | ○     | ○        | ○         | ○           | ?     | ○     | ○          | ○     | ?         |  |
-| Durable delivery          | ●     | ○     | ○     | ○         | ○         | ○     | ○        | ○         | ○           | ?     | ○     | ○          | ◐     | ?         |  |
-| Capability routing        | ●     | ◐     | ◐     | ○         | ○         | ○     | ◐        | ○         | ◐           | ?     | ○     | ○          | ◐     | ?         |  |
-| Human as principal        | ●     | ○     | ○     | ○         | ○         | ●     | ●        | ○         | ○           | ?     | ●     | ◐          | ○     | ?         |  |
-| Shared workspace          | ●     | ○     | ◐     | ○         | ○         | ●     | ●        | ◐         | ○           | ?     | ◐     | ○          | ?     | ?         |  |
-| HITL approval             | ●     | ●     | ●     | ●         | ●         | ●     | ●        | ●         | ●           | ?     | ◐     | ●          | ●     | ?         |  |
-| Long-term agent memory    | ◐     | ○     | ●     | ○         | ●         | ●     | ○        | ◐         | ○           | ?     | ●     | ○          | ◐     | ?         |  |
-| Shared memory             | ●     | ◐     | ●     | ◐         | ●         | ◐     | ◐        | ◐         | ○           | ?     | ●     | ○          | ◐     | ?         |  |
-| Memory permissions        | ◐     | ●     | ◐     | ○         | ○         | ●     | ○        | ◐         | ○           | ?     | ◐     | ○          | ?     | ?         |  |
-| Capability abstraction    | ●     | ○     | ○     | ○         | ○         | ◐     | ●        | ◐         | ●           | ?     | ○     | ○          | ○     | ?         |  |
-| Policy interception       | ●     | ○     | ●     | ○         | ○         | ●     | ●        | ●         | ◐           | ?     | ●     | ◐          | ●     | ?         |  |
-| Agent authN identity      | ●     | ○     | ○     | ○         | ○         | ●     | ●        | ○         | ○           | ?     | ●     | ○          | ○     | ?         |  |
-| Tenant isolation          | ○     | ○     | ●     | ○         | ○         | ○     | ●        | ○         | ○           | ?     | ●     | ○          | ?     | ?         |  |
-| Audit log                 | ●     | ◐     | ●     | ◐         | ◐         | ●     | ●        | ◐         | ◐           | ?     | ?     | ◐          | ●     | ?         |  |
-| Sandbox                   | ○     | ●     | ●     | ●         | ○         | ●     | ●        | ●         | ○           | ?     | ?     | ○          | ?     | ?         |  |
-| Pluggable sandbox         | ○     | ○     | ●     | ●         | ○         | ●     | ●        | ●         | ○           | ?     | ?     | ○          | ?     | ?         |  |
-| Scheduled triggers        | ○     | ●     | ○     | ○         | ◐         | ●     | ●        | ●         | ○           | ?     | ?     | ○          | ?     | ?         |  |
-| Subagents first-class     | ●     | ●     | ●     | ○         | ●         | ●     | ●        | ●         | ◐           | ?     | ?     | ◐          | ●     | ?         |  |
-| OpenTelemetry             | ◐     | ●     | ●     | ●         | ○         | ○     | ●        | ◐         | ●           | ?     | ○     | ○          | ?     | ?         |  |
-| Stable event schema       | ●     | ●     | ●     | ●         | ◐         | ◐     | ●        | ●         | ●           | ?     | ●     | ●          | ●     | ?         |  |
-| Cost accounting           | ◐     | ○     | ◐     | ○         | ○         | ◐     | ●        | ●         | ●           | ?     | ◐     | ●          | ?     | ?         |  |
-| Multi-tenancy in OSS      | ○     | ○     | ◐     | ○         | ●         | ◐     | ●        | ◐         | ○           | ?     | ●     | ○          | ◐     | ?         |  |
-| MCP                       | ●     | ●     | ●     | ◐         | ○         | ○     | ●        | ●         | ●           | ?     | ●     | ●          | ●     | ?         |  |
+| Stable agent identity     | ●     | ●     | ◐     | ◐         | ○         | ●     | ●        | ◐         | ○           | ◐     | ●     | ○          | ◐     | ?         |  |
+| Identity survives restart | ●     | ●     | ○     | ○         | ◐         | ●     | ●        | ○         | ○           | ●     | ●     | ○          | ○     | ?         |  |
+| Agent versioning          | ○     | ○     | ○     | ○         | ●         | ○     | ●        | ○         | ○           | ○     | ○     | ○          | ◐     | ?         |  |
+| Agent registry            | ●     | ◐     | ◐     | ◐         | ◐         | ●     | ●        | ●         | ◐           | ●     | ●     | ○          | ?     | ?         |  |
+| Agent discovery           | ●     | ○     | ○     | ○         | ○         | ◐     | ●        | ○         | ○           | ●     | ●     | ○          | ?     | ?         |  |
+| Declarative manifest      | ●     | ○     | ◐     | ◐         | ○         | ◐     | ●        | ●         | ●           | ○     | ?     | ○          | ●     | ?         |  |
+| Task separate from Run    | ●     | ◐     | ◐     | ◐         | ○         | ○     | ●        | ○         | ○           | ○     | ?     | ◐          | ◐     | ?         |  |
+| Messages first-class      | ●     | ●     | ●     | ◐         | ○         | ◐     | ●        | ●         | ◐           | ◐     | ?     | ●          | ●     | ?         |  |
+| Artifacts first-class     | ◐     | ○     | ●     | ○         | ○         | ◐     | ●        | ◐         | ○           | ○     | ●     | ○          | ?     | ?         |  |
+| Durable execution         | ●     | ●     | ●     | ●         | ●         | ●     | ●        | ●         | ○           | ●     | ?     | ●          | ●     | ?         |  |
+| Checkpoint / resume       | ●     | ◐     | ◐     | ●         | ●         | ●     | ◐        | ●         | ◐           | ◐     | ?     | ◐          | ◐     | ?         |  |
+| Crash recovery            | ●     | ●     | ●     | ●         | ●         | ●     | ◐        | ◐         | ◐           | ○     | ?     | ●          | ●     | ?         |  |
+| Durable timers            | ●     | ●     | ○     | ○         | ◐         | ●     | ●        | ●         | ○           | ○     | ?     | ●          | ?     | ?         |  |
+| Mid-flight upgrade        | ○     | ◐     | ◐     | ●         | ○         | ○     | ◐        | ○         | ◐           | ○     | ○     | ○          | ●     | ?         |  |
+| Foreign agent hosting     | ●     | ○     | ●     | ●         | ○         | ○     | ●        | ●         | ●           | ●     | ◐     | ○          | ◐     | ?         |  |
+| Observable tool calls     | ●     | ●     | ●     | ●         | ●         | ●     | ●        | ●         | ●           | ●     | ?     | ●          | ●     | ?         |  |
+| Cancellation              | ●     | ●     | ○     | ●         | ◐         | ●     | ●        | ●         | ●           | ◐     | ?     | ●          | ?     | ?         |  |
+| Agent mailbox             | ●     | ○     | ○     | ○         | ○         | ○     | ○        | ○         | ○           | ○     | ○     | ○          | ○     | ?         |  |
+| Durable delivery          | ●     | ○     | ○     | ○         | ○         | ○     | ○        | ○         | ○           | ○     | ○     | ○          | ◐     | ?         |  |
+| Capability routing        | ●     | ◐     | ◐     | ○         | ○         | ○     | ◐        | ○         | ◐           | ○     | ○     | ○          | ◐     | ?         |  |
+| Human as principal        | ●     | ○     | ○     | ○         | ○         | ●     | ●        | ○         | ○           | ○     | ●     | ◐          | ○     | ?         |  |
+| Shared workspace          | ●     | ○     | ◐     | ○         | ○         | ●     | ●        | ◐         | ○           | ◐     | ◐     | ○          | ?     | ?         |  |
+| HITL approval             | ●     | ●     | ●     | ●         | ●         | ●     | ●        | ●         | ●           | ◐     | ◐     | ●          | ●     | ?         |  |
+| Long-term agent memory    | ◐     | ○     | ●     | ○         | ●         | ●     | ○        | ◐         | ○           | ○     | ●     | ○          | ◐     | ?         |  |
+| Shared memory             | ●     | ◐     | ●     | ◐         | ●         | ◐     | ◐        | ◐         | ○           | ○     | ●     | ○          | ◐     | ?         |  |
+| Memory permissions        | ◐     | ●     | ◐     | ○         | ○         | ●     | ○        | ◐         | ○           | ○     | ◐     | ○          | ?     | ?         |  |
+| Capability abstraction    | ●     | ○     | ○     | ○         | ○         | ◐     | ●        | ◐         | ●           | ◐     | ○     | ○          | ○     | ?         |  |
+| Policy interception       | ●     | ○     | ●     | ○         | ○         | ●     | ●        | ●         | ◐           | ●     | ●     | ◐          | ●     | ?         |  |
+| Agent authN identity      | ●     | ○     | ○     | ○         | ○         | ●     | ●        | ○         | ○           | ○     | ●     | ○          | ○     | ?         |  |
+| Tenant isolation          | ○     | ○     | ●     | ○         | ○         | ○     | ●        | ○         | ○           | ●     | ●     | ○          | ?     | ?         |  |
+| Audit log                 | ●     | ◐     | ●     | ◐         | ◐         | ●     | ●        | ◐         | ◐           | ●     | ?     | ◐          | ●     | ?         |  |
+| Sandbox                   | ○     | ●     | ●     | ●         | ○         | ●     | ●        | ●         | ○           | ○     | ?     | ○          | ?     | ?         |  |
+| Pluggable sandbox         | ○     | ○     | ●     | ●         | ○         | ●     | ●        | ●         | ○           | ○     | ?     | ○          | ?     | ?         |  |
+| Scheduled triggers        | ○     | ●     | ○     | ○         | ◐         | ●     | ●        | ●         | ○           | ○     | ?     | ○          | ?     | ?         |  |
+| Subagents first-class     | ●     | ●     | ●     | ○         | ●         | ●     | ●        | ●         | ◐           | ○     | ?     | ◐          | ●     | ?         |  |
+| OpenTelemetry             | ◐     | ●     | ●     | ●         | ○         | ○     | ●        | ◐         | ●           | ◐     | ○     | ○          | ?     | ?         |  |
+| Stable event schema       | ●     | ●     | ●     | ●         | ◐         | ◐     | ●        | ●         | ●           | ●     | ●     | ●          | ●     | ?         |  |
+| Cost accounting           | ◐     | ○     | ◐     | ○         | ○         | ◐     | ●        | ●         | ●           | ○     | ◐     | ●          | ?     | ?         |  |
+| Multi-tenancy in OSS      | ○     | ○     | ◐     | ○         | ●         | ◐     | ●        | ◐         | ○           | ◐     | ●     | ○          | ◐     | ?         |  |
+| MCP                       | ●     | ●     | ●     | ◐         | ○         | ○     | ●        | ●         | ●           | ◐     | ●     | ●          | ●     | ?         |  |
 
 ## Probe reference
 
@@ -122,7 +122,7 @@ Derived from `projects/*/facts.yaml`. Regenerate with `./.venv/bin/python tools/
 | omnigent | 173 | 173 | 100% | 0 |
 | openhands | 172 | 173 | 99% | 1 |
 | pydantic-ai | 173 | 173 | 100% | 0 |
-| agent-control | 3 | 173 | 2% | 170 |
+| agent-control | 173 | 173 | 100% | 0 |
 | aws-agentcore | 121 | 173 | 70% | 52 |
 | humanlayer | 173 | 173 | 100% | 0 |
 | microsoft-agent-framework | 121 | 173 | 70% | 52 |

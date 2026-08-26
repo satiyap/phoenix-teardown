@@ -56,6 +56,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | HumanLayer | neutral | `hld/mcp/ @ 99abe67` | MCP appears in an inverted role worth noting: not as a way for the agent to reach tools, but as **a surface by which another agent can answer a human-in-the-loop approval request.** |
 | AWS AgentCore | confirms | `src/bedrock_agentcore/gateway/ @ 826416a` | A managed **gateway** service fronts tools — architecturally the right place for credential injection and policy enforcement. Protocol-shaped, with no capability-claim model. |
 | Microsoft Agent Framework | confirms | `declarative-agents/agent-samples/foundry/MicrosoftLearnAgent.yaml @ e34bf48` | MCP as a tool `kind` in the manifest, scoped by `allowedTools` and gated by `approvalMode` — protocol plus declared scoping, with no capability-claim model. |
+| Agent Control | neutral | `README.md @ 7cb21af` | Tool calls are enforcement points; no capability model. `EvaluatorSpec` declares evaluator capability, not agent capability. |
 
 ## Open questions
 

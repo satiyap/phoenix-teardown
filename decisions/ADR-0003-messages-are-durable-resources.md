@@ -159,6 +159,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | HumanLayer | confirms | `hld/store/sqlite.go:373-405 @ 99abe67` | No agent-to-agent messaging. `parent_tool_use_id` (migration 6, "for sub-task tracking") gives a sub-task tree within a session. AG2 remains the sole F-section answer. |
 | AWS AgentCore | confirms | `src/bedrock_agentcore/runtime/a2a.py @ 826416a` | No durable agent-to-agent messaging; A2A appears only as an edge adapter. AG2 remains the sole precedent. |
 | Microsoft Agent Framework | amends | `python/packages/core/agent_framework/_workflows/_checkpoint.py:54 @ e34bf48` | **A genuinely different answer from AG2's, and worth stating precisely.** Messages between *executors* are a named part of the workflow checkpoint, so intra-graph agent messaging is durable **because the workflow is**. AG2's envelope is durable independently of any orchestration; MAF's messages exist only inside a checkpointed graph. There is no mailbox, addressing, or delivery guarantee outside one. **The amendment: if all agent interaction happens inside an orchestration we already checkpoint, message durability comes free** — a cheaper v0.1 option than a full messaging substrate, at the cost of agents that cannot talk outside a graph. |
+| Agent Control | neutral | `models/src/agent_control_models/ @ 7cb21af` | Out of scope — a policy control plane, not a messaging layer. |
 
 ## Open questions
 

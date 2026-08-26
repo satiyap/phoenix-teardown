@@ -181,6 +181,98 @@ analysis tooling is open source and independent of AWS, so the capability is
 available to us regardless of what the managed service surfaces. That converts this
 ADR's hardest requirement from a research question into a tooling one.
 
+## Amendment 2 — 2026-08-26 (Phase 4, Agent Control): three outcomes, and the shadow half ships
+
+Amendment 1 adopted Cedar and turned shadow comparison from a research question
+into a tooling one. Agent Control closes it the other way — empirically — and adds
+an outcome category I did not have.
+
+### `observe` is the shadow half
+
+`observe` is a **canonical control action**, not a logging flag
+(`models/actions.py:8-17 @ 7cb21af`), verified live:
+
+```text
+canonical actions: ['deny', 'steer', 'observe']
+legacy aliases  -> {'allow': 'observe', 'warn': 'observe', 'log': 'observe'}
+```
+
+And it is genuinely A/B rather than merely non-blocking. All controls bound to a
+target evaluate **concurrently**, each recording its own `ControlExecutionEvent`,
+with only `deny`/`steer` affecting the outcome (`engine/core.py:662-780`). So a
+candidate control runs against the same live traffic as the enforced ones and its
+verdicts are recorded without changing behaviour.
+
+The other half of why this works is the observability model: `ControlStats`,
+`StatsRequest`, `TimeseriesBucket`, `EventQueryRequest`. **Shadow evaluation is
+worthless without aggregation** — knowing that a candidate policy fired 4,102 times
+matters, knowing it fired *once* does not. The two features are one design.
+
+**A caveat we must design around.** A `deny_found` event cancels remaining
+evaluations once any control denies (`engine/core.py:673-677`), which is correct for
+latency and wrong for shadow data: observe controls may record no verdict for denied
+traffic, biasing the sample away from exactly the cases a candidate policy most
+needs comparing on. **Our observe-mode evaluations must be exempt from
+deny-triggered cancellation**, accepting the latency cost on the deny path.
+
+### `steer` is a third outcome
+
+Fifteen projects treat policy as binary plus an optional human gate. Agent Control
+adds a third decision that returns **structured remediation guidance**
+(`models/controls.py:244-275`), and the shipped examples are procedures rather than
+messages:
+
+> "This large transfer requires user verification. Request 2FA code from user,
+> verify it, then retry the transaction with `verified_2fa=True`."
+
+> "Transfer exceeds daily limit. Steps: 1) Ask user for business justification,
+> 2) Request manager approval with amount and justification, 3) If approved, retry
+> with `manager_approved=True` and justification filled in."
+
+For an LLM-driven caller that is far more actionable than a denial, and it is
+enforced structurally: a composite control with `decision="steer"` and no
+`steering_context` fails validation with *"Composite steer controls require
+action.steering_context"*. **You cannot ship a steer control that does not say how
+to comply.**
+
+### Amended decision
+
+**Policy decisions are three-way, traced, aggregable, and comparable both
+empirically and statically.**
+
+```text
+decision ∈ { deny, steer, observe }
+  deny     refuse; the operation does not proceed
+  steer    refuse AND return machine-readable remediation guidance
+           (required, validated — a steer without guidance is invalid)
+  observe  evaluate and RECORD only; never affects the outcome
+```
+
+With four supporting rules:
+
+1. **Every decision is recorded as a queryable, aggregable event**, not a log line.
+   Rejections included (AG2), with stats and timeseries over them (Agent Control).
+2. **Observe-mode controls run on live traffic alongside enforced ones**, and are
+   **exempt from short-circuit cancellation** so the shadow sample is unbiased.
+3. **Static comparison via Cedar** (Amendment 1) answers "is B more permissive than
+   A" without traffic; **empirical comparison via observe mode** answers "what would
+   B have done to real requests". Both, because each catches what the other misses:
+   static analysis finds cases traffic has not yet produced, empirical evaluation
+   finds cases the policy author did not anticipate.
+4. **Policy has ownership precedence** (MAF/Purview): organisation policies bind
+   agent policies and an agent-level control cannot weaken an org-level one. And the
+   governed cannot edit the governor — **separate credentials for submitting
+   evaluations and for managing controls** (Agent Control's agent vs admin API keys,
+   the only instance of this separation in the study).
+
+### Status of this ADR
+
+It entered Phase 4 as the weakest-supported decision in the set — traceability had
+precedent, shadow comparison had none in twelve projects. It leaves with **both
+halves precedented and a third outcome category I had not conceived of**. Cedar
+supplies the language and the static analysis; Agent Control supplies the empirical
+mode, the aggregation, and `steer`.
+
 ## Evidence log
 
 | Project | Effect | Evidence | Note |
@@ -198,6 +290,7 @@ ADR's hardest requirement from a research question into a tooling one.
 | HumanLayer | confirms | `hld/store/sqlite.go:201-217 @ 99abe67` | **Traces the decision but not the policy.** The record is strong — which tool, what input, what status, when responded, and a free-text rationale — but nothing records *the rule that required approval*, because that is delegated to the harness's permission mode. That is precisely the half AG2 (`deciding_policies`) and Omnigent supply, and it confirms both halves are needed: a decision trail without the rule cannot answer "why was this gated", and a rule trail without the decision cannot answer "what did the human say". |
 | AWS AgentCore | confirms | `src/bedrock_agentcore/policy/client.py:30-37,240-290 @ 826416a` | **The first real precedent for this ADR, and it changes the plan.** Policy is **Cedar** — `definition={"cedar": {"statement": "permit(principal, action, resource);"}}` — a language with a formal semantics and an existing analysis toolchain, exposed through a dedicated `PolicyEngine` resource separate from the agent. That matters specifically because "is policy set B more permissive than A" becomes a **tractable question**, which is exactly what the shadow-comparison half needs and what twelve projects offered nothing for. Additionally `start_policy_generation` turns natural language into Cedar policies as **reviewable assets** (`content={"rawText": …}` → poll to `GENERATED` → `list_policy_generation_assets`) — the only instance in the study of treating a policy as something you evaluate *before* enforcing. **Amend the ADR to adopt Cedar rather than building a bespoke rule engine.** |
 | Microsoft Agent Framework | amends | `python/packages/purview/README.md @ e34bf48`; `python/packages/purview/agent_framework_purview/_middleware.py:24,150` | **Adds an axis Omnigent's per-phase model lacks.** `agent-framework-purview` enforces policy on "both the *prompt* (user input + conversation history) and the *model response*", blocking "at both ingress (prompt) and egress (response)", from **centrally managed** DLP policy applied "without rewriting agent logic". So an agent author **cannot bypass an org policy by editing their agent**. Omnigent answers *where* in the enforcement path to fail closed; Purview answers *who owns the rule*. **Amendment: our policy model needs explicit ownership precedence — organisation policies bind agent policies, and an agent cannot weaken one.** Audit also flows into an existing compliance system (Audit, Communication Compliance, Insider Risk, eDiscovery) rather than a bespoke log. |
+| Agent Control | confirms | `models/src/agent_control_models/actions.py:8-17 @ 7cb21af`; `models/src/agent_control_models/controls.py:244-275`; verified live: canonical actions ['deny','steer','observe']; engine tests 115 passed | **The shadow half, finally, after fifteen projects with no precedent.** `observe` is a *canonical* action — evaluate and record without enforcing — verified live alongside `deny` and `steer`. And it is genuinely A/B: all bound controls evaluate concurrently, so an observe control runs on the same live traffic as enforced ones (`engine/core.py:662-780`). Paired with `ControlStats`/`TimeseriesBucket`, which is what makes shadow data actionable. **Plus `steer`, a category I did not have**: structured remediation guidance (`SteeringContext.message`) returned instead of a refusal, with a validator rejecting a composite steer control that omits it. **One caveat to design around**: a `deny_found` event cancels remaining evaluations, so observe controls may not record verdicts for denied traffic — biasing shadow data away from exactly the cases that matter. Our observe evaluations must be exempt from that cancellation. |
 
 ## Open questions
 

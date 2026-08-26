@@ -55,6 +55,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | HumanLayer | neutral | `hld/PROTOCOL.md @ 99abe67` | No A2A. Interop is JSON-RPC 2.0 over a Unix socket, plus MCP. |
 | AWS AgentCore | confirms | `src/bedrock_agentcore/runtime/a2a.py @ 826416a`; `runtime/ag_ui.py` | **Fourth independent instance** (with AG2, ADK, and AG-UI here too) of A2A as an optional edge adapter alongside a different internal model. This ADR is settled. |
 | Microsoft Agent Framework | confirms | `python/packages/a2a/ @ e34bf48`; `python/packages/ag-ui/` | **Fifth independent instance** (with AG2, ADK, AgentCore, and AG-UI here) of A2A as a separate edge package beside a different internal model. Settled beyond doubt. |
+| Agent Control | neutral | `sdks/ @ 7cb21af` | No A2A; integration is REST plus SDKs plus framework adapters. |
 
 ## Open questions
 

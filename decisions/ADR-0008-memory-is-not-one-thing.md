@@ -119,6 +119,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | HumanLayer | neutral | `hld/store/sqlite.go @ 99abe67` | No memory or knowledge subsystem; the transcript is stored for display and correlation, not recall. |
 | AWS AgentCore | confirms | `src/bedrock_agentcore/memory/constants.py:13-35,76-78 @ 826416a` | Second real memory service, and it adds a dimension ADK did not have. ADK gave four **scopes** (`app:`/`user:`/`temp:`/session — who sees it, how long it lives); AgentCore adds orthogonal **kinds**: `SEMANTIC`, `SUMMARIZATION`, `USER_PREFERENCE`, `CUSTOM` (plus `*_OVERRIDE`). `USER_PREFERENCE` as a distinct kind is new to the study — durable preferences have different write patterns and privacy consequences from semantic recall. **Scope and kind are independent dimensions and our Recall interface needs both.** Namespaces (`/org/MyOrg/`, `/actor/Jane/`) are more flexible than fixed scopes and correspondingly less safe, though wildcards are refused. |
 | Microsoft Agent Framework | confirms | `python/packages/core/agent_framework/_skills.py @ e34bf48`; `python/packages/core/agent_framework/_compaction.py` | Consistent with the settled split: `_skills.py`/`_filesystem.py` for knowledge, pluggable memory backends (`azure-cosmos-memory`, `mem0`, `redis`, `azure-ai-search`) for recall, and first-class `_compaction.py` — third project shipping a compaction *strategy* rather than only a hook. |
+| Agent Control | neutral | `models/src/agent_control_models/ @ 7cb21af` | Out of scope. |
 
 ## Open questions
 

@@ -14,935 +14,1070 @@ project:
   evidence_class: A
   read_on: 2026-08-26
   repo: "https://github.com/agentcontrol/agent-control"
-  commit:                  # SHA the claims were read against
+  commit: 7cb21af33e46ae5122288acc92d8ce5b3f7159e7
   docs:
-  version:
+  version: "agent-control-sdk (PyPI); repo @ 2026-08-21"
   license: Apache-2.0
   license_verdict: INTEGRATE
-  runtime_class: unknown
+  runtime_class: hybrid
   one_line: "Centralized agent control plane for governing runtime; TypeScript SDK published as npm agent-control v3.1.0."
-  thesis:                  # the core architectural bet
+  thesis: "Policy is a control plane, not a library: controls are runtime-configurable resources bound to targets, and an evaluated control can deny, steer, or merely observe."
 
 probes:
 
   # --- A. Core abstraction and object model ---
   # A1: What does this system think an agent *is*? State it in one sentence, in their vocabulary.
   A1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Agents are REGISTERED with the control plane so controls can be bound to them, but an agent is a policy target rather than a modelled runtime resource."
+    evidence: "models/src/agent_control_models/agent.py @ 7cb21af"
   # A2: What is the root resource — the thing everything else hangs off?
   A2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No session resource; out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # A3: Is `Agent` persistent or ephemeral? Can it exist while not executing?
   A3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Controls, bindings and execution events persist in PostgreSQL independently of any agent process - 'configure once and apply across all agents', updatable without redeploying."
+    evidence: "README.md @ 7cb21af; server/src/agent_control_server/models.py"
   # A4: Is `Task` a separate resource from `Run`? If not, which concept is missing and what fills the...
   A4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No Task or Run; the evaluated unit is a Step. out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/evaluation.py @ 7cb21af"
   # A5: What is a `Session` attached to: user, agent, task, or execution?
   A5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No session model; out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # A6: Are messages first-class durable resources, or transient function arguments?
   A6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Step is the evaluated payload with dot-notation selectable fields (input, input.query, context.user_id), but it is an evaluation request rather than a durable message."
+    evidence: "engine/src/agent_control_engine/selectors.py:7-21 @ 7cb21af"
   # A7: Are artifacts (files, outputs, deliverables) first-class?
   A7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No artifact resource."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # A8: Can multiple agents participate in one task? How is that represented?
   A8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No multi-agent participation; out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # A9: Draw the object model as a tree. Only nodes that exist in their code or API.
   A9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Namespace(namespace_key) > {Agent, Control > ConditionNode (recursive leaf/and/or/not) + action{decision, steering_context}, Policy, ControlBinding(namespace_key, target_type, target_id, control_id, enabled)}; plus Step, EvaluatorSpec, ControlExecutionEvent, ControlStats, TimeseriesBucket. See teardown section 3."
+    evidence: "models/src/agent_control_models/controls.py @ 7cb21af; verified live against agent-control-sdk (PyPI, 2026-08-26); engine tests 115 passed after adding pytest-asyncio"
 
   # --- B. Runtime model ---
   # B1: Does the platform launch agents, host them, or attach to external ones?
   B1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "Does not launch agents; out of scope: this is a policy control plane, not an agent runtime. The agent calls out to the control plane at enforcement points."
+    evidence: "README.md @ 7cb21af"
   # B2: Execution substrate: process, container, microVM, serverless, in-process library, remote HTTP?
   B2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No execution substrate; out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "README.md @ 7cb21af"
   # B3: Who owns the event loop — platform or agent?
   B3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent loop; out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "README.md @ 7cb21af"
   # B4: Who decides when an agent wakes?
   B4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No placement; out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "README.md @ 7cb21af"
   # B5: Can an agent run indefinitely? What is the actual ceiling?
   B5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "README.md @ 7cb21af"
   # B6: Are there background or unattended agents?
   B6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No scheduling; out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "README.md @ 7cb21af"
   # B7: Is execution synchronous or asynchronous from the caller's view?
   B7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Evaluation is synchronous per Step, with concurrent control evaluation under a semaphore; audit events are submitted in batches so the enforcement path is not blocked by the write."
+    evidence: "engine/src/agent_control_engine/core.py:662-680 @ 7cb21af; models/src/agent_control_models/observability.py:203"
   # B8: Can in-flight work migrate between workers?
   B8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "README.md @ 7cb21af"
   # B9: Can an agent survive a machine restart? Automatically, or with operator action?
   B9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent recovery; out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "README.md @ 7cb21af"
   # B10: Classify: worker/queue, durable actor, attached harness, or in-process library.
   B10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "hybrid: a policy control plane EXTERNAL to the agent, integrated via a @control() decorator and framework adapters, deliberately not owning execution."
+    evidence: "README.md @ 7cb21af"
 
   # --- C. Durability and failure semantics ---
   # C1: What state is durable, and what is lost on crash?
   C1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "PostgreSQL for controls, policies, bindings and execution events, with Alembic migrations (multiple migration test suites)."
+    evidence: "server/src/agent_control_server/models.py @ 7cb21af; server/tests/test_data_model_v1_alembic_migration.py"
   # C2: *When* is state persisted — every step, every tool call, on checkpoint, never?
   C2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Control execution events are recorded per evaluation, batched; there is no agent state to checkpoint."
+    evidence: "models/src/agent_control_models/observability.py:30,203 @ 7cb21af"
   # C3: Checkpointing or event sourcing? Can state be rebuilt from a log?
   C3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Execution events accumulate as an append-style record queryable by time and aggregatable into stats; controls and bindings are mutable rows."
+    evidence: "models/src/agent_control_models/observability.py:266-445 @ 7cb21af"
   # C4: Retry semantics, and at what granularity: run, step, tool call?
   C4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No retry policy for agent work."
+    evidence: "engine/src/agent_control_engine/core.py @ 7cb21af"
   # C5: At-least-once or exactly-once? What do the docs claim versus what the code does?
   C5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No delivery semantics for agent work; out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "engine/src/agent_control_engine/core.py @ 7cb21af"
   # C6: Is there an idempotency model for tool side effects?
   C6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No effect ledger; out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "engine/src/agent_control_engine/core.py @ 7cb21af"
   # C7: Process crash recovery: what resumes, and from where?
   C7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No state recovery; out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "README.md @ 7cb21af"
   # C8: Node loss: is work re-dispatched, and how is it detected?
   C8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No worker liveness model; out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "README.md @ 7cb21af"
   # C9: Context-window overflow: truncation, summarisation, or failure?
   C9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No context management; out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # C10: Timers, scheduled execution, long sleeps — durable across restart?
   C10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No durable timers."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # C11: Human-in-the-loop pause and resume: durable, or in-memory only?
   C11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "NO APPROVAL RESOURCE - but 'steer' reframes the problem: a control returns machine-readable remediation instructions the agent acts on, including instructions to obtain human approval ('Request 2FA code from user, verify it, then retry with verified_2fa=True'). So many would-be approvals become self-service corrections."
+    evidence: "models/src/agent_control_models/controls.py:244-275 @ 7cb21af"
   # C12: Can a definition be upgraded while runs are in flight? What happens to them?
   C12:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No versioning or pinning."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
 
   # --- D. Agent identity and lifecycle ---
   # D1: Is an agent globally addressable? By what identifier?
   D1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Agents have registered names used as binding targets (target_type, target_id / agent_name), so identity exists precisely so policy can attach to it - ADR-0001's rebased rationale from the policy side."
+    evidence: "server/src/agent_control_server/models.py:66-80 @ 7cb21af"
   # D2: Does identity survive process restart?
   D2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Registered agents and their policy bindings persist in PostgreSQL independently of any agent process."
+    evidence: "server/src/agent_control_server/models.py:66-80 @ 7cb21af"
   # D3: Is identity distinct from runtime instance?
   D3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A registered agent name is the identity; there is no definition-vs-execution pair."
+    evidence: "models/src/agent_control_models/agent.py @ 7cb21af"
   # D4: Are agents versioned? Immutable or mutable definitions?
   D4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent versioning."
+    evidence: "models/src/agent_control_models/agent.py @ 7cb21af"
   # D5: Is there a registry or catalog?
   D5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The server IS a registry of agents, controls, policies and bindings, all runtime-manageable via API or UI without redeploying agents."
+    evidence: "README.md @ 7cb21af"
   # D6: Can agents discover each other at runtime?
   D6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Paginated, filtered listing of controls and bindings (ListControlBindingsResponse with PaginationInfo), queryable by namespace and target."
+    evidence: "models/src/agent_control_models/server.py:768-790 @ 7cb21af"
   # D7: Can agents advertise capabilities? In what format?
   D7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "EvaluatorSpec declares which evaluator a control uses, with builtin/contrib separation - a declared evaluator capability rather than an agent capability model."
+    evidence: "models/src/agent_control_models/controls.py:546-560 @ 7cb21af; evaluators/"
   # D8: Is there an owner, team, or tenant on the agent record?
   D8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "namespace_key owns every control, policy and binding, and is part of the composite primary key."
+    evidence: "server/src/agent_control_server/models.py:44-52 @ 7cb21af"
   # D9: Can an agent be suspended, revoked, or deprecated?
   D9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "ControlBinding has an 'enabled' flag, so a binding can be disabled without deletion - revocation of a POLICY ATTACHMENT rather than of an agent. There is no agent revocation lifecycle. FOURTEEN PROJECTS absent for agents."
+    evidence: "models/src/agent_control_models/server.py:768-778 @ 7cb21af"
   # D10: Is there anything resembling a declarative agent manifest?
   D10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent manifest; agents are registered by name rather than declared."
+    evidence: "models/src/agent_control_models/agent.py @ 7cb21af"
 
   # --- E. Harness and runtime interoperability ---
   # E1: What is the minimum interface an agent implementation must satisfy?
   E1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The @control() decorator is the integration contract, wrapping a model or tool call, with framework adapters for LangChain, CrewAI, Google ADK and AWS Strands - governing runtimes it did not author."
+    evidence: "README.md @ 7cb21af"
   # E2: Transport: stdin/stdout, HTTP, gRPC, WebSocket, in-process, ACP, A2A?
   E2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "HTTP/REST to the control plane from Python and TypeScript SDKs."
+    evidence: "sdks/ @ 7cb21af"
   # E3: Can it host a foreign agent (Claude Code, Codex, OpenHands, LangGraph, ADK)?
   E3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Framework adapters for LangChain, CrewAI, Google ADK and AWS Strands - built on the assumption that it is a component, not the platform."
+    evidence: "README.md @ 7cb21af"
   # E4: Is there an event stream out of a running agent? What granularity?
   E4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "ControlExecutionEvent per evaluation with batch submission, querying and aggregation into ControlStats and TimeseriesBucket."
+    evidence: "models/src/agent_control_models/observability.py:30-445 @ 7cb21af"
   # E5: Are tool calls externally observable, or internal to the agent?
   E5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Tool calls are a primary enforcement point, with dot-notation selectors reaching into tool arguments and a SQL evaluator for structured arguments."
+    evidence: "engine/src/agent_control_engine/selectors.py:7-21 @ 7cb21af; evaluators/builtin"
   # E6: How is context injected at start?
   E6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Controls are declarative data (recursive condition tree plus action), managed at runtime via API or UI - 'update without redeploying'."
+    evidence: "README.md @ 7cb21af; models/src/agent_control_models/controls.py:546-585"
   # E7: Is cancellation supported? Cooperative or forced? Does it propagate to subagents?
   E7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Evaluation respects cancellation and timeout per control, with a deny_found event cancelling remaining evaluations - but this is evaluation cancellation, not agent cancellation."
+    evidence: "engine/src/agent_control_engine/core.py:662-680 @ 7cb21af"
   # E8: Can a run be checkpointed and restored by the platform, or only by the agent?
   E8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No checkpoint contract; out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "README.md @ 7cb21af"
   # E9: Which of these would be hard to adapt, and why?
   E9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Pydantic models with field descriptions throughout, a ConditionNode shape validator, docstrings distinguishing validate_action (API boundary, strict) from normalize_action (internal reads, lenient), an OpenAPI surface and a TESTING.md."
+    evidence: "models/src/agent_control_models/actions.py:19-58 @ 7cb21af; TESTING.md"
 
   # --- F. Agent-to-agent communication ---
   # F1: Direct messages between agents?
   F1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent-to-agent messaging; out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # F2: Channels, topics, or pub/sub?
   F2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # F3: Task delegation as a distinct mechanism from messaging?
   F3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # F4: Synchronous RPC between agents?
   F4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # F5: Asynchronous inbox or mailbox?
   F5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # F6: Is delivery durable? Survives restart of sender and receiver?
   F6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # F7: Is message ordering guaranteed? Per what scope?
   F7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # F8: Acknowledgement or delivery receipts?
   F8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # F9: Correlation ids for request/response pairing?
   F9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "ControlExecutionEvent correlates a decision to its control, target and namespace and is queryable by time, but there is no cross-agent trace correlation."
+    evidence: "models/src/agent_control_models/observability.py:30 @ 7cb21af"
   # F10: Conversation threading?
   F10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # F11: Capability-based routing — address by what an agent *can do* rather than who it is?
   F11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No capability routing."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
 
   # --- G. Human-agent collaboration ---
   # G1: Is a human modelled as a special kind of agent, a distinct principal type, or not modelled?
   G1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "NO PRINCIPALS. It governs agent BEHAVIOUR thoroughly and cannot express AUTHORITY at all - no users, no on-behalf-of, no record of who a decision concerned."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # G2: Shared rooms, channels, or workspaces?
   G2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "namespace_key is an organisational boundary, but there is no shared human workspace."
+    evidence: "server/src/agent_control_server/models.py:44-52 @ 7cb21af"
   # G3: Task threads humans can read and post into?
   G3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A UI dashboard for managing controls and viewing decisions, with runtime configuration so a human changes policy without a deploy."
+    evidence: "ui/ @ 7cb21af; README.md"
   # G4: Mentions or directed addressing?
   G4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No addressing."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # G5: Approval gates. Blocking or advisory? Durable while pending?
   G5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "No approval resource, but 'steer' can instruct an agent to obtain human approval as a remediation step, which reframes approval as an escalation rather than the default response to a violation."
+    evidence: "models/src/agent_control_models/controls.py:262-275 @ 7cb21af"
   # G6: Mid-run intervention: can a human redirect without restarting?
   G6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A human changes controls at runtime via API or UI and they apply across all agents without redeployment - real-time control over agent behaviour."
+    evidence: "README.md @ 7cb21af"
   # G7: Agent status and presence visible to humans?
   G7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "ControlExecutionEvent plus ControlStats plus TimeseriesBucket plus a dashboard - decisions are a queryable, aggregable dataset rather than log lines."
+    evidence: "models/src/agent_control_models/observability.py:380-460 @ 7cb21af"
   # G8: Notifications or escalation when an agent is blocked?
   G8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "The dashboard and stats surface violations; there is no escalation or notification policy."
+    evidence: "ui/ @ 7cb21af"
   # G9: Shared scratchpad or working surface?
   G9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No shared scratchpad."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # G10: Can a human see the context an agent is operating on?
   G10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Every control evaluation is recorded with its decision and queryable by target, control and time."
+    evidence: "models/src/agent_control_models/observability.py:266-378 @ 7cb21af"
 
   # --- H. Context and memory ---
   # H1: Which of these exist as *separate* concepts: prompt context, working state, session history, ...
   H1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No memory subsystem; out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # H2: Who owns memory: agent, human, workspace, task, or tenant?
   H2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # H3: Can memory be shared between agents? At what granularity?
   H3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # H4: Are there permissions on memory?
   H4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # H5: Is provenance tracked — where a memory came from?
   H5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # H6: Expiry, TTL, or forgetting?
   H6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # H7: Summarisation or compaction. Automatic or explicit?
   H7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # H8: Retrieval mechanism: vector, keyword, structured, agent-driven?
   H8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # H9: Can an agent mutate its own memory mid-run?
   H9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # H10: Conflict resolution on concurrent writes?
   H10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # H11: Is memory in the same store as execution state, or separate?
   H11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
 
   # --- I. Tools and capabilities ---
   # I1: Are tools bound to agents statically, or resolved dynamically?
   I1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Tool calls are wrapped by @control() as enforcement points, but tools are not defined or registered here."
+    evidence: "README.md @ 7cb21af"
   # I2: Is there a capability abstraction distinct from tool implementation?
   I2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "EvaluatorSpec is a declared capability for EVALUATORS (builtin regex/list/JSON/SQL, plus contrib), not for agents or runtimes."
+    evidence: "evaluators/ @ 7cb21af"
   # I3: Is there a registry of available tools?
   I3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No tool registry."
+    evidence: "README.md @ 7cb21af"
   # I4: Tool scoping — can an agent be restricted to a subset?
   I4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Controls bound per target restrict what an agent may do, with dot-notation selectors targeting precise fields of a tool call rather than whole payloads."
+    evidence: "engine/src/agent_control_engine/selectors.py:7-21 @ 7cb21af"
   # I5: Are tools versioned?
   I5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No tool versioning."
+    evidence: "README.md @ 7cb21af"
   # I6: How are credentials supplied to a tool?
   I6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No credential handling; out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "README.md @ 7cb21af"
   # I7: OAuth or delegated user credentials?
   I7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No OAuth or delegated credentials."
+    evidence: "README.md @ 7cb21af"
   # I8: Can policy intercept a tool call before execution?
   I8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "STRONGEST POLICY LAYER IN THE STUDY, and the only project whose entire purpose it is. Controls are runtime-configurable resources with a RECURSIVE boolean condition tree (leaf/and/or/not, exactly one kind per node, empty groups rejected), pluggable evaluators, bindings as their own resource with an enabled flag, and a THREE-WAY outcome: deny | steer | observe."
+    evidence: "models/src/agent_control_models/controls.py:546-625 @ 7cb21af; models/src/agent_control_models/actions.py:8-17; verified live against agent-control-sdk (PyPI, 2026-08-26); engine tests 115 passed after adding pytest-asyncio"
   # I9: Approval gates on specific tools?
   I9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Per-call gating with three outcomes, where 'steer' returns structured remediation guidance and a composite steer control WITHOUT steering_context is rejected at validation."
+    evidence: "models/src/agent_control_models/controls.py:539-543 @ 7cb21af"
   # I10: Do tools execute inside or outside the agent's sandbox?
   I10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No sandboxing; out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "README.md @ 7cb21af"
 
   # --- J. Security and identity ---
   # J1: What identity does an agent authenticate as?
   J1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent principal for authentication; agents present an API key."
+    evidence: "README.md @ 7cb21af"
   # J2: Authentication mechanism for agent-to-platform?
   J2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "API-key authentication with SEPARATE AGENT AND ADMIN KEYS (AGENT_CONTROL_API_KEYS vs AGENT_CONTROL_ADMIN_API_KEYS), so a governed agent cannot modify its own governance. No other project makes this separation."
+    evidence: "README.md @ 7cb21af; server/tests/test_auth.py"
   # J3: Authorisation model: RBAC, ABAC, capability tokens, none?
   J3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Two-tier authorisation: agent keys may submit evaluations, admin keys may manage controls. Plus namespace scoping enforced in the schema."
+    evidence: "README.md @ 7cb21af"
   # J4: Secret storage and injection?
   J4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Env-var configuration for API keys and DB password, with a README warning that the default (no keys) 'is dangerous for any real world usage'."
+    evidence: "README.md @ 7cb21af"
   # J5: Per-agent credentials, or shared platform credentials?
   J5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No per-agent credentials beyond a shared agent key."
+    evidence: "README.md @ 7cb21af"
   # J6: Can an agent act as a user? Is that impersonation or delegation?
   J6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No impersonation or delegation - it governs behaviour, not authority."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # J7: Tenant isolation: logical, or enforced at runtime?
   J7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "STRONGEST TENANCY MECHANISM IN THE STUDY. namespace_key is in the composite PRIMARY key AND in composite FOREIGN keys on association tables - 'Composite FKs enforce same-namespace references on both sides'. Omnigent and ADK prevent unscoped READS; this also prevents cross-namespace WRITES, so a policy in one namespace cannot be bound to a control in another."
+    evidence: "server/src/agent_control_server/models.py:41-80 @ 7cb21af"
   # J8: Network and filesystem isolation?
   J8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No isolation; out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "README.md @ 7cb21af"
   # J9: Is there an audit log? Is it tamper-evident?
   J9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Every control evaluation is recorded as a ControlExecutionEvent, queryable and aggregable - an audit trail of decisions as a dataset. Missing only the principal a decision concerned."
+    evidence: "models/src/agent_control_models/observability.py:30-378 @ 7cb21af"
   # J10: Where are policy decisions enforced — control plane, runtime, or tool gateway?
   J10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Enforcement is the product: a centralized control plane evaluating inputs and outputs at runtime, configured once and applied across agents without code changes, with decisions recorded and aggregable."
+    evidence: "README.md @ 7cb21af"
 
   # --- K. Sandbox and isolation ---
   # K1: Is there a workspace or sandbox concept? What is its lifecycle?
   K1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "README.md @ 7cb21af"
   # K2: Persistent filesystem across runs?
   K2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "README.md @ 7cb21af"
   # K3: Snapshot and restore?
   K3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "README.md @ 7cb21af"
   # K4: Network egress rules?
   K4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Not network egress control, but content-level egress control: outputs are evaluated before they leave, so PII leakage can be blocked on the way out."
+    evidence: "README.md @ 7cb21af"
   # K5: Container, microVM, or none?
   K5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "README.md @ 7cb21af"
   # K6: Resource quotas: CPU, memory, disk, wall clock?
   K6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No resource quotas."
+    evidence: "README.md @ 7cb21af"
   # K7: How are secrets injected without landing in the image or logs?
   K7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "README.md @ 7cb21af"
   # K8: Arbitrary code execution? Browser execution?
   K8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "README.md @ 7cb21af"
   # K9: Is the sandbox pluggable, or a fixed implementation?
   K9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "README.md @ 7cb21af"
 
   # --- L. Orchestration and scheduling ---
   # L1: Does it distinguish agent coordination from workflow orchestration?
   L1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "THE CLEANEST INSTANCE IN THE STUDY of the separation ADR-0013 assumes: policy is a service with its own control plane, and orchestration is explicitly somebody else's job."
+    evidence: "README.md @ 7cb21af"
   # L2: Topology: DAG, cyclic graph, supervisor, planner, event-driven, queue?
   L2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No workflow model; out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "README.md @ 7cb21af"
   # L3: Cron or scheduled triggers?
   L3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No scheduling; out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "README.md @ 7cb21af"
   # L4: Dynamic task spawning at runtime?
   L4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "README.md @ 7cb21af"
   # L5: Fan-out / fan-in?
   L5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Multiple bound controls are evaluated CONCURRENTLY under a semaphore with early cancellation once any control denies - fan-out over policy evaluation rather than over agent work."
+    evidence: "engine/src/agent_control_engine/core.py:662-680 @ 7cb21af"
   # L6: Subagents. Are they first-class, or just nested calls?
   L6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "README.md @ 7cb21af"
   # L7: Retry and backoff policy — declarative or hand-rolled?
   L7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No retry policy."
+    evidence: "engine/src/agent_control_engine/core.py @ 7cb21af"
   # L8: Compensation or rollback on failure?
   L8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No compensation or rollback. FIFTEEN PROJECTS - including this one, whose entire job is control, and MAF, whose entire job is orchestration. Combined with Pydantic AI's argument that saga compensation is the workflow engine's job, L8 is a BOUNDARY rather than a gap: it belongs to a durable workflow engine, and an agent platform should integrate one."
+    evidence: "engine/src/agent_control_engine/core.py @ 7cb21af"
   # L9: Does cancellation propagate through the whole tree?
   L9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Evaluation-level cancellation with timeouts and a deny_found event; no agent cancellation."
+    evidence: "engine/src/agent_control_engine/core.py:662-680 @ 7cb21af"
   # L10: Could this be replaced by Temporal or Restate, or is orchestration inseparable from the agent...
   L10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Deliberately no orchestration - the project is a component that sits beside whatever runtime you use, with adapters for four of them."
+    evidence: "README.md @ 7cb21af"
 
   # --- M. Observability ---
   # M1: Which of these are modelled as telemetry objects: trace, run, step, LLM call, tool call, mess...
   M1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A properly modelled observability surface: ControlExecutionEvent, BatchEventsRequest/Response, EventQueryRequest/Response, ControlStats, StatsRequest, TimeseriesBucket, plus a telemetry/ directory and a dashboard."
+    evidence: "models/src/agent_control_models/observability.py:30-460 @ 7cb21af"
   # M2: Is telemetry keyed to agent, run, model, task, user, or tenant?
   M2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Events carry control, target and namespace identity and are queryable by time - though there is no distributed trace id."
+    evidence: "models/src/agent_control_models/observability.py:30,266 @ 7cb21af"
   # M3: OpenTelemetry, proprietary, or none?
   M3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A telemetry/ directory exists and the model is explicitly designed for aggregation, but OTel semantic-convention adherence was not established in this targeted pass."
+    evidence: "telemetry/ @ 7cb21af"
   # M4: Is there a documented, stable event schema?
   M4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Fully typed Pydantic models with field descriptions and json_schema_extra examples, plus a validated action vocabulary and a validated condition-tree shape."
+    evidence: "models/src/agent_control_models/controls.py:255-278 @ 7cb21af"
   # M5: Cost and token accounting. Per what unit?
   M5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No cost accounting - though a deny control on an expensive tool is an available mechanism."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # M6: Latency breakdown by phase?
   M6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "TimeseriesBucket and ControlStats give decision latency and volume over time; evaluation has per-control timeouts."
+    evidence: "models/src/agent_control_models/observability.py:380-460 @ 7cb21af"
   # M7: Error taxonomy?
   M7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A dedicated errors module, evaluation errors captured per control with formatted exceptions rather than failing the whole evaluation, and explicit validation errors on malformed controls."
+    evidence: "models/src/agent_control_models/errors.py @ 7cb21af; engine/src/agent_control_engine/core.py:680-690"
   # M8: Can the event stream reconstruct a run after the fact — replay or audit?
   M8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Every decision is recorded and queryable, so the policy history of any target is reconstructible - and observe-mode decisions are recorded alongside enforced ones."
+    evidence: "models/src/agent_control_models/observability.py:266-378 @ 7cb21af"
 
   # --- N. Multi-tenancy and enterprise ---
   # N1: Resource hierarchy: org, workspace, project, environment?
   N1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "namespace_key is the tenancy level, with Policy grouping Controls and bindings attaching them to targets - two levels of grouping, but no org/project/environment hierarchy."
+    evidence: "server/src/agent_control_server/models.py:41-80 @ 7cb21af"
   # N2: RBAC model and its granularity?
   N2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Two roles enforced by separate key sets: agent keys submit evaluations, admin keys manage controls."
+    evidence: "README.md @ 7cb21af"
   # N3: Quotas and cost limits. Enforced or advisory?
   N3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No quotas or cost limits."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # N4: dev / staging / prod separation?
   N4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "namespace_key could separate environments, and docker-compose.dev.yml exists, but there is no declared environment dimension."
+    evidence: "docker-compose.dev.yml @ 7cb21af"
   # N5: Deployment promotion path?
   N5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No promotion path - though observe mode is a natural staging mechanism for a control before enforcing it."
+    evidence: "models/src/agent_control_models/actions.py:8 @ 7cb21af"
   # N6: Agent catalog scoped to a tenant?
   N6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Controls, policies and bindings are all listable with pagination and filtering, per namespace - a catalog of governance."
+    evidence: "models/src/agent_control_models/server.py:783-795 @ 7cb21af"
   # N7: Audit retention controls?
   N7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No audit retention policy for execution events."
+    evidence: "models/src/agent_control_models/observability.py @ 7cb21af"
   # N8: Is multi-tenancy in the OSS core, or reserved for a commercial tier?
   N8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Multi-tenancy is in the OSS schema (composite PKs and FKs on namespace_key), not withheld; agentcontrol.dev suggests a hosted offering but the self-hosted path is complete."
+    evidence: "server/src/agent_control_server/models.py:41-80 @ 7cb21af"
 
   # --- O. API and protocol surface ---
   # O1: List the actual primary endpoints or SDK entry points. Verbatim.
   O1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A REST server with an OpenAPI surface, a UI dashboard, Python and TypeScript SDKs, and framework adapters for four agent frameworks."
+    evidence: "sdks/ @ 7cb21af; ui/"
   # O2: Is the API resource-oriented or RPC-flavoured?
   O2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Fully resource-oriented: controls, policies, bindings and events with CRUD, pagination and filtering."
+    evidence: "models/src/agent_control_models/server.py:768-800 @ 7cb21af"
   # O3: Streaming: SSE, WebSocket, long-poll, gRPC stream?
   O3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Synchronous evaluation plus batch event submission; no streaming surface."
+    evidence: "models/src/agent_control_models/observability.py:203 @ 7cb21af"
   # O4: Webhooks or outbound callbacks?
   O4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No webhooks."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # O5: Which standards are implemented: MCP, A2A, ACP, OTel, OpenAI-compatible?
   O5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "REST and OpenAPI, with framework adapters rather than agent protocols. No MCP, A2A or OTel adherence established."
+    evidence: "sdks/ @ 7cb21af"
   # O6: Is the API versioned? Stability commitment?
   O6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Alembic migrations with dedicated per-change migration tests, and a strict-in/lenient-out action vocabulary that accepts legacy stored values while rejecting them at the API boundary - a real schema-evolution discipline."
+    evidence: "models/src/agent_control_models/actions.py:19-58 @ 7cb21af; server/tests/test_control_action_alembic_migration.py"
   # O7: Is there a separate northbound (client) and southbound (runtime) API?
   O7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Northbound is the admin API and UI (managing controls); southbound is the agent evaluation API and SDK adapters. Two surfaces with SEPARATE CREDENTIALS."
+    evidence: "README.md @ 7cb21af"
 
   # --- P. Storage ---
   # P1: What datastores are required to run it?
   P1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "PostgreSQL with Alembic migrations and association tables using composite keys."
+    evidence: "server/src/agent_control_server/models.py:41-80 @ 7cb21af"
   # P2: What is treated as authoritative, strongly consistent state?
   P2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The database is authoritative for controls, policies, bindings and recorded decisions."
+    evidence: "server/src/agent_control_server/models.py @ 7cb21af"
   # P3: What is event-stream or append-only?
   P3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Execution events accumulate append-style; controls and bindings are mutable rows."
+    evidence: "models/src/agent_control_models/observability.py:30 @ 7cb21af"
   # P4: Where do large artifacts go?
   P4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No blob storage."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # P5: Is there a vector store? Required or optional?
   P5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No vector store."
+    evidence: "evaluators/builtin @ 7cb21af"
   # P6: Is storage pluggable, or hardcoded?
   P6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "PostgreSQL is assumed (docker-compose ships it); evaluators are the pluggable layer rather than storage."
+    evidence: "docker-compose.yml @ 7cb21af"
 
   # --- Q. Licensing and commercial ---
   # Q1: Exact license, including any per-directory variation.
   Q1:
     verdict: first_class
-    note: "Apache-2.0."
-    evidence: "https://github.com/agentcontrol/agent-control (GitHub API + npm registry, read 2026-08-26; 299 stars, pushed 2026-08-24)"
+    note: "Apache-2.0 across server, engine, models, evaluators, UI and SDKs."
+    evidence: "LICENSE @ 7cb21af"
   # Q2: Are there enterprise-only components missing from the OSS repo?
   Q2:
-    verdict: unknown
-    note: "Not yet assessed; hosted offering unknown."
-    evidence: "https://github.com/agentcontrol/agent-control (GitHub API + npm registry, read 2026-08-26; 299 stars, pushed 2026-08-24)"
+    verdict: absent
+    note: "Nothing appears withheld: the whole control plane is in the repo and the self-hosted path is complete and documented. agentcontrol.dev suggests a hosted offering alongside."
+    evidence: "LICENSE @ 7cb21af; docker-compose.yml"
   # Q3: SaaS or hosted-service restrictions?
   Q3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No SaaS restriction under Apache-2.0."
+    evidence: "LICENSE @ 7cb21af"
   # Q4: Trademark constraints on derived works?
   Q4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Agent Control naming and logo; Apache-2.0 grants no trademark rights."
+    evidence: "LICENSE @ 7cb21af"
   # Q5: Network copyleft (AGPL, SSPL) implications for a hosted product?
   Q5:
     verdict: absent
-    note: "No network copyleft. Apache-2.0/MIT only across the whole study."
-    evidence: "https://github.com/agentcontrol/agent-control (GitHub API + npm registry, read 2026-08-26; 299 stars, pushed 2026-08-24)"
+    note: "No network copyleft."
+    evidence: "LICENSE @ 7cb21af"
   # Q6: Verdict: `USE` / `INTEGRATE` / `REFERENCE_ONLY` / `AVOID`, with reasoning.
   Q6:
     verdict: first_class
-    note: "INTEGRATE - Apache-2.0. Located on re-check via the npm registry after GitHub search proved unusable. Restored from recon to targeted depth for policy-enforcement questions."
-    evidence: "https://github.com/agentcontrol/agent-control (GitHub API + npm registry, read 2026-08-26; 299 stars, pushed 2026-08-24)"
+    note: "INTEGRATE-CANDIDATE - the second in the study after AG2, and for the same reason: Apache-2.0, Python, self-hostable, well-factored, and it solves a subsystem we would otherwise build while explicitly not assuming it owns the platform."
+    evidence: "LICENSE @ 7cb21af; README.md"
 
   # --- R. Developer experience ---
   # R1: Time from clone to a running agent. Actual elapsed minutes.
   R1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Excellent: a single curl'd docker-compose file starts Postgres, server and UI with NO REPO CLONE, then pip install the SDK. Verified the SDK independently; engine tests pass (115) once pytest-asyncio is added."
+    evidence: "README.md @ 7cb21af; verified live against agent-control-sdk (PyPI, 2026-08-26); engine tests 115 passed after adding pytest-asyncio"
   # R2: How many concepts before "hello world"?
   R2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Few concepts: control, condition, action, binding. The quickstart is four steps."
+    evidence: "README.md @ 7cb21af"
   # R3: Is there a local dev loop? Hot reload?
   R3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "docker-compose.dev.yml plus a Makefile plus TESTING.md; the whole control plane runs locally on Postgres."
+    evidence: "docker-compose.dev.yml @ 7cb21af; TESTING.md"
   # R4: How do you debug a stuck run?
   R4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A dashboard UI, queryable decision events, stats and timeseries - and observe mode lets you watch what a control WOULD do before enforcing it."
+    evidence: "ui/ @ 7cb21af"
   # R5: Can an agent be unit tested? Is there a test harness?
   R5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "115 engine tests pass and there are dedicated Alembic migration test suites plus codecov - but a fresh clone reports 64 spurious failures because pytest-asyncio is not in the default install path."
+    evidence: "verified live against agent-control-sdk (PyPI, 2026-08-26); engine tests 115 passed after adding pytest-asyncio"
   # R6: Deployment story?
   R6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "docker compose up from a remote compose file, with env vars for ports, API keys and DB password, plus Podman instructions."
+    evidence: "docker-compose.yml @ 7cb21af"
   # R7: CLI ergonomics — try the equivalent of `init`, `agent add`, `run`.
   R7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Management is via API, SDK or UI rather than a CLI."
+    evidence: "ui/ @ 7cb21af"
 
   # --- S. Hard scenarios ---
   # S1: Delegated authority
   S1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No principals; it governs behaviour, not authority."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # S2: Torn side effect
   S2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "engine/src/agent_control_engine/core.py @ 7cb21af"
   # S3: Upgrade mid-flight
   S3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No versioning."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # S4: Concurrent memory write
   S4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # S5: Cancellation tree
   S5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "engine/src/agent_control_engine/core.py @ 7cb21af"
   # S6: Silent context loss
   S6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # S7: Poison message
   S7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "engine/src/agent_control_engine/core.py @ 7cb21af"
   # S8: Tenant leak
   S8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class_answer
+    note: "STRONGEST MECHANISM IN THE STUDY, found by reading the schema after my first pass through the API models got it wrong. namespace_key sits in the composite PRIMARY key and in composite FOREIGN keys on association tables - 'Composite FKs enforce same-namespace references on both sides' - so a cross-namespace binding is a constraint violation rather than a silent success. Omnigent and ADK prevent unscoped reads; this also prevents cross-tenant writes, which for a policy system is the more dangerous case."
+    evidence: "server/src/agent_control_server/models.py:41-80 @ 7cb21af"
   # S9: Runaway spend
   S9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No cost model, though a deny control on an expensive tool is an available mechanism."
+    evidence: "models/src/agent_control_models/ @ 7cb21af"
   # S10: Zombie sandbox
   S10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "out of scope: this is a policy control plane, not an agent runtime."
+    evidence: "README.md @ 7cb21af"
 
 object_model: |
-  # ASCII tree of resources that actually exist
+  Namespace (namespace_key)     the tenancy boundary - in composite PKs AND
+   |                            in composite FKs on association tables
+   |-- Agent                    registered; a policy TARGET
+   |-- Control                  the policy definition
+   |    |-- ConditionNode       RECURSIVE boolean tree:
+   |    |    |-- leaf           (selector + evaluator) - both required
+   |    |    |-- and[]          at least one child
+   |    |    |-- or[]           at least one child
+   |    |    `-- not            single child
+   |    `-- action
+   |         |-- decision       deny | steer | observe
+   |         `-- steering_context  {message} - required for composite steer
+   |-- Policy                   groups controls (policy_controls assoc table)
+   `-- ControlBinding           (namespace_key, target_type, target_id,
+                                 control_id, enabled, created_at, updated_at)
 
-strongest_ideas: []
+  Step                          the evaluated payload; dot-notation selectors
+                                'input', 'input.query', 'context.user_id'
+  EvaluatorSpec                 builtin (regex, list, JSON, SQL) or contrib
+  ControlExecutionEvent         + ControlStats, TimeseriesBucket
 
-weakest_choices: []
+strongest_ideas:
+  - "OBSERVE as a first-class control action - evaluate and record without enforcing. Shadow mode, shipped, and the only instance in fifteen projects. Verified live: ['deny','steer','observe'] are the canonical actions."
+  - "STEER as a third outcome, returning machine-readable remediation instructions rather than a refusal - a policy that repairs instead of only refusing."
+  - "Requiring steering_context on composite steer controls: 'Composite steer controls require action.steering_context'. You cannot ship a steer decision that fails to say how to comply."
+  - "Steering examples that are PROCEDURES, not messages: '1) Ask user for business justification, 2) Request manager approval..., 3) If approved, retry with manager_approved=True'."
+  - "Recursive ConditionNode trees (leaf/and/or/not) with a validator enforcing exactly one node kind per node and rejecting empty and/or groups."
+  - "Strict-in, lenient-out enum normalisation: validate_action REJECTS legacy values at the API boundary while normalize_action ACCEPTS them on internal read paths, with the reasoning in both docstrings. The correct asymmetry for schema evolution."
+  - "Separate agent and admin API keys, so an agent subject to policy cannot modify its own governance. No other project makes this separation."
+  - "A README that names its own unsafe default: 'This starts server without API keys configured which is dangerous for any real world usage.'"
+  - "namespace_key in composite FOREIGN keys, not just the primary key - 'Composite FKs enforce same-namespace references on both sides' - so a cross-namespace BINDING is a constraint violation, not a silent success."
+  - "ControlBinding as a first-class resource with an enabled flag, so policy ATTACHMENT is queryable, auditable and independently disable-able."
+  - "Dot-notation selectors (input.query, context.user_id) so a control targets a precise field rather than a whole payload."
+  - "A full stats and timeseries model over decisions - which is what makes observe mode actionable rather than merely non-blocking."
+  - "Batch event submission, so the audit write does not block the enforcement path."
+  - "SQL as a builtin evaluator, implying structured-argument evaluation rather than text-only matching."
+  - "Concurrent control evaluation under a semaphore with a deny_found event for early cancellation, so many bound controls do not penalise the fast path."
+  - "Framework adapters for runtimes it does not own (LangChain, CrewAI, Google ADK, AWS Strands) - built on the assumption that it is a component, not the platform."
+  - "Deployable from a curl'd docker-compose file with no repo clone."
+  - "Dedicated Alembic migration test suites per schema change."
 
-reusable_components: []
-  # - component: 
-  #   decision: INTEGRATE   # BUILD|INTEGRATE|ADOPT_AS_STANDARD|REUSE|DEFER
-  #   note: 
+weakest_choices:
+  - "NO PRINCIPALS and no end-user authentication. It governs agent BEHAVIOUR thoroughly and cannot express AUTHORITY at all - no on-whose-behalf, no record of who a decision concerned."
+  - "No row-level security, so tenancy relies on the application always supplying the namespace - though composite FKs make cross-namespace relationships structurally impossible, which is the more dangerous case."
+  - "No agent versioning or revocation (though a ControlBinding can be disabled)."
+  - "No policy ANALYSIS: controls are evaluated, never compared. Gives empirical shadow comparison but not the static kind Cedar enables."
+  - "CAVEAT WE MUST DESIGN AROUND: early cancellation on deny means observe-mode controls may not record a verdict for denied traffic, so shadow data is systematically missing exactly the cases a candidate policy most needs comparing on."
+  - "Tests need pytest-asyncio which is not in the default install path, so a fresh clone reports 64 spurious failures."
+  - "Narrow by design - a strength for integration, and it means the project answers very few probes."
 
-lessons: []
+reusable_components:
+  - component: "observe as a first-class action"
+    decision: ADOPT_AS_STANDARD
+    note: "Shadow mode; the only precedent in fifteen projects."
+  - component: "steer with required remediation guidance"
+    decision: ADOPT_AS_STANDARD
+    note: "Policy that repairs beats policy that refuses."
+  - component: "Structural validation of steer completeness"
+    decision: ADOPT_AS_STANDARD
+    note: "A steer control that cannot say how to comply is a bug."
+  - component: "Recursive condition trees with shape validation"
+    decision: REUSE
+    note: "A real policy expression language, structurally validated."
+  - component: "Strict-in / lenient-out enum normalisation"
+    decision: ADOPT_AS_STANDARD
+    note: "Correct asymmetry for evolving a vocabulary."
+  - component: "Separate agent vs admin credentials"
+    decision: ADOPT_AS_STANDARD
+    note: "A governed subject must not be able to edit its governance."
+  - component: "Composite FKs enforcing same-namespace references"
+    decision: ADOPT_AS_STANDARD
+    note: "Prevents cross-tenant relationships, not just reads. Strongest tenancy found."
+  - component: "ControlBinding as a queryable resource with enabled flag"
+    decision: ADOPT_AS_STANDARD
+    note: "Policy attachment is auditable and reversible, not implicit."
+  - component: "Dot-notation field selectors"
+    decision: REUSE
+    note: "Target a field, not a payload."
+  - component: "Stats + timeseries over decisions"
+    decision: ADOPT_AS_STANDARD
+    note: "What makes observe mode actionable."
+  - component: "Batch event submission"
+    decision: REUSE
+    note: "Audit must not block enforcement."
+  - component: "Naming your unsafe default in the README"
+    decision: REUSE
+    note: "Honest defaults documentation."
+  - component: "The whole control plane"
+    decision: INTEGRATE
+    note: "Second INTEGRATE-candidate after AG2."
+  - component: "Early cancellation applied to observe-mode controls"
+    decision: BUILD
+    note: "Reject; observe evaluations must be exempt or shadow data is biased."
 
-adr_impact: []
-  # - adr: ADR-0001
-  #   effect: confirms      # confirms|amends|challenges|neutral
-  #   note: 
+lessons:
+  - "THE SHADOW HALF OF ADR-0013, FINALLY. Fifteen projects with no shadow-comparison precedent, and this ships it: observe is a CANONICAL action that evaluates and records without enforcing, paired with stats and timeseries models that make the recorded data useful. Verified live. AMEND ADR-0013 to a three-way outcome and require that observe-mode data be aggregable, not merely logged. (confirms ADR-0013)"
+  - "STEER IS A CATEGORY I DID NOT HAVE. Instead of blocking, a control returns structured remediation the agent can act on - including instructions to obtain human approval. This reframes ADR-0015: many approvals exist only because a policy can only say no. Approval should be the ESCALATION PATH when steering is impossible, not the default response to a violation. (amends ADR-0015)"
+  - "Empirical shadow (run the candidate, see what it would have done) and static shadow (Cedar: prove B is more permissive than A) are COMPLEMENTARY, and we should have both. AgentCore gives the static kind, this gives the empirical kind."
+  - "SEPARATE THE GOVERNED FROM THE GOVERNOR: distinct agent and admin credentials, so an agent subject to policy cannot modify policy. Obvious once stated, and only this project does it."
+  - "STRONGEST TENANCY MECHANISM IN THE STUDY, and it corrected me: namespace_key is in composite FOREIGN keys as well as primary keys, so a cross-namespace binding cannot be created. Omnigent and ADK prevent unscoped reads; this prevents cross-tenant writes. For a policy system the dangerous failure is not READING another tenant's control, it is ATTACHING one."
+  - "FOURTH project to have half the ADR-0007 model: governs behaviour thoroughly, cannot express authority at all. With ADK (credentials, no principals), HumanLayer (decisions, no approver) and AgentCore (both halves), the principal model is now unmistakably the field's most consistent omission - and it is what ties policy, approval and delegation together. (challenges ADR-0007)"
+  - "L8 CLOSED AS A BOUNDARY, NOT A GAP. Compensation is absent in fifteen of fifteen projects, including the one whose entire job is control (this) and the one whose entire job is orchestration (MAF), and four managed enterprise platforms. With Pydantic AI's argument that saga compensation is the workflow engine's job, I record L8 as a DELIBERATE v0.1 exclusion with fifteen projects of evidence behind it, rather than an unbuilt feature."
+  - "Framework adapters for four runtimes it does not own means this is the only project in the study built on the assumption that it is NOT the whole platform - which is exactly why it is integrable. (confirms ADR-0004)"
+  - "Decisions are a modelled, queryable, AGGREGABLE dataset rather than log lines. Extends the ADR-0010 amendment: refusals must be observable AND aggregable. (confirms ADR-0010)"
+  - "PROCESS NOTE: I recorded namespace_key as a mere filter field after reading the API models, and the server schema contradicted it. Third time in this study that checking the schema overturned an inference from an API surface."
+
+adr_impact:
+  - adr: ADR-0001
+    effect: confirms
+    note: "Agents are registered so controls can be BOUND to them - the rebased rationale seen from the policy side."
+  - adr: ADR-0002
+    effect: neutral
+    note: "No run lifecycle; the evaluated unit is a Step."
+  - adr: ADR-0003
+    effect: neutral
+    note: "Out of scope."
+  - adr: ADR-0004
+    effect: confirms
+    note: "Framework adapters for LangChain, CrewAI, ADK and Strands - the adapter thesis applied to policy rather than execution."
+  - adr: ADR-0005
+    effect: neutral
+    note: "Tool calls are enforcement points; no capability model."
+  - adr: ADR-0006
+    effect: neutral
+    note: "No A2A."
+  - adr: ADR-0007
+    effect: challenges
+    note: "Fourth project with half the model: governs behaviour, cannot express authority. No principals at all."
+  - adr: ADR-0008
+    effect: neutral
+    note: "Out of scope."
+  - adr: ADR-0009
+    effect: neutral
+    note: "No process sandbox, though output evaluation is content-level egress control."
+  - adr: ADR-0010
+    effect: confirms
+    note: "Decisions are a queryable, aggregable dataset - refusals must be observable AND aggregable."
+  - adr: ADR-0011
+    effect: neutral
+    note: "No versioning."
+  - adr: ADR-0012
+    effect: confirms
+    note: "EvaluatorSpec declares the evaluator, with builtin/contrib separation - declared rather than discovered."
+  - adr: ADR-0013
+    effect: confirms
+    note: "THE shadow half: observe is a canonical action, with stats and timeseries making the data usable. Plus steer as a third outcome."
+  - adr: ADR-0014
+    effect: neutral
+    note: "Not an execution layer."
+  - adr: ADR-0015
+    effect: amends
+    note: "steer reframes approval as an ESCALATION when steering is impossible, not the default response to a violation."

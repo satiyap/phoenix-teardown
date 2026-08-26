@@ -362,6 +362,7 @@ cannot act on is a bug report waiting to be filed.
 | HumanLayer | neutral | `hld/approval/types.go @ 99abe67` | No capability model. |
 | AWS AgentCore | neutral | `src/bedrock_agentcore/ @ 826416a` | No declared capability model for agents or runtimes. |
 | Microsoft Agent Framework | neutral | `python/packages/core/agent_framework/_feature_stage.py @ e34bf48` | No declared capability model. `_feature_stage.py` marks *feature* stability in code — the same instinct as ADK's module-path stability tiers, but a different concept from a capability claim. |
+| Agent Control | confirms | `evaluators/ @ 7cb21af` | `EvaluatorSpec` declares which evaluator a control uses, with a builtin/contrib separation — declared rather than discovered, and the control names its evaluator instead of probing for one. |
 
 ## Open questions
 

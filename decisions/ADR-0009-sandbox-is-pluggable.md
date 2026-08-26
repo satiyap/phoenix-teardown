@@ -111,6 +111,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | HumanLayer | neutral | `hld/session/manager.go @ 99abe67` | No sandbox at all — Claude Code runs with daemon privileges, and *approval* is the control instead of isolation. A coherent single-user choice, and a reminder that HITL and sandboxing are alternative answers to the same risk. |
 | AWS AgentCore | neutral | `src/bedrock_agentcore/runtime/ @ 826416a` | Sandboxing is a managed capability not surfaced in this SDK. Recorded as **`unknown`, not `absent`** — 8 of the K-section probes are genuinely unanswerable from a client surface, and coding them as absent would have overstated the gap. |
 | Microsoft Agent Framework | neutral | `python/packages/hyperlight/ @ e34bf48` | `hyperlight` (Microsoft's micro-VM technology) is packaged, implying a VM-grade isolation option rather than only process isolation — but its integration depth was not read in this targeted pass. Recorded `implicit`/`unknown` rather than claimed (OQ-039). |
+| Agent Control | neutral | `README.md @ 7cb21af` | No process sandbox. Worth noting though: evaluating *outputs* before they leave is content-level egress control, which is the third boundary from a different angle than Pydantic AI's network guard. |
 
 ## Open questions
 

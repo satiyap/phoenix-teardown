@@ -119,6 +119,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | HumanLayer | confirms | `hld/session/claudecode_wrapper.go @ 99abe67`; `claudecode-go/` | An `attached_harness` wrapping Claude Code behind a `ClaudeSession` interface, with **the daemon owning durability on the agent's behalf** — the transcript, the approvals, the reconciliation. Same split AX established: control plane owns the log, the adapter streams events. One vendor rather than a general contract, so the seam is real but narrow. |
 | AWS AgentCore | neutral | `src/bedrock_agentcore/runtime/ @ 826416a` | A client SDK over managed services, not an adapter contract. |
 | Microsoft Agent Framework | neutral | `python/packages/ @ e34bf48` | Not an adapter contract for agents — `Executor` is the node abstraction and agents are written against the framework. The wide provider surface (anthropic, gemini, bedrock, ollama, mistral, copilotstudio…) adapts *models*, not agents. |
+| Agent Control | confirms | `README.md @ 7cb21af` | The adapter thesis applied to *policy* rather than execution: framework adapters for LangChain, CrewAI, Google ADK and AWS Strands mean it governs runtimes it did not author, via a `@control()` decorator. **The only project in the study built on the assumption that it is not the whole platform** — which is exactly why it is integrable. |
 
 ## Open questions
 
