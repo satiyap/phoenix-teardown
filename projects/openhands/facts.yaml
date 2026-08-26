@@ -1,0 +1,1057 @@
+# Machine-readable extraction. Schema: schema/facts.schema.yaml
+# Validate:  ./.venv/bin/python tools/validate_facts.py
+#
+# verdict:   first_class | implicit | absent | unknown
+# scenarios: first_class_answer | inferable | undefined | unknown
+# evidence:  'path/file.py:120 @ sha'  or  'URL (read YYYY-MM-DD)'
+
+schema_version: 1
+
+project:
+  slug: openhands
+  name: OpenHands
+  depth: deep
+  evidence_class: A
+  read_on: 2026-08-26
+  repo: "https://github.com/OpenHands/OpenHands + https://github.com/OpenHands/software-agent-sdk"
+  commit: "Canvas f48eca6ab9149b3aa532e86842c85da43e370108 / SDK 760eea2845509ceb446db11f73ca5aa666bd01bb"
+  docs: "https://docs.all-hands.dev"
+  version: "openhands-sdk 1.43.1 / agent-canvas 1.15.0"
+  license: MIT
+  license_verdict: INTEGRATE
+  runtime_class: attached_harness
+  one_line: "Agent Canvas: self-hosted developer control center running OpenHands, Claude Code, Codex, Gemini or any ACP-compatible agent across local, remote and cloud backends."
+  thesis: "The control plane owns the workspace, the event log and the policy; the agent is a replaceable subprocess speaking a standard protocol. AgentKind = openhands | acp makes the native agent a peer of every foreign agent."
+
+probes:
+
+  # --- A. Core abstraction and object model ---
+  # A1: What does this system think an agent *is*? State it in one sentence, in their vocabulary.
+  A1:
+    verdict: first_class
+    note: "An agent is a KIND plus a launch command, not a resource. AgentKind = 'openhands' | 'acp': the native agent and foreign ACP agents are peers behind one enum."
+    evidence: "src/types/settings.ts:110 @ f48eca6"
+  # A2: What is the root resource — the thing everything else hangs off?
+  A2:
+    verdict: first_class
+    note: "Backend is the root (id, name, host, apiKey, kind: local|cloud); Conversation is the unit of work."
+    evidence: "src/api/backend-registry/types.ts:4 @ f48eca6"
+  # A3: Is `Agent` persistent or ephemeral? Can it exist while not executing?
+  A3:
+    verdict: absent
+    note: "No Agent resource with durable identity. AgentProfile is configuration, like LangGraph's Assistant."
+    evidence: "openhands-agent-server/openhands/agent_server/agent_profiles_router.py @ 760eea2"
+  # A4: Is `Task` a separate resource from `Run`? If not, which concept is missing and what fills the...
+  A4:
+    verdict: absent
+    note: "No Task/Run split. Conversation is the durable unit; a 'run' is POST /{id}/run against it."
+    evidence: "openhands-agent-server/openhands/agent_server/conversation_router.py:284 @ 760eea2"
+  # A5: What is a `Session` attached to: user, agent, task, or execution?
+  A5:
+    verdict: first_class
+    note: "Conversation is the session, identified by UUID, owning state, events, workspace and secrets."
+    evidence: "openhands-sdk/openhands/sdk/conversation/state.py @ 760eea2"
+  # A6: Are messages first-class durable resources, or transient function arguments?
+  A6:
+    verdict: first_class
+    note: "MessageEvent is a durable node in the append-only event tree, addressable by EventID with parent_id."
+    evidence: "openhands-sdk/openhands/sdk/conversation/state.py:315 @ 760eea2"
+  # A7: Are artifacts (files, outputs, deliverables) first-class?
+  A7:
+    verdict: implicit
+    note: "No Artifact resource. Outputs are files in the workspace plus git_changes/git_diff on BaseWorkspace."
+    evidence: "openhands-sdk/openhands/sdk/workspace/base.py:234 @ 760eea2"
+  # A8: Can multiple agents participate in one task? How is that represented?
+  A8:
+    verdict: implicit
+    note: "Sub-agents via sub_agents_router create nested conversations; not modelled as co-participants in one task."
+    evidence: "openhands-agent-server/openhands/agent_server/sub_agents_router.py:117 @ 760eea2"
+  # A9: Draw the object model as a tree. Only nodes that exist in their code or API.
+  A9:
+    verdict: first_class
+    note: "Backend > Conversation > {Event tree, ConversationState, Workspace, SubAgent, Secrets}. See teardown section 3."
+    evidence: "openhands-sdk/openhands/sdk/conversation/state.py @ 760eea2"
+
+  # --- B. Runtime model ---
+  # B1: Does the platform launch agents, host them, or attach to external ones?
+  B1:
+    verdict: first_class
+    note: "Launches agents as stdio ACP subprocesses from a registry-declared command. Does not host them in-process."
+    evidence: "src/constants/acp-providers.ts:82 @ f48eca6"
+  # B2: Execution substrate: process, container, microVM, serverless, in-process library, remote HTTP?
+  B2:
+    verdict: first_class
+    note: "Five substrates: local process, Docker, Apptainer (rootless/HPC), remote API sandbox, cloud."
+    evidence: "openhands-workspace/openhands/workspace/ @ 760eea2"
+  # B3: Who owns the event loop — platform or agent?
+  B3:
+    verdict: first_class
+    note: "The agent-server (FastAPI) owns the event loop; Canvas is a client."
+    evidence: "openhands-agent-server/openhands/agent_server/api.py @ 760eea2"
+  # B4: Who decides when an agent wakes?
+  B4:
+    verdict: first_class
+    note: "Control plane decides: POST /{id}/run, goal loops, and automation triggers."
+    evidence: "openhands-agent-server/openhands/agent_server/conversation_router.py:284,315 @ 760eea2"
+  # B5: Can an agent run indefinitely? What is the actual ceiling?
+  B5:
+    verdict: implicit
+    note: "Goal loops run until complete or 'capped'. No indefinite execution ceiling documented."
+    evidence: "src/types/agent-server/core/events/conversation-state-event.ts:85 @ f48eca6"
+  # B6: Are there background or unattended agents?
+  B6:
+    verdict: first_class
+    note: "Automations with triggers and scheduled runs are a headline feature ('always-on engineering team')."
+    evidence: "README.md @ f48eca6"
+  # B7: Is execution synchronous or asynchronous from the caller's view?
+  B7:
+    verdict: first_class
+    note: "Asynchronous: conversations are started then polled/streamed; pause and interrupt act on a running conversation."
+    evidence: "openhands-agent-server/openhands/agent_server/conversation_router.py:236 @ 760eea2"
+  # B8: Can in-flight work migrate between workers?
+  B8:
+    verdict: absent
+    note: "No work migration between workers; a conversation is bound to its workspace."
+    evidence: "openhands-sdk/openhands/sdk/workspace/base.py:27 @ 760eea2"
+  # B9: Can an agent survive a machine restart? Automatically, or with operator action?
+  B9:
+    verdict: implicit
+    note: "Event log persists so a conversation is reconstructible, but no documented crash-recovery contract."
+    evidence: "openhands-sdk/openhands/sdk/conversation/state.py:341 @ 760eea2"
+  # B10: Classify: worker/queue, durable actor, attached harness, or in-process library.
+  B10:
+    verdict: first_class
+    note: "attached_harness: launches and adapts external agent processes over ACP, inside a pluggable sandbox."
+    evidence: "src/types/settings.ts:110 @ f48eca6"
+
+  # --- C. Durability and failure semantics ---
+  # C1: What state is durable, and what is lost on crash?
+  C1:
+    verdict: first_class
+    note: "Durable: the append-only Event tree plus ConversationState (execution_status, stats, secret_registry, confirmation_policy, agent, leaf_event_id)."
+    evidence: "openhands-sdk/openhands/sdk/conversation/state.py:170-200 @ 760eea2"
+  # C2: *When* is state persisted — every step, every tool call, on checkpoint, never?
+  C2:
+    verdict: implicit
+    note: "Events persist on append via a single chokepoint, but there is NO declared persistence-timing contract (no sync/async/exit equivalent)."
+    evidence: "openhands-sdk/openhands/sdk/conversation/state.py:315 @ 760eea2"
+  # C3: Checkpointing or event sourcing? Can state be rebuilt from a log?
+  C3:
+    verdict: first_class
+    note: "Event sourcing with a branching TREE: parent_id stamping plus a movable HEAD (leaf_event_id). Moving HEAD re-roots the active branch, so fork and history navigation are first-class."
+    evidence: "openhands-sdk/openhands/sdk/conversation/state.py:175,315 @ 760eea2"
+  # C4: Retry semantics, and at what granularity: run, step, tool call?
+  C4:
+    verdict: absent
+    note: "No declarative retry policy at conversation or tool level."
+    evidence: "openhands-agent-server/openhands/agent_server/conversation_router.py @ 760eea2"
+  # C5: At-least-once or exactly-once? What do the docs claim versus what the code does?
+  C5:
+    verdict: unknown
+    note: "No documented delivery semantics for tool execution replay."
+    evidence: "openhands-sdk/openhands/sdk/conversation/state.py @ 760eea2"
+  # C6: Is there an idempotency model for tool side effects?
+  C6:
+    verdict: absent
+    note: "No idempotency key on tool calls or actions."
+    evidence: "src/types/agent-server/core/events/action-event.ts @ f48eca6"
+  # C7: Process crash recovery: what resumes, and from where?
+  C7:
+    verdict: implicit
+    note: "Incremental replay reconstructs the active branch in O(k) on append, but crash recovery is implied by the event log rather than specified."
+    evidence: "openhands-sdk/openhands/sdk/conversation/state.py:341 @ 760eea2"
+  # C8: Node loss: is work re-dispatched, and how is it detected?
+  C8:
+    verdict: implicit
+    note: "Canvas polls backend health (use-backends-health) so an unreachable backend is detected; no run re-dispatch."
+    evidence: "src/hooks/query/use-backends-health.ts:188 @ f48eca6"
+  # C9: Context-window overflow: truncation, summarisation, or failure?
+  C9:
+    verdict: first_class
+    note: "Condensation: a configurable condenser compresses history and emits CondensationSummaryEvent."
+    evidence: "openhands-sdk/openhands/sdk/event/ @ 760eea2"
+  # C10: Timers, scheduled execution, long sleeps — durable across restart?
+  C10:
+    verdict: first_class
+    note: "Automations support scheduled triggers; goal loops carry lifecycle status."
+    evidence: "README.md @ f48eca6"
+  # C11: Human-in-the-loop pause and resume: durable, or in-memory only?
+  C11:
+    verdict: first_class
+    note: "WAITING_FOR_CONFIRMATION is a first-class execution state, and pause/interrupt both land in resumable 'paused'."
+    evidence: "src/types/agent-server/core/base/common.ts:71 @ f48eca6"
+  # C12: Can a definition be upgraded while runs are in flight? What happens to them?
+  C12:
+    verdict: absent
+    note: "Conversation state stores agent config but no version pin and no compatibility check on resume. Same hazard as LangGraph (ADR-0011)."
+    evidence: "openhands-sdk/openhands/sdk/conversation/state.py @ 760eea2"
+
+  # --- D. Agent identity and lifecycle ---
+  # D1: Is an agent globally addressable? By what identifier?
+  D1:
+    verdict: implicit
+    note: "Agent KIND has a stable registry key, stored on conversations as tags.acpserver. Agent instances have no identity."
+    evidence: "src/constants/acp-providers.ts:80 @ f48eca6"
+  # D2: Does identity survive process restart?
+  D2:
+    verdict: absent
+    note: "No agent identity exists to survive restart."
+    evidence: "openhands-agent-server/openhands/agent_server/agent_profiles_router.py @ 760eea2"
+  # D3: Is identity distinct from runtime instance?
+  D3:
+    verdict: absent
+    note: "No identity/instance distinction."
+    evidence: "src/types/settings.ts:110 @ f48eca6"
+  # D4: Are agents versioned? Immutable or mutable definitions?
+  D4:
+    verdict: absent
+    note: "No agent versioning. AgentProfile is mutable configuration."
+    evidence: "openhands-agent-server/openhands/agent_server/agent_profiles_router.py @ 760eea2"
+  # D5: Is there a registry or catalog?
+  D5:
+    verdict: first_class
+    note: "Two registries: ACP provider registry (mirrored from the Python SDK source of truth) and manifest-registry for automations."
+    evidence: "src/constants/acp-providers.ts:69 @ f48eca6; src/manifests/manifest-registry.ts"
+  # D6: Can agents discover each other at runtime?
+  D6:
+    verdict: absent
+    note: "No runtime agent discovery between agents."
+    evidence: "openhands-agent-server/openhands/agent_server/sub_agents_router.py @ 760eea2"
+  # D7: Can agents advertise capabilities? In what format?
+  D7:
+    verdict: first_class
+    note: "Automation manifests declare requires.features and trigger kinds; deployments report supported features. Set-membership check, neutral about meaning."
+    evidence: "src/manifests/manifest-capabilities.ts:36 @ f48eca6"
+  # D8: Is there an owner, team, or tenant on the agent record?
+  D8:
+    verdict: implicit
+    note: "Org-level skills config and cloud orgId on backend selection; no owner field on an agent."
+    evidence: "openhands-agent-server/openhands/agent_server/skills_router.py:62 @ 760eea2"
+  # D9: Can an agent be suspended, revoked, or deprecated?
+  D9:
+    verdict: absent
+    note: "No suspend/revoke/deprecate for agents."
+    evidence: "openhands-agent-server/openhands/agent_server/agent_profiles_router.py @ 760eea2"
+  # D10: Is there anything resembling a declarative agent manifest?
+  D10:
+    verdict: first_class
+    note: "Automation manifests are declarative (requires.features, setup.form.triggers) with local validation and an error map."
+    evidence: "src/manifests/manifest-local-validation.ts @ f48eca6"
+
+  # --- E. Harness and runtime interoperability ---
+  # E1: What is the minimum interface an agent implementation must satisfy?
+  E1:
+    verdict: first_class
+    note: "An agent must be a real ACP stdio server. The SDK validates the command against the provider key."
+    evidence: "src/constants/acp-providers.ts:82-92 @ f48eca6"
+  # E2: Transport: stdin/stdout, HTTP, gRPC, WebSocket, in-process, ACP, A2A?
+  E2:
+    verdict: first_class
+    note: "ACP over stdio for agents; REST+OpenAPI for the control plane; websockets for streaming."
+    evidence: "src/constants/acp-providers.ts:82 @ f48eca6; openhands-agent-server/openhands/agent_server/sockets.py"
+  # E3: Can it host a foreign agent (Claude Code, Codex, OpenHands, LangGraph, ADK)?
+  E3:
+    verdict: first_class
+    note: "Yes - Claude Code, Codex, Gemini CLI and custom ACP agents, each with a default_command and credential env vars."
+    evidence: "src/constants/acp-providers.ts:221-254 @ f48eca6"
+  # E4: Is there an event stream out of a running agent? What granularity?
+  E4:
+    verdict: first_class
+    note: "17 typed event classes streamed: ActionEvent, ObservationEvent, ACPToolCallEvent, HookExecutionEvent, PauseEvent, InterruptEvent, StreamingDeltaEvent, TokenEvent and more."
+    evidence: "openhands-sdk/openhands/sdk/event/ @ 760eea2; verified empirically 2026-08-26, openhands-sdk 1.43.1"
+  # E5: Are tool calls externally observable, or internal to the agent?
+  E5:
+    verdict: first_class
+    note: "ACPToolCallEvent plus ActionEvent/ObservationEvent make foreign-agent tool calls observable."
+    evidence: "src/types/agent-server/core/events/acp-tool-call-event.ts @ f48eca6"
+  # E6: How is context injected at start?
+  E6:
+    verdict: first_class
+    note: "Context injected via conversation settings and secrets (request.secrets), never a per-agent env channel."
+    evidence: "src/types/settings.ts:107 @ f48eca6"
+  # E7: Is cancellation supported? Cooperative or forced? Does it propagate to subagents?
+  E7:
+    verdict: first_class
+    note: "Two grades: /pause waits for the current LLM call to finish; /interrupt cancels the in-flight request immediately. Both durable, both resumable."
+    evidence: "openhands-agent-server/openhands/agent_server/conversation_router.py:236-268 @ 760eea2"
+  # E8: Can a run be checkpointed and restored by the platform, or only by the agent?
+  E8:
+    verdict: implicit
+    note: "Workspace pause/resume suspends the container; conversation state persists via the event log. No checkpoint of agent-internal state."
+    evidence: "openhands-sdk/openhands/sdk/workspace/base.py:261 @ 760eea2"
+  # E9: Which of these would be hard to adapt, and why?
+  E9:
+    verdict: first_class
+    note: "Documented failure mode: 'npx -y @openai/codex acp' looks plausible but is NOT an ACP server - no acp subcommand, exits on non-TTY stdin, silently DEADLOCKS the ACP handshake. Adapters need validation, not just configuration."
+    evidence: "src/constants/acp-providers.ts:85-92 @ f48eca6"
+
+  # --- F. Agent-to-agent communication ---
+  # F1: Direct messages between agents?
+  F1:
+    verdict: absent
+    note: "No direct agent-to-agent messages."
+    evidence: "openhands-agent-server/openhands/agent_server/sub_agents_router.py @ 760eea2"
+  # F2: Channels, topics, or pub/sub?
+  F2:
+    verdict: absent
+    note: "No channels or pub/sub between agents."
+    evidence: "openhands-agent-server/openhands/agent_server/sub_agents_router.py @ 760eea2"
+  # F3: Task delegation as a distinct mechanism from messaging?
+  F3:
+    verdict: implicit
+    note: "Delegation exists as sub-agent conversations via TaskManager, but it is a nested call, not a task hand-off."
+    evidence: "openhands-sdk/openhands/sdk/observability/laminar.py:412 @ 760eea2"
+  # F4: Synchronous RPC between agents?
+  F4:
+    verdict: implicit
+    note: "Sub-agent invocation is effectively synchronous RPC inside the parent's tool span."
+    evidence: "openhands-sdk/openhands/sdk/observability/laminar.py:412 @ 760eea2"
+  # F5: Asynchronous inbox or mailbox?
+  F5:
+    verdict: absent
+    note: "No mailbox or inbox."
+    evidence: "openhands-agent-server/openhands/agent_server/ @ 760eea2"
+  # F6: Is delivery durable? Survives restart of sender and receiver?
+  F6:
+    verdict: absent
+    note: "No inter-agent delivery layer, hence no durability guarantee."
+    evidence: "openhands-agent-server/openhands/agent_server/sub_agents_router.py @ 760eea2"
+  # F7: Is message ordering guaranteed? Per what scope?
+  F7:
+    verdict: implicit
+    note: "Event tree gives ordering within a conversation via parent_id chains."
+    evidence: "openhands-sdk/openhands/sdk/conversation/state.py:315 @ 760eea2"
+  # F8: Acknowledgement or delivery receipts?
+  F8:
+    verdict: absent
+    note: "No acknowledgement mechanism between agents."
+    evidence: "openhands-agent-server/openhands/agent_server/sub_agents_router.py @ 760eea2"
+  # F9: Correlation ids for request/response pairing?
+  F9:
+    verdict: first_class
+    note: "Delegate traces link back explicitly: delegate.parent_trace_id, delegate.parent_span_id, plus best-effort tool_call_id from the parent's TOOL span."
+    evidence: "openhands-sdk/openhands/sdk/observability/laminar.py:417 @ 760eea2"
+  # F10: Conversation threading?
+  F10:
+    verdict: first_class
+    note: "Conversation tree with movable HEAD provides branching threads."
+    evidence: "openhands-sdk/openhands/sdk/conversation/state.py:175 @ 760eea2"
+  # F11: Capability-based routing — address by what an agent *can do* rather than who it is?
+  F11:
+    verdict: absent
+    note: "No capability-based routing between agents."
+    evidence: "openhands-agent-server/openhands/agent_server/sub_agents_router.py @ 760eea2"
+
+  # --- G. Human-agent collaboration ---
+  # G1: Is a human modelled as a special kind of agent, a distinct principal type, or not modelled?
+  G1:
+    verdict: absent
+    note: "Humans are not modelled as principals. Auth is a shared session API key per agent-server."
+    evidence: "openhands-agent-server/openhands/agent_server/config.py:23 @ 760eea2"
+  # G2: Shared rooms, channels, or workspaces?
+  G2:
+    verdict: implicit
+    note: "Canvas is a shared self-hosted control center, but there is no Workspace/Channel participation model."
+    evidence: "README.md @ f48eca6"
+  # G3: Task threads humans can read and post into?
+  G3:
+    verdict: first_class
+    note: "Conversations are readable and postable-into by humans; the event tree is the shared record."
+    evidence: "openhands-agent-server/openhands/agent_server/conversation_router.py:203 @ 760eea2"
+  # G4: Mentions or directed addressing?
+  G4:
+    verdict: absent
+    note: "No mentions or directed addressing."
+    evidence: "openhands-agent-server/openhands/agent_server/conversation_router.py @ 760eea2"
+  # G5: Approval gates. Blocking or advisory? Durable while pending?
+  G5:
+    verdict: first_class
+    note: "Pluggable ConfirmationPolicy: AlwaysConfirm, NeverConfirm, ConfirmRisky(threshold, confirm_unknown=True). Fail-safe on UNKNOWN, and threshold=UNKNOWN rejected by validator. Verified."
+    evidence: "openhands-sdk/openhands/sdk/security/confirmation_policy.py @ 760eea2; verified empirically 2026-08-26, openhands-sdk 1.43.1"
+  # G6: Mid-run intervention: can a human redirect without restarting?
+  G6:
+    verdict: first_class
+    note: "Pause, interrupt, resume, plus set_conversation_confirmation_policy mid-run and event-tree navigation/forking."
+    evidence: "openhands-agent-server/openhands/agent_server/conversation_router.py:236,425 @ 760eea2"
+  # G7: Agent status and presence visible to humans?
+  G7:
+    verdict: first_class
+    note: "ExecutionStatus = idle|running|paused|waiting_for_confirmation|finished|error|STUCK. STUCK models 'running but not progressing' - rare and valuable."
+    evidence: "src/types/agent-server/core/base/common.ts:67 @ f48eca6"
+  # G8: Notifications or escalation when an agent is blocked?
+  G8:
+    verdict: implicit
+    note: "Automation completion callbacks POST status; no escalation when an agent blocks."
+    evidence: "openhands-sdk/openhands/sdk/workspace/base.py:87 @ 760eea2"
+  # G9: Shared scratchpad or working surface?
+  G9:
+    verdict: first_class
+    note: "The workspace filesystem is a genuine shared scratchpad, inspectable via file_router and git_diff."
+    evidence: "openhands-agent-server/openhands/agent_server/file_router.py @ 760eea2"
+  # G10: Can a human see the context an agent is operating on?
+  G10:
+    verdict: first_class
+    note: "Full event stream plus file and git inspection expose the agent's working context."
+    evidence: "openhands-agent-server/openhands/agent_server/event_router.py @ 760eea2"
+
+  # --- H. Context and memory ---
+  # H1: Which of these exist as *separate* concepts: prompt context, working state, session history, ...
+  H1:
+    verdict: implicit
+    note: "Separates working conversation state, condensed history, and org-level git-backed skills. NO long-term agent memory and no shared knowledge store."
+    evidence: "openhands-agent-server/openhands/agent_server/skills_router.py:62 @ 760eea2"
+  # H2: Who owns memory: agent, human, workspace, task, or tenant?
+  H2:
+    verdict: implicit
+    note: "Conversation owns its state; skills are org-owned via a git repository."
+    evidence: "openhands-agent-server/openhands/agent_server/skills_service.py:97 @ 760eea2"
+  # H3: Can memory be shared between agents? At what granularity?
+  H3:
+    verdict: implicit
+    note: "Sharing happens through org skills repositories, not a memory store."
+    evidence: "openhands-agent-server/openhands/agent_server/skills_router.py:96 @ 760eea2"
+  # H4: Are there permissions on memory?
+  H4:
+    verdict: implicit
+    note: "Skills access is governed by git repository permissions (pre-authenticated URL), not a memory ACL."
+    evidence: "openhands-agent-server/openhands/agent_server/skills_router.py:69 @ 760eea2"
+  # H5: Is provenance tracked — where a memory came from?
+  H5:
+    verdict: implicit
+    note: "Git history provides provenance for skills; no provenance on conversation context."
+    evidence: "openhands-agent-server/openhands/agent_server/skills_service.py:97 @ 760eea2"
+  # H6: Expiry, TTL, or forgetting?
+  H6:
+    verdict: absent
+    note: "No TTL or expiry on any context store."
+    evidence: "openhands-agent-server/openhands/agent_server/skills_router.py @ 760eea2"
+  # H7: Summarisation or compaction. Automatic or explicit?
+  H7:
+    verdict: first_class
+    note: "Condensation with a configurable condenser; CondensationSummaryEvent records that compaction occurred."
+    evidence: "openhands-sdk/openhands/sdk/event/ @ 760eea2"
+  # H8: Retrieval mechanism: vector, keyword, structured, agent-driven?
+  H8:
+    verdict: absent
+    note: "No retrieval mechanism - no vector store, no semantic search over memory."
+    evidence: "openhands-agent-server/openhands/agent_server/ @ 760eea2"
+  # H9: Can an agent mutate its own memory mid-run?
+  H9:
+    verdict: absent
+    note: "No agent-writable long-term memory."
+    evidence: "openhands-agent-server/openhands/agent_server/ @ 760eea2"
+  # H10: Conflict resolution on concurrent writes?
+  H10:
+    verdict: absent
+    note: "No shared mutable memory, so no conflict resolution needed or provided."
+    evidence: "openhands-agent-server/openhands/agent_server/ @ 760eea2"
+  # H11: Is memory in the same store as execution state, or separate?
+  H11:
+    verdict: first_class
+    note: "Conversation state and skills are in entirely separate stores (DB vs git)."
+    evidence: "openhands-agent-server/openhands/agent_server/skills_service.py:97 @ 760eea2"
+
+  # --- I. Tools and capabilities ---
+  # I1: Are tools bound to agents statically, or resolved dynamically?
+  I1:
+    verdict: implicit
+    note: "Tools are bound per conversation via agent settings; MCP servers are configured and testable at runtime."
+    evidence: "openhands-agent-server/openhands/agent_server/mcp_router.py:652 @ 760eea2"
+  # I2: Is there a capability abstraction distinct from tool implementation?
+  I2:
+    verdict: implicit
+    note: "No capability abstraction for AGENT tools, but automation manifests DO have one (requires.features vs reported features)."
+    evidence: "src/manifests/manifest-capabilities.ts:36 @ f48eca6"
+  # I3: Is there a registry of available tools?
+  I3:
+    verdict: first_class
+    note: "tool_router plus MCP server configuration and test endpoint act as a tool registry."
+    evidence: "openhands-agent-server/openhands/agent_server/tool_router.py @ 760eea2"
+  # I4: Tool scoping — can an agent be restricted to a subset?
+  I4:
+    verdict: implicit
+    note: "Tools are scoped per conversation through agent_settings.tools."
+    evidence: "src/types/settings.ts:100 @ f48eca6"
+  # I5: Are tools versioned?
+  I5:
+    verdict: absent
+    note: "No tool versioning."
+    evidence: "openhands-agent-server/openhands/agent_server/tool_router.py @ 760eea2"
+  # I6: How are credentials supplied to a tool?
+  I6:
+    verdict: first_class
+    note: "SecretRegistry resolves credentials lazily and exports them as env vars per command, with output masking."
+    evidence: "openhands-sdk/openhands/sdk/conversation/secret_registry.py:77,143 @ 760eea2"
+  # I7: OAuth or delegated user credentials?
+  I7:
+    verdict: first_class
+    note: "Full MCP OAuth flow: start_mcp_oauth, get_mcp_oauth_status, submit_mcp_oauth_callback. Real delegated-credential support."
+    evidence: "openhands-agent-server/openhands/agent_server/mcp_router.py:699-790 @ 760eea2"
+  # I8: Can policy intercept a tool call before execution?
+  I8:
+    verdict: first_class
+    note: "PreToolUse hooks run before execution and can BLOCK; HookExecutionEvent carries a blocked flag. Hook types: COMMAND (subprocess), PROMPT (LLM completion), AGENT (agent with tools)."
+    evidence: "openhands-sdk/openhands/sdk/hooks/config.py:39 @ 760eea2; openhands-sdk/openhands/sdk/hooks/conversation_hooks.py:92,164"
+  # I9: Approval gates on specific tools?
+  I9:
+    verdict: first_class
+    note: "Per-action confirmation driven by ConfirmationPolicy against ActionEvent.security_risk."
+    evidence: "openhands-sdk/openhands/sdk/security/confirmation_policy.py @ 760eea2"
+  # I10: Do tools execute inside or outside the agent's sandbox?
+  I10:
+    verdict: first_class
+    note: "Tools execute inside the workspace sandbox via execute_command."
+    evidence: "openhands-sdk/openhands/sdk/workspace/base.py:171 @ 760eea2"
+
+  # --- J. Security and identity ---
+  # J1: What identity does an agent authenticate as?
+  J1:
+    verdict: absent
+    note: "Agents have no identity. Authentication is a shared SESSION_API_KEY per agent-server, forwarded into the container as an env var."
+    evidence: "openhands-agent-server/openhands/agent_server/config.py:23-51 @ 760eea2"
+  # J2: Authentication mechanism for agent-to-platform?
+  J2:
+    verdict: first_class
+    note: "Session API key via x-session-api-key header, exchanged for a workspace session cookie."
+    evidence: "openhands-agent-server/openhands/agent_server/auth_router.py:120-146 @ 760eea2"
+  # J3: Authorisation model: RBAC, ABAC, capability tokens, none?
+  J3:
+    verdict: absent
+    note: "No authorisation model - no roles, no resource/action policy. Possession of the session key grants full access."
+    evidence: "openhands-agent-server/openhands/agent_server/auth_router.py @ 760eea2"
+  # J4: Secret storage and injection?
+  J4:
+    verdict: first_class
+    note: "SecretRegistry: lazy resolution, exported-value tracking, output masking per output and per ACP chunk, and rotated secrets still mask previous values."
+    evidence: "openhands-sdk/openhands/sdk/conversation/secret_registry.py:35,143,149,161 @ 760eea2"
+  # J5: Per-agent credentials, or shared platform credentials?
+  J5:
+    verdict: absent
+    note: "No per-agent credentials; provider credentials are per-conversation secrets."
+    evidence: "src/constants/acp-providers.ts:221 @ f48eca6"
+  # J6: Can an agent act as a user? Is that impersonation or delegation?
+  J6:
+    verdict: absent
+    note: "No impersonation or delegation model. A sub-agent inherits the parent's workspace and secrets wholesale."
+    evidence: "openhands-agent-server/openhands/agent_server/sub_agents_router.py @ 760eea2"
+  # J7: Tenant isolation: logical, or enforced at runtime?
+  J7:
+    verdict: absent
+    note: "No tenant isolation in OSS."
+    evidence: "openhands-agent-server/openhands/agent_server/ @ 760eea2"
+  # J8: Network and filesystem isolation?
+  J8:
+    verdict: implicit
+    note: "Container gives filesystem isolation and --network is configurable, but there is no egress policy."
+    evidence: "openhands-workspace/openhands/workspace/docker/workspace.py:119,237 @ 760eea2"
+  # J9: Is there an audit log? Is it tamper-evident?
+  J9:
+    verdict: implicit
+    note: "The event log is a complete action record including hook decisions, but it is not a tamper-evident audit log."
+    evidence: "openhands-sdk/openhands/sdk/conversation/state.py:315 @ 760eea2"
+  # J10: Where are policy decisions enforced — control plane, runtime, or tool gateway?
+  J10:
+    verdict: first_class
+    note: "Three enforcement points: PreToolUse hooks (can block), ConfirmationPolicy (per-action risk), and workspace boundary. Enforced in the runtime, not the API edge."
+    evidence: "openhands-sdk/openhands/sdk/hooks/conversation_hooks.py:164 @ 760eea2"
+
+  # --- K. Sandbox and isolation ---
+  # K1: Is there a workspace or sandbox concept? What is its lifecycle?
+  K1:
+    verdict: first_class
+    note: "BaseWorkspace ABC: a sandboxed environment with context-manager lifecycle (__enter__/__exit__) and working_dir."
+    evidence: "openhands-sdk/openhands/sdk/workspace/base.py:27,57,157 @ 760eea2"
+  # K2: Persistent filesystem across runs?
+  K2:
+    verdict: first_class
+    note: "Persistent filesystem with file_upload/file_download and git_changes/git_diff; local mode can use a repo or a new worktree."
+    evidence: "openhands-sdk/openhands/sdk/workspace/base.py:194-248 @ 760eea2; src/utils/workspace-mode.ts"
+  # K3: Snapshot and restore?
+  K3:
+    verdict: implicit
+    note: "pause/resume suspends and resumes a container, but there is no snapshot/restore of workspace state."
+    evidence: "openhands-sdk/openhands/sdk/workspace/base.py:261 @ 760eea2"
+  # K4: Network egress rules?
+  K4:
+    verdict: implicit
+    note: "Docker --network is configurable and volumes are explicit, but there is no egress rule engine."
+    evidence: "openhands-workspace/openhands/workspace/docker/workspace.py:119 @ 760eea2"
+  # K5: Container, microVM, or none?
+  K5:
+    verdict: first_class
+    note: "Docker and Apptainer (rootless/HPC) containers, plus remote-API and cloud sandboxes."
+    evidence: "openhands-workspace/openhands/workspace/ @ 760eea2"
+  # K6: Resource quotas: CPU, memory, disk, wall clock?
+  K6:
+    verdict: absent
+    note: "Only --ulimit nofile=65536. NO CPU, memory or pid quota. Weakest link for running untrusted agent code."
+    evidence: "openhands-workspace/openhands/workspace/docker/workspace.py:240-258 @ 760eea2"
+  # K7: How are secrets injected without landing in the image or logs?
+  K7:
+    verdict: first_class
+    note: "Secrets resolved and injected per command as env vars, then masked in output. forward_env is explicit and minimal."
+    evidence: "openhands-sdk/openhands/sdk/conversation/secret_registry.py:77 @ 760eea2; openhands-workspace/openhands/workspace/docker/workspace.py:89"
+  # K8: Arbitrary code execution? Browser execution?
+  K8:
+    verdict: first_class
+    note: "Arbitrary command execution via execute_command; VS Code integration via vscode_router."
+    evidence: "openhands-sdk/openhands/sdk/workspace/base.py:171 @ 760eea2"
+  # K9: Is the sandbox pluggable, or a fixed implementation?
+  K9:
+    verdict: first_class
+    note: "Pluggable: five providers behind one ABC (Local, Docker, Apptainer, RemoteAPI, Cloud). Direct precedent for ADR-0009. BUT optional capabilities are signalled by raising NotImplementedError with NO query method - verified: zero capability-query attributes, and LocalWorkspace.pause() silently no-ops."
+    evidence: "openhands-sdk/openhands/sdk/workspace/base.py:261-281 @ 760eea2; verified empirically 2026-08-26, openhands-sdk 1.43.1"
+
+  # --- L. Orchestration and scheduling ---
+  # L1: Does it distinguish agent coordination from workflow orchestration?
+  L1:
+    verdict: implicit
+    note: "No workflow engine; orchestration is conversational, hook-driven and automation-triggered."
+    evidence: "openhands-agent-server/openhands/agent_server/conversation_router.py @ 760eea2"
+  # L2: Topology: DAG, cyclic graph, supervisor, planner, event-driven, queue?
+  L2:
+    verdict: implicit
+    note: "Event-driven with goal loops; no DAG or declarative graph."
+    evidence: "src/types/agent-server/core/events/conversation-state-event.ts:85 @ f48eca6"
+  # L3: Cron or scheduled triggers?
+  L3:
+    verdict: first_class
+    note: "Automations support scheduled triggers ('always-on engineering team')."
+    evidence: "README.md @ f48eca6"
+  # L4: Dynamic task spawning at runtime?
+  L4:
+    verdict: first_class
+    note: "Sub-agents spawned dynamically at runtime."
+    evidence: "openhands-agent-server/openhands/agent_server/sub_agents_router.py:117 @ 760eea2"
+  # L5: Fan-out / fan-in?
+  L5:
+    verdict: absent
+    note: "No fan-out/fan-in primitive."
+    evidence: "openhands-agent-server/openhands/agent_server/sub_agents_router.py @ 760eea2"
+  # L6: Subagents. Are they first-class, or just nested calls?
+  L6:
+    verdict: first_class
+    note: "Sub-agents are first-class with their own router, conversations and severed-then-relinked traces."
+    evidence: "openhands-agent-server/openhands/agent_server/sub_agents_router.py:117 @ 760eea2; openhands-sdk/openhands/sdk/observability/laminar.py:412"
+  # L7: Retry and backoff policy — declarative or hand-rolled?
+  L7:
+    verdict: absent
+    note: "No declarative retry/backoff policy."
+    evidence: "openhands-agent-server/openhands/agent_server/conversation_router.py @ 760eea2"
+  # L8: Compensation or rollback on failure?
+  L8:
+    verdict: absent
+    note: "No compensation or rollback."
+    evidence: "openhands-agent-server/openhands/agent_server/conversation_router.py @ 760eea2"
+  # L9: Does cancellation propagate through the whole tree?
+  L9:
+    verdict: first_class
+    note: "Interrupt cancels the in-flight LLM request immediately; pause drains gracefully. Both emit typed events and are resumable."
+    evidence: "openhands-agent-server/openhands/agent_server/conversation_router.py:250-268 @ 760eea2"
+  # L10: Could this be replaced by Temporal or Restate, or is orchestration inseparable from the agent...
+  L10:
+    verdict: absent
+    note: "No workflow engine to replace; the question does not apply."
+    evidence: "openhands-agent-server/openhands/agent_server/conversation_router.py @ 760eea2"
+
+  # --- M. Observability ---
+  # M1: Which of these are modelled as telemetry objects: trace, run, step, LLM call, tool call, mess...
+  M1:
+    verdict: first_class
+    note: "17 event classes: ActionEvent, ObservationEvent, MessageEvent, ACPToolCallEvent, HookExecutionEvent, PauseEvent, InterruptEvent, CondensationSummaryEvent, TokenEvent, LLMCompletionLogEvent, StreamingDeltaEvent and more."
+    evidence: "openhands-sdk/openhands/sdk/event/ @ 760eea2; verified empirically 2026-08-26, openhands-sdk 1.43.1"
+  # M2: Is telemetry keyed to agent, run, model, task, user, or tenant?
+  M2:
+    verdict: first_class
+    note: "Keyed to conversation_id, event_id (with parent_id), tool_call_id, and AUTOMATION_RUN_ID. Cost keyed to the workspace run."
+    evidence: "openhands-sdk/openhands/sdk/workspace/base.py:87-100 @ 760eea2"
+  # M3: OpenTelemetry, proprietary, or none?
+  M3:
+    verdict: implicit
+    note: "OTel present only INDIRECTLY via Laminar; integration required working around Laminar's own isolated ContextVar diverging from opentelemetry.context."
+    evidence: "openhands-sdk/openhands/sdk/observability/laminar.py:400-430 @ 760eea2"
+  # M4: Is there a documented, stable event schema?
+  M4:
+    verdict: first_class
+    note: "Typed event classes plus an OpenAPI spec, with an oasdiff check flagging breaking REST changes; a field is kept non-nullable specifically to preserve the published contract."
+    evidence: "openhands-agent-server/openhands/agent_server/openapi.py @ 760eea2; openhands-sdk/openhands/sdk/hooks/config.py:47-58"
+  # M5: Cost and token accounting. Per what unit?
+  M5:
+    verdict: first_class
+    note: "Cost accumulated on the WORKSPACE (register_cost/accumulated_cost), reported on close via automation callback with conversation_id and cost. Notable placement: cost belongs to the sandbox run."
+    evidence: "openhands-sdk/openhands/sdk/workspace/base.py:65-100 @ 760eea2"
+  # M6: Latency breakdown by phase?
+  M6:
+    verdict: implicit
+    note: "Spans via Laminar give phase timing; no first-class latency breakdown."
+    evidence: "openhands-sdk/openhands/sdk/observability/laminar.py @ 760eea2"
+  # M7: Error taxonomy?
+  M7:
+    verdict: first_class
+    note: "AgentErrorEvent plus ExecutionStatus error/stuck; STUCK distinguishes non-progress from failure."
+    evidence: "src/types/agent-server/core/base/common.ts:67 @ f48eca6"
+  # M8: Can the event stream reconstruct a run after the fact — replay or audit?
+  M8:
+    verdict: first_class
+    note: "Append-only event tree with incremental replay reconstructs any branch."
+    evidence: "openhands-sdk/openhands/sdk/conversation/state.py:341 @ 760eea2"
+
+  # --- N. Multi-tenancy and enterprise ---
+  # N1: Resource hierarchy: org, workspace, project, environment?
+  N1:
+    verdict: implicit
+    note: "Org-level skills configuration and a cloud orgId on backend selection; no full hierarchy in OSS."
+    evidence: "openhands-agent-server/openhands/agent_server/skills_router.py:62 @ 760eea2"
+  # N2: RBAC model and its granularity?
+  N2:
+    verdict: absent
+    note: "No RBAC."
+    evidence: "openhands-agent-server/openhands/agent_server/auth_router.py @ 760eea2"
+  # N3: Quotas and cost limits. Enforced or advisory?
+  N3:
+    verdict: absent
+    note: "No quotas or cost limits enforced; cost is measured, not capped."
+    evidence: "openhands-sdk/openhands/sdk/workspace/base.py:65 @ 760eea2"
+  # N4: dev / staging / prod separation?
+  N4:
+    verdict: absent
+    note: "No dev/staging/prod separation."
+    evidence: "openhands-agent-server/openhands/agent_server/ @ 760eea2"
+  # N5: Deployment promotion path?
+  N5:
+    verdict: absent
+    note: "No deployment promotion path."
+    evidence: "openhands-agent-server/openhands/agent_server/ @ 760eea2"
+  # N6: Agent catalog scoped to a tenant?
+  N6:
+    verdict: first_class
+    note: "ACP provider registry and manifest registry act as catalogs; org skills are git-scoped."
+    evidence: "src/manifests/manifest-registry.ts @ f48eca6"
+  # N7: Audit retention controls?
+  N7:
+    verdict: absent
+    note: "No audit retention controls."
+    evidence: "openhands-agent-server/openhands/agent_server/ @ 760eea2"
+  # N8: Is multi-tenancy in the OSS core, or reserved for a commercial tier?
+  N8:
+    verdict: implicit
+    note: "Multi-tenancy is minimal in OSS: org skills exist, but organizations belong to the cloud offering."
+    evidence: "src/hooks/query/use-cloud-organizations.ts @ f48eca6"
+
+  # --- O. API and protocol surface ---
+  # O1: List the actual primary endpoints or SDK entry points. Verbatim.
+  O1:
+    verdict: first_class
+    note: "POST /conversations, /{id}/pause, /{id}/interrupt, /{id}/run, /{id}/goal start|stop|resume, /{id}/secrets, /{id}/confirmation_policy, DELETE /{id}; plus event, file, tool, mcp, hooks, sub_agents, settings, profiles, skills, llm, vscode, auth routers."
+    evidence: "openhands-agent-server/openhands/agent_server/conversation_router.py:89-429 @ 760eea2"
+  # O2: Is the API resource-oriented or RPC-flavoured?
+  O2:
+    verdict: first_class
+    note: "Resource-oriented REST with an OpenAPI spec; action sub-resources for pause/interrupt/run."
+    evidence: "openhands-agent-server/openhands/agent_server/openapi.py @ 760eea2"
+  # O3: Streaming: SSE, WebSocket, long-poll, gRPC stream?
+  O3:
+    verdict: first_class
+    note: "Websocket streaming (sockets.py) with StreamingDeltaEvent for token-level output."
+    evidence: "openhands-agent-server/openhands/agent_server/sockets.py @ 760eea2"
+  # O4: Webhooks or outbound callbacks?
+  O4:
+    verdict: first_class
+    note: "Automation completion callbacks POST to AUTOMATION_CALLBACK_URL with bearer auth and AUTOMATION_RUN_ID."
+    evidence: "openhands-sdk/openhands/sdk/workspace/base.py:87-100 @ 760eea2"
+  # O5: Which standards are implemented: MCP, A2A, ACP, OTel, OpenAI-compatible?
+  O5:
+    verdict: first_class
+    note: "ACP (stdio, agent adaptation) and MCP (with OAuth) both implemented. OTel indirectly via Laminar. No A2A."
+    evidence: "src/constants/acp-providers.ts @ f48eca6; openhands-agent-server/openhands/agent_server/mcp_router.py @ 760eea2"
+  # O6: Is the API versioned? Stability commitment?
+  O6:
+    verdict: first_class
+    note: "OpenAPI with an oasdiff breaking-change check in CI; contract stability is an explicit practice."
+    evidence: "openhands-sdk/openhands/sdk/hooks/config.py:47-58 @ 760eea2"
+  # O7: Is there a separate northbound (client) and southbound (runtime) API?
+  O7:
+    verdict: first_class
+    note: "Northbound REST/websocket for clients; southbound ACP stdio to agents and BaseWorkspace to sandboxes."
+    evidence: "openhands-sdk/openhands/sdk/workspace/base.py:27 @ 760eea2"
+
+  # --- P. Storage ---
+  # P1: What datastores are required to run it?
+  P1:
+    verdict: first_class
+    note: "Agent-server persists conversations and events via SQLAlchemy; workspace filesystem is provider-owned; skills come from git."
+    evidence: "openhands-agent-server/openhands/agent_server/models.py @ 760eea2"
+  # P2: What is treated as authoritative, strongly consistent state?
+  P2:
+    verdict: first_class
+    note: "The append-only event tree is authoritative; ConversationState is derived and cached."
+    evidence: "openhands-sdk/openhands/sdk/conversation/state.py:341 @ 760eea2"
+  # P3: What is event-stream or append-only?
+  P3:
+    verdict: first_class
+    note: "Events are append-only with parent_id chains - a genuine event log."
+    evidence: "openhands-sdk/openhands/sdk/conversation/state.py:315 @ 760eea2"
+  # P4: Where do large artifacts go?
+  P4:
+    verdict: implicit
+    note: "Large outputs live in the workspace filesystem; no blob store abstraction."
+    evidence: "openhands-agent-server/openhands/agent_server/file_router.py @ 760eea2"
+  # P5: Is there a vector store? Required or optional?
+  P5:
+    verdict: absent
+    note: "No vector store."
+    evidence: "openhands-agent-server/openhands/agent_server/ @ 760eea2"
+  # P6: Is storage pluggable, or hardcoded?
+  P6:
+    verdict: first_class
+    note: "Workspace is fully pluggable via BaseWorkspace; conversation storage is service-mediated."
+    evidence: "openhands-sdk/openhands/sdk/workspace/base.py:27 @ 760eea2"
+
+  # --- Q. Licensing and commercial ---
+  # Q1: Exact license, including any per-directory variation.
+  Q1:
+    verdict: first_class
+    note: "MIT for both OpenHands/OpenHands (Agent Canvas) and OpenHands/software-agent-sdk."
+    evidence: "LICENSE @ f48eca6 and @ 760eea2"
+  # Q2: Are there enterprise-only components missing from the OSS repo?
+  Q2:
+    verdict: first_class
+    note: "OpenHands Cloud and OpenHands Enterprise are commercial; CloudWorkspace ships in the OSS tree as a client. Quotas and organizations are cloud-side."
+    evidence: "openhands-workspace/openhands/workspace/cloud/workspace.py @ 760eea2"
+  # Q3: SaaS or hosted-service restrictions?
+  Q3:
+    verdict: absent
+    note: "No SaaS restriction. MIT imposes none."
+    evidence: "LICENSE @ f48eca6"
+  # Q4: Trademark constraints on derived works?
+  Q4:
+    verdict: implicit
+    note: "OpenHands is a mark of All Hands AI. MIT grants no trademark rights; avoid implying endorsement in derived works."
+    evidence: "LICENSE @ f48eca6; README.md @ f48eca6"
+  # Q5: Network copyleft (AGPL, SSPL) implications for a hosted product?
+  Q5:
+    verdict: absent
+    note: "No network copyleft. MIT."
+    evidence: "LICENSE @ f48eca6"
+  # Q6: Verdict: `USE` / `INTEGRATE` / `REFERENCE_ONLY` / `AVOID`, with reasoning.
+  Q6:
+    verdict: first_class
+    note: "INTEGRATE - MIT. Workspace abstraction and ACP adapter approach are patterns to borrow; the agent is one harness among several."
+    evidence: "LICENSE @ f48eca6"
+
+  # --- R. Developer experience ---
+  # R1: Time from clone to a running agent. Actual elapsed minutes.
+  R1:
+    verdict: first_class
+    note: "pip install openhands-sdk worked first try; SDK importable and policy objects exercisable in minutes without any LLM key."
+    evidence: "verified empirically 2026-08-26, openhands-sdk 1.43.1"
+  # R2: How many concepts before "hello world"?
+  R2:
+    verdict: implicit
+    note: "Canvas hides the concept count behind a UI, but the SDK requires Conversation, Workspace, Agent, ConfirmationPolicy - four or five before useful work."
+    evidence: "verified empirically 2026-08-26, openhands-sdk 1.43.1"
+  # R3: Is there a local dev loop? Hot reload?
+  R3:
+    verdict: first_class
+    note: "Canvas has an electron dev app, vite dev server, playwright configs including a mock-LLM harness for offline testing."
+    evidence: "playwright.mock-llm.config.ts @ f48eca6"
+  # R4: How do you debug a stuck run?
+  R4:
+    verdict: first_class
+    note: "Event stream plus ExecutionStatus including STUCK, and file/git inspection of the workspace. Strong debugging surface."
+    evidence: "openhands-agent-server/openhands/agent_server/event_router.py @ 760eea2"
+  # R5: Can an agent be unit tested? Is there a test harness?
+  R5:
+    verdict: first_class
+    note: "Mock-LLM playwright configs and a stryker mutation-testing config; policy objects are unit-testable in isolation (verified)."
+    evidence: "stryker.config.mjs @ f48eca6; verified empirically 2026-08-26, openhands-sdk 1.43.1"
+  # R6: Deployment story?
+  R6:
+    verdict: first_class
+    note: "npm package, Docker image, Electron desktop app, and a Helm chart for Kubernetes."
+    evidence: "helm/agent-canvas @ f48eca6"
+  # R7: CLI ergonomics — try the equivalent of `init`, `agent add`, `run`.
+  R7:
+    verdict: first_class
+    note: "Canvas IS the 'agent add' experience: add a backend, pick an ACP provider from the registry, supply credentials in the Secrets panel."
+    evidence: "src/components/features/backends/add-backend-modal.tsx @ f48eca6"
+
+  # --- S. Hard scenarios ---
+  # S1: Delegated authority
+  S1:
+    verdict: undefined
+    note: "A sub-agent inherits the parent's workspace and secrets wholesale. No delegation token, no permission intersection, no per-agent identity. Second project in a row where S1 cannot be posed."
+    evidence: "openhands-agent-server/openhands/agent_server/sub_agents_router.py @ 760eea2"
+  # S2: Torn side effect
+  S2:
+    verdict: undefined
+    note: "The event log records the action, but there is no idempotency key on tool calls and no documented replay contract for a conversation interrupted mid-action."
+    evidence: "openhands-sdk/openhands/sdk/conversation/state.py @ 760eea2"
+  # S3: Upgrade mid-flight
+  S3:
+    verdict: undefined
+    note: "Conversation state stores agent config but no version pin and no compatibility check on resume. Same hazard as LangGraph."
+    evidence: "openhands-sdk/openhands/sdk/conversation/state.py @ 760eea2"
+  # S4: Concurrent memory write
+  S4:
+    verdict: undefined
+    note: "No shared mutable memory store, so the scenario does not arise."
+    evidence: "openhands-agent-server/openhands/agent_server/ @ 760eea2"
+  # S5: Cancellation tree
+  S5:
+    verdict: first_class_answer
+    note: "BEST IN STUDY: /pause waits for the current LLM call to finish; /interrupt cancels the in-flight request so the effect is instant. Both transition to resumable 'paused' and emit typed PauseEvent/InterruptEvent."
+    evidence: "openhands-agent-server/openhands/agent_server/conversation_router.py:236-268 @ 760eea2"
+  # S6: Silent context loss
+  S6:
+    verdict: undefined
+    note: "Condensation compresses history and CondensationSummaryEvent records that it happened, but nothing detects that a specific constraint was lost."
+    evidence: "openhands-sdk/openhands/sdk/event/ @ 760eea2"
+  # S7: Poison message
+  S7:
+    verdict: undefined
+    note: "No queue. Hook failures are logged and skipped; no dead-letter path."
+    evidence: "openhands-sdk/openhands/sdk/hooks/conversation_hooks.py @ 760eea2"
+  # S8: Tenant leak
+  S8:
+    verdict: undefined
+    note: "No tenant boundary in OSS."
+    evidence: "openhands-agent-server/openhands/agent_server/ @ 760eea2"
+  # S9: Runaway spend
+  S9:
+    verdict: inferable
+    note: "Partial: goal loops carry a 'capped' status and cost accumulates per workspace, but there is no hard budget enforcement and no CPU/memory quota on the container."
+    evidence: "src/types/agent-server/core/events/conversation-state-event.ts:85 @ f48eca6; openhands-workspace/openhands/workspace/docker/workspace.py:240"
+  # S10: Zombie sandbox
+  S10:
+    verdict: inferable
+    note: "Containers run with --rm and Canvas polls backend health, so orphans are detectable. No documented reaping of a workspace whose control plane vanished, and no fencing of its late output."
+    evidence: "openhands-workspace/openhands/workspace/docker/workspace.py:247 @ 760eea2; src/hooks/query/use-backends-health.ts:188 @ f48eca6"
+
+object_model: |
+  Backend                      (id, name, host, apiKey, kind: local|cloud)
+   `-- Conversation            (UUID; the unit of work)
+        |-- Event              (append-only TREE: parent_id + movable HEAD)
+        |    |-- ActionEvent          (carries security_risk)
+        |    |-- ObservationEvent
+        |    |-- MessageEvent
+        |    |-- ACPToolCallEvent
+        |    |-- HookExecutionEvent   (carries blocked flag)
+        |    |-- PauseEvent / InterruptEvent
+        |    |-- CondensationSummaryEvent
+        |    `-- ConversationStateUpdateEvent
+        |-- ConversationState  (execution_status, stats, secret_registry,
+        |                       confirmation_policy, agent, leaf_event_id)
+        |-- Workspace          (Local | Docker | Apptainer | RemoteAPI | Cloud)
+        |-- SubAgent           (delegation via nested conversation)
+        `-- Secrets            (SecretRegistry, masked in output)
+
+  AgentProfile / Manifest      (automations: requires.features, triggers)
+  MCPServer                    (with OAuth flow)
+  Hook                         (PreToolUse, PostToolUse, SessionStart/End, Stop)
+
+strongest_ideas:
+  - "AgentKind = 'openhands' | 'acp': the project's own agent and foreign agents are peers behind one enum. ADR-0004's thesis in production, from a team that could have privileged its own harness."
+  - "Pause vs interrupt as distinct durable operations: /pause waits for the current LLM call to finish, /interrupt cancels it immediately. Both resumable."
+  - "ConfirmRisky(confirm_unknown=True) with a validator forbidding threshold=UNKNOWN: fail-safe by default and impossible to misconfigure."
+  - "Manifest capability assessment where 'unknown' is a distinct outcome from 'no' - and the assessment returns WHICH requirements were unmet so a refusal can explain itself."
+  - "STUCK execution status: a state for 'running but not progressing'. Nearly unique in this study."
+  - "SecretRegistry with output masking per output and per ACP chunk, including masking rotated secrets' previous values."
+  - "Hooks that can BLOCK actions, implementable as COMMAND, PROMPT (LLM) or AGENT."
+  - "Event log as a tree with a movable HEAD, making fork and history navigation first-class."
+  - "Single storage chokepoint for event append, with the invariant documented where it is enforced."
+  - "Apptainer support: evidence the sandbox abstraction is load-bearing rather than decorative."
+  - "oasdiff REST contract checking, with code comments explaining why a field shape is preserved."
+
+weakest_choices:
+  - "Optional workspace capabilities signalled by raising NotImplementedError with NO query method. Verified: zero capability-query attributes, and LocalWorkspace.pause() silently no-ops - a false success is worse than a refusal."
+  - "Thin container isolation: only --ulimit nofile, no CPU/memory/pid quota, no egress policy. Weakest link for a product whose selling point is running untrusted agent code."
+  - "Security boundary depends on an LLM's risk prediction, so the enforcement point has a probabilistic input."
+  - "Shared SESSION_API_KEY rather than per-agent identity, so S1 cannot be answered."
+  - "No durability-timing contract (no sync/async/exit equivalent) and no conformance suite for storage backends."
+  - "No definition version pinning on conversations - ADR-0011's hazard applies here too."
+  - "Weak memory model: condensation only, no long-term or shared memory, and no detection of constraints lost to compaction."
+  - "Two object models across two repos with no single published domain model."
+
+reusable_components:
+  - component: "AgentKind peer-adapter pattern"
+    decision: REUSE
+    note: "Own harness as one adapter among many; validates ADR-0004."
+  - component: "ACP as adapter protocol"
+    decision: ADOPT_AS_STANDARD
+    note: "Working stdio protocol with real Claude Code / Codex / Gemini adapters."
+  - component: "pause vs interrupt semantics"
+    decision: ADOPT_AS_STANDARD
+    note: "Two grades of stop, both durable and resumable."
+  - component: "ConfirmRisky + confirm_unknown fail-safe"
+    decision: REUSE
+    note: "Approval policy that cannot be configured incoherently."
+  - component: "Manifest capability assessment (unknown != no)"
+    decision: REUSE
+    note: "Combine with LangGraph's declared-capability detection."
+  - component: "STUCK execution status"
+    decision: ADOPT_AS_STANDARD
+    note: "Add to our Run state machine."
+  - component: "SecretRegistry output masking"
+    decision: REUSE
+    note: "Masks rotated secrets' previous values too."
+  - component: "Blocking PreToolUse hooks"
+    decision: REUSE
+    note: "Interception point for the capability gateway."
+  - component: "BaseWorkspace provider set"
+    decision: INTEGRATE
+    note: "Provider list and method surface inform our SandboxProvider."
+  - component: "Workspace capability signalling via NotImplementedError"
+    decision: BUILD
+    note: "Reject their approach; build declared capabilities instead."
+  - component: "Container isolation config"
+    decision: BUILD
+    note: "Insufficient; specify CPU/memory/pid quotas and egress policy ourselves."
+
+lessons:
+  - "Second successful system with no durable agent identity: an agent is a KIND plus a launch command. Two of two projects deliver value without it, so our justification must be delegation, policy and audit. S1 undefined in both is precisely that evidence. (challenges ADR-0001)"
+  - "WAITING_FOR_CONFIRMATION and STUCK show the value of a rich execution state machine. The pause/interrupt split refines our CANCELLING amendment into TWO operations, not one. (confirms ADR-0002)"
+  - "Delegation as nested conversation gives no delivery or ordering guarantees between agents. (confirms ADR-0003)"
+  - "Strongest ADR-0004 evidence yet, plus a concrete failure mode: a plausible-looking ACP command that is not a real ACP server silently DEADLOCKS the handshake. Adapters need validation, not just configuration. (confirms ADR-0004)"
+  - "MCP integrated as protocol with OAuth while policy lives in hooks, confirmation policy and risk levels - exactly the split ADR-0005 proposes. (confirms ADR-0005)"
+  - "No principal model; sub-agents inherit parent credentials wholesale. (confirms ADR-0007)"
+  - "Condensation-only context management shows org knowledge may be better served by versioned git-backed skills than by a memory store. (amends ADR-0008)"
+  - "BaseWorkspace with five providers including Apptainer is direct precedent for SandboxProvider. Also proves the negative: optional capabilities must be DECLARED, and a no-op must never masquerade as success. (confirms ADR-0009)"
+  - "OTel reachable only through a vendor SDK, and integrating it required working around non-standard context propagation. The delegate.parent_trace_id re-linking pattern is needed for subagent traces. (amends ADR-0010)"
+  - "No version pinning on conversations either - two of two projects share the hazard. (confirms ADR-0011)"
+  - "NEW: capability negotiation must be declarative and queryable, and an unsupported optional operation must fail explicitly rather than no-op. Proposing ADR-0012."
+
+adr_impact:
+  - adr: ADR-0001
+    effect: challenges
+    note: "Second system succeeding with no durable agent identity. Identity lives on the Conversation; an agent is a kind plus a launch command."
+  - adr: ADR-0002
+    effect: confirms
+    note: "STUCK and WAITING_FOR_CONFIRMATION enrich the state machine. pause/interrupt = two grades of stop, both durable."
+  - adr: ADR-0003
+    effect: confirms
+    note: "Sub-agent delegation has no mailbox, no ordering, no delivery guarantee."
+  - adr: ADR-0004
+    effect: confirms
+    note: "AgentKind peer model is the strongest supporting evidence so far. Plus: adapters need validation - a wrong ACP command deadlocks silently."
+  - adr: ADR-0005
+    effect: confirms
+    note: "MCP as protocol with OAuth; policy enforced separately via hooks and confirmation policy."
+  - adr: ADR-0006
+    effect: neutral
+    note: "No A2A; ACP occupies the adapter role."
+  - adr: ADR-0007
+    effect: confirms
+    note: "Shared session key, no principal model, sub-agents inherit credentials wholesale."
+  - adr: ADR-0008
+    effect: amends
+    note: "Git-backed org skills may serve organizational knowledge better than a memory store. Condensation-only leaves agents unable to accumulate knowledge."
+  - adr: ADR-0009
+    effect: confirms
+    note: "Five providers behind one ABC is direct precedent. Negative lesson: NotImplementedError signalling plus a silent local no-op is the wrong contract."
+  - adr: ADR-0010
+    effect: amends
+    note: "OTel only via vendor SDK, requiring workarounds for non-standard context propagation. Subagent traces need explicit parent re-linking."
+  - adr: ADR-0011
+    effect: confirms
+    note: "No version pin on conversations; same silent-resume hazard."

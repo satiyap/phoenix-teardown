@@ -1,0 +1,140 @@
+# ADR-0012 — Adapter and provider capabilities are declared, not discovered
+
+- **Status:** Provisional (raised by evidence, Phase 2)
+- **Date:** 2026-08-26
+- **Supersedes:** —
+- **Superseded by:** —
+
+## Context
+
+Not in the original strawman. Raised because the first two deep teardowns solved
+the *same* problem in two different ways, and the comparison specifies the
+requirement precisely.
+
+Both LangGraph and OpenHands have a pluggable backend interface where some
+operations are optional. Both had to answer: how does a caller know whether this
+implementation supports `pause`, or `prune`, or snapshotting?
+
+**LangGraph declares and detects.** `libs/checkpoint-conformance @ 3803173`
+defines a `Capability` enum split into `BASE_CAPABILITIES` (mandatory) and
+`EXTENDED_CAPABILITIES` (optional), detects which are implemented by checking
+whether a method is overridden from the base class, and runs only the applicable
+conformance tests. A backend can be partially implemented and still be validated
+against what it claims.
+
+**OpenHands raises and hopes.** `openhands-sdk/openhands/sdk/workspace/base.py:261
+@ 760eea2` implements optional `pause()` / `resume()` by raising
+`NotImplementedError` from the base class. Verified empirically with
+`openhands-sdk` 1.43.1:
+
+```text
+LocalWorkspace methods: ['pause', 'resume', 'execute_command']
+capability-query attributes: NONE
+local pause(): no-op, succeeded
+```
+
+There is no way to ask. Worse, `LocalWorkspace.pause()` is documented as "for
+local workspaces, this is a no-op" and returns successfully — so a caller pausing
+a workspace to conserve resources receives success while nothing was paused.
+Three of five providers actually implement it.
+
+Separately, OpenHands' *automation manifest* layer gets this right, and states
+the principle better than we did:
+
+> "'unknown' is a real outcome, not an error: a deployment that cannot be asked
+> must not be treated as one that answered no."
+> — `src/manifests/manifest-capabilities.ts:14 @ f48eca6`
+
+That is the same `absent` vs `unknown` distinction this teardown's methodology
+insists on, arrived at independently in a different domain. Its assessment also
+returns *which* requirements were unmet, so a refusal can explain itself.
+
+This matters for us more than for either of them. ADR-0004 commits us to adapting
+harnesses with genuinely different capabilities — Claude Code can checkpoint, a
+raw HTTP A2A endpoint cannot — and ADR-0009 commits us to sandbox providers where
+snapshot support varies. If capability mismatches surface as exceptions at the
+moment of use, or worse as silent no-ops, the platform cannot schedule
+intelligently or explain a refusal.
+
+## Decision
+
+Every adapter and provider **declares** its capabilities as data, queryable
+before invocation. Three rules:
+
+1. **Declared, not inferred.** A capability set is part of the registration
+   contract, not something derived by introspection or discovered by calling.
+2. **Three-valued, not boolean.** `supported` / `unsupported` /
+   `unknown` are distinct. An implementation that cannot be asked must never be
+   recorded as having answered no.
+3. **Explicit failure over silent success.** Invoking an undeclared optional
+   operation raises a typed error. A no-op that returns success is forbidden,
+   because it converts a capability gap into a correctness bug.
+
+A refusal must name the unmet capabilities, not merely report that some were
+unmet.
+
+Capability declarations are verified by a conformance suite, following LangGraph's
+pattern: mandatory core, optional extensions, and spec tests gated on what the
+implementation claims.
+
+## Rationale
+
+Declaration is what makes the control plane able to reason. Scheduling a run that
+requires checkpoint/resume onto an adapter that cannot checkpoint should be
+impossible at admission time, not a runtime surprise. That is only achievable if
+capabilities are data before they are behaviour.
+
+The three-valued rule follows from the two projects' own evidence: OpenHands
+articulated it clearly in one subsystem (manifests) and violated it in another
+(workspaces). Getting it right in one place and wrong in another within the same
+codebase suggests the failure is easy and needs to be a stated rule.
+
+The no-silent-no-op rule is the sharpest lesson available. A `pause()` that does
+nothing and reports success is worse than one that refuses, because the caller
+proceeds on a false belief. Any capability we cannot honour must be visible.
+
+## Implications
+
+- Adapter and provider registration includes a capability manifest.
+- Needs a capability vocabulary spanning both harness adapters and sandbox
+  providers, with distinct namespaces.
+- Admission control consults declared capabilities before dispatch, so a Task can
+  be rejected or routed based on requirements.
+- Needs typed `UnsupportedCapability` errors carrying the unmet set.
+- Needs a conformance test suite per interface, and a way for third-party
+  implementations to run it.
+- A capability declaration that lies is a conformance bug; the suite is how that
+  gets caught.
+- Interacts with ADR-0011: "can report a definition version" is itself a
+  capability, and adapters that cannot must be admitted only for best-effort
+  resume.
+
+## Falsification
+
+If the set of adapters we actually support converges on a uniform capability set,
+declaration is ceremony over a constant and a simpler mandatory interface wins.
+
+Also falsifiable if declaration proves unmaintainable — if declarations routinely
+drift from behaviour despite conformance tests, runtime detection (LangGraph's
+override check) may be more honest than a hand-maintained manifest, at the cost
+of not being knowable before load.
+
+## Deciding probes
+
+`E1`, `E8`, `E9`, `K9`, `D7`, `C12`
+
+## Evidence log
+
+| Project | Effect | Evidence | Note |
+|---|---|---|---|
+| LangGraph | raised | `libs/checkpoint-conformance/.../capabilities.py @ 3803173` | BASE vs EXTENDED, runtime detection by method override, spec tests gated on detected set. The good pattern. |
+| OpenHands | raised | `openhands-sdk/.../workspace/base.py:261 @ 760eea2`; verified 2026-08-26 | `NotImplementedError` signalling, no query method, and `LocalWorkspace.pause()` silently no-ops. The anti-pattern. |
+| OpenHands | confirms | `src/manifests/manifest-capabilities.ts:14,36 @ f48eca6` | Manifest layer states the three-valued rule explicitly and returns which requirements were unmet. |
+| Letta | confirms | `src/sandbox/availability.ts:7-45 @ 852ca24`; `src/memory-confinement.ts:14-21 @ 852ca24` | **Reference implementation.** `SandboxAvailability { backend: SandboxBackend|null, bwrapPath?, reason }` detected by a REAL user-namespace mount probe, cached per process, with a human-readable reason for the null case. Dependent code fails closed: 'Throws when no supported kernel sandbox is available rather than silently running with a weaker policy.' Three projects, three designs; this is the one to copy. |
+
+## Open questions
+
+- Should capability declarations be versioned independently of the adapter, so a
+  capability can be added without a new adapter version?
+- Is one vocabulary right for both harness adapters and sandbox providers, or two
+  with a shared shape?

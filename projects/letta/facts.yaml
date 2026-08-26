@@ -1,0 +1,1076 @@
+# Machine-readable extraction. Schema: schema/facts.schema.yaml
+# Validate:  ./.venv/bin/python tools/validate_facts.py
+#
+# verdict:   first_class | implicit | absent | unknown
+# scenarios: first_class_answer | inferable | undefined | unknown
+# evidence:  'path/file.py:120 @ sha'  or  'URL (read YYYY-MM-DD)'
+
+schema_version: 1
+
+project:
+  slug: letta
+  name: Letta
+  depth: deep
+  evidence_class: A
+  read_on: 2026-08-26
+  repo: "https://github.com/letta-ai/letta-code"
+  commit: 852ca244b00253e7871e1e878bb8272d4b4a696a
+  docs: "https://docs.letta.com"
+  version: "@letta-ai/letta-code 0.31.0"
+  license: Apache-2.0
+  license_verdict: REFERENCE_ONLY
+  runtime_class: durable_actor
+  one_line: Stateful agents with long-lived memory and identity; harness, App Server and channels in TypeScript.
+  thesis: "The agent is the durable unit and its memory is a version-controlled filesystem it edits with tools. Agent identity is a security boundary enforced by the kernel, not by convention: AGENT_ID decides which memory tree a process may touch."
+
+probes:
+
+  # --- A. Core abstraction and object model ---
+  # A1: What does this system think an agent *is*? State it in one sentence, in their vocabulary.
+  A1:
+    verdict: first_class
+    note: "A durable, addressable entity that owns a version-controlled memory filesystem. Identity (AGENT_ID) is a security boundary, not a label."
+    evidence: "src/permissions/memory-paths.ts:115 @ 852ca24"
+  # A2: What is the root resource — the thing everything else hangs off?
+  A2:
+    verdict: first_class
+    note: "Agent is genuinely the root: listable, searchable by name/tag, shareable, owning memory, blocks, conversations, subagents and cron tasks."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # A3: Is `Agent` persistent or ephemeral? Can it exist while not executing?
+  A3:
+    verdict: first_class
+    note: "Persistent and exists while not executing. `letta agents list` enumerates agents independent of any running process."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # A4: Is `Task` a separate resource from `Run`? If not, which concept is missing and what fills the...
+  A4:
+    verdict: absent
+    note: "No Task/Run split. Conversation plus turn queue is the unit; cron tasks schedule prompts into conversations."
+    evidence: "src/cron/cron-file.ts:53 @ 852ca24"
+  # A5: What is a `Session` attached to: user, agent, task, or execution?
+  A5:
+    verdict: first_class
+    note: "Conversation is attached to an Agent; cron targets 'default' | 'new' | a specific conversation id."
+    evidence: "src/cron/cron-file.ts:60-64 @ 852ca24"
+  # A6: Are messages first-class durable resources, or transient function arguments?
+  A6:
+    verdict: implicit
+    note: "Channel messages are durable in the channel platform and there is a `letta messages` subcommand, but messages are not a first-class internal resource with delivery guarantees."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # A7: Are artifacts (files, outputs, deliverables) first-class?
+  A7:
+    verdict: implicit
+    note: "Memory files are durable artifacts in git; no separate Artifact resource."
+    evidence: "src/tools/descriptions/Memory.md @ 852ca24"
+  # A8: Can multiple agents participate in one task? How is that represented?
+  A8:
+    verdict: implicit
+    note: "Subagents participate via spawned processes with {self,parent} memory scope; not co-participants in one task resource."
+    evidence: "src/permissions/cross-agent-guard.ts:24-26 @ 852ca24"
+  # A9: Draw the object model as a tree. Only nodes that exist in their code or API.
+  A9:
+    verdict: first_class
+    note: "Agent > {Memory(git), Blocks, Tags, Conversation[] > PendingControlRequest, Subagent[], CronTask[], Skills/Mods, Permissions}. Channels and Environments are separate. See teardown section 3."
+    evidence: "src/ @ 852ca24"
+
+  # --- B. Runtime model ---
+  # B1: Does the platform launch agents, host them, or attach to external ones?
+  B1:
+    verdict: first_class
+    note: "Launches agent and subagent processes, propagating AGENT_ID and LETTA_PARENT_AGENT_ID via environment."
+    evidence: "src/agent/subagents/subagent-launcher.ts @ 852ca24"
+  # B2: Execution substrate: process, container, microVM, serverless, in-process library, remote HTTP?
+  B2:
+    verdict: first_class
+    note: "Local process wrapped in a kernel filesystem sandbox (bwrap on Linux, Seatbelt on macOS), or a remote environment."
+    evidence: "src/sandbox/availability.ts @ 852ca24"
+  # B3: Who owns the event loop — platform or agent?
+  B3:
+    verdict: first_class
+    note: "The harness owns the loop: turn queue runtime plus a websocket listener command surface."
+    evidence: "src/queue/turn-queue-runtime.ts @ 852ca24"
+  # B4: Who decides when an agent wakes?
+  B4:
+    verdict: first_class
+    note: "Cron scheduler wakes agents on schedule; channels wake them on message; reminders engine also triggers."
+    evidence: "src/cron/cron-file.ts @ 852ca24"
+  # B5: Can an agent run indefinitely? What is the actual ceiling?
+  B5:
+    verdict: first_class
+    note: "Long-running via `letta server` App Server plus channel listeners; cron tasks have no auto-expiry (expires_at null for all tasks now)."
+    evidence: "src/cron/cron-file.ts:80 @ 852ca24"
+  # B6: Are there background or unattended agents?
+  B6:
+    verdict: first_class
+    note: "Unattended memory subagents run confined by default; headless mode and cron provide background execution."
+    evidence: "src/memory-confinement.ts:14 @ 852ca24"
+  # B7: Is execution synchronous or asynchronous from the caller's view?
+  B7:
+    verdict: first_class
+    note: "Both: interactive TUI is synchronous, headless -p and cron are asynchronous."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # B8: Can in-flight work migrate between workers?
+  B8:
+    verdict: first_class
+    note: "`letta teleport` moves a live conversation between environments - unique in this study."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # B9: Can an agent survive a machine restart? Automatically, or with operator action?
+  B9:
+    verdict: first_class
+    note: "Agent identity, memory (git) and pending approvals all survive restart; dedicated recovery tests exist for approvals and interrupts."
+    evidence: "src/headless-approval-recovery.test.ts, src/headless-interrupt-recovery.test.ts @ 852ca24"
+  # B10: Classify: worker/queue, durable actor, attached harness, or in-process library.
+  B10:
+    verdict: first_class
+    note: "durable_actor: agent identity persists independently of execution and acts as a security boundary."
+    evidence: "src/permissions/memory-paths.ts:115 @ 852ca24"
+
+  # --- C. Durability and failure semantics ---
+  # C1: What state is durable, and what is lost on crash?
+  C1:
+    verdict: first_class
+    note: "Durable: memory (git repo per agent), pending control requests (JSON on disk), cron tasks (file with lease), agent config and blocks."
+    evidence: "src/channels/pending-control-requests.ts @ 852ca24"
+  # C2: *When* is state persisted — every step, every tool call, on checkpoint, never?
+  C2:
+    verdict: implicit
+    note: "Memory commits per tool call and pushes after the turn. No declared persistence-timing contract for conversation state (no sync/async/exit equivalent)."
+    evidence: "src/tools/descriptions/Memory.md @ 852ca24"
+  # C3: Checkpointing or event sourcing? Can state be rebuilt from a log?
+  C3:
+    verdict: first_class
+    note: "Git commit history IS the checkpoint chain for memory: diff, backup, restore, export and pull are first-class commands."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # C4: Retry semantics, and at what granularity: run, step, tool call?
+  C4:
+    verdict: implicit
+    note: "Cron run outcomes include failed/missed/skipped with named reasons, but no declarative retry/backoff policy."
+    evidence: "src/cron/cron-file.ts:33-43 @ 852ca24"
+  # C5: At-least-once or exactly-once? What do the docs claim versus what the code does?
+  C5:
+    verdict: unknown
+    note: "No documented delivery semantics for tool-call replay after crash."
+    evidence: "src/queue/turn-queue-runtime.ts @ 852ca24"
+  # C6: Is there an idempotency model for tool side effects?
+  C6:
+    verdict: absent
+    note: "No idempotency key on tool calls. Git makes memory writes idempotent in effect, but not tool side effects."
+    evidence: "src/tools/impl/memory.ts @ 852ca24"
+  # C7: Process crash recovery: what resumes, and from where?
+  C7:
+    verdict: first_class
+    note: "Dedicated recovery paths and tests: headless-approval-recovery, headless-bootstrap-pending-approval, headless-interrupt-recovery, headless-interrupt-latch, headless-backend-lifecycle."
+    evidence: "src/headless-*.test.ts @ 852ca24"
+  # C8: Node loss: is work re-dispatched, and how is it detected?
+  C8:
+    verdict: first_class
+    note: "SchedulerOwner uses pid + token + process_start_ticks + boot_id to detect a stale owner across PID reuse and host reboot. Best liveness detection in the study."
+    evidence: "src/cron/cron-file.ts:45-52 @ 852ca24"
+  # C9: Context-window overflow: truncation, summarisation, or failure?
+  C9:
+    verdict: first_class
+    note: "Compaction with local/API parity tests plus explicit context-pressure handling; subagents have a context budget."
+    evidence: "src/backend/local-compaction-parity.test.ts, src/agent/subagents/context-budget.ts @ 852ca24"
+  # C10: Timers, scheduled execution, long sleeps — durable across restart?
+  C10:
+    verdict: first_class
+    note: "Cron with IANA timezones, recurring and one-off tasks, lease-owned scheduler, and a run log. Reminders engine as well."
+    evidence: "src/cron/cron-file.ts:70-76 @ 852ca24"
+  # C11: Human-in-the-loop pause and resume: durable, or in-memory only?
+  C11:
+    verdict: first_class
+    note: "PendingControlRequest events persist to disk so an approval survives restart; bootstrap path explicitly handles a pending approval blocking new messages."
+    evidence: "src/channels/pending-control-requests.ts @ 852ca24; src/headless-bootstrap-pending-approval.test.ts"
+  # C12: Can a definition be upgraded while runs are in flight? What happens to them?
+  C12:
+    verdict: absent
+    note: "No version pin on a suspended conversation despite system-prompt-versioning tests existing. Same hazard as LangGraph and OpenHands."
+    evidence: "src/agent/system-prompt-versioning.test.ts @ 852ca24"
+
+  # --- D. Agent identity and lifecycle ---
+  # D1: Is an agent globally addressable? By what identifier?
+  D1:
+    verdict: first_class
+    note: "Globally addressable as agent-<id> via --agent, LETTA_AGENT_ID or AGENT_ID, with documented resolution precedence: explicit > session context > env."
+    evidence: "src/permissions/memory-paths.ts:115-129 @ 852ca24"
+  # D2: Does identity survive process restart?
+  D2:
+    verdict: first_class
+    note: "Identity survives restart: memory tree, blocks and config are keyed by agent id on disk or in the API backend."
+    evidence: "src/permissions/memory-paths.ts @ 852ca24"
+  # D3: Is identity distinct from runtime instance?
+  D3:
+    verdict: first_class
+    note: "Distinct: one agent identity can be resumed by many processes; AGENT_ID is injected into each process environment."
+    evidence: "src/permissions/cross-agent-guard.ts:53-61 @ 852ca24"
+  # D4: Are agents versioned? Immutable or mutable definitions?
+  D4:
+    verdict: absent
+    note: "No agent versioning. System prompts have versioning tests but the agent itself is not versioned."
+    evidence: "src/agent/system-prompt-versioning.test.ts @ 852ca24"
+  # D5: Is there a registry or catalog?
+  D5:
+    verdict: first_class
+    note: "`letta agents list` with exact name, fuzzy --query, --tags (ANY or ALL), --include-blocks, --shared, --limit. A genuine registry."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # D6: Can agents discover each other at runtime?
+  D6:
+    verdict: implicit
+    note: "Humans discover agents via the registry; agents do not discover each other at runtime."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # D7: Can agents advertise capabilities? In what format?
+  D7:
+    verdict: implicit
+    note: "Tags on agents plus mods capabilities; no formal capability advertisement for agents."
+    evidence: "src/mods/capabilities.ts @ 852ca24"
+  # D8: Is there an owner, team, or tenant on the agent record?
+  D8:
+    verdict: implicit
+    note: "`letta agents list --shared` implies a user/owner model; no explicit tenant or team field in the OSS tree."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # D9: Can an agent be suspended, revoked, or deprecated?
+  D9:
+    verdict: absent
+    note: "No suspend, revoke or deprecate lifecycle for agents."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # D10: Is there anything resembling a declarative agent manifest?
+  D10:
+    verdict: implicit
+    note: "Agent presets and profiles configure agents declaratively (agent-presets.ts, personality-default-files.ts) but there is no full manifest spec."
+    evidence: "src/agent-presets.ts @ 852ca24"
+
+  # --- E. Harness and runtime interoperability ---
+  # E1: What is the minimum interface an agent implementation must satisfy?
+  E1:
+    verdict: absent
+    note: "Letta is a harness, not a host. No adapter interface for foreign agents."
+    evidence: "src/agent/ @ 852ca24"
+  # E2: Transport: stdin/stdout, HTTP, gRPC, WebSocket, in-process, ACP, A2A?
+  E2:
+    verdict: first_class
+    note: "CLI with JSON-only machine subcommands, websocket listener with a command surface, App Server for desktop/web/channels."
+    evidence: "src/websocket/listener/commands/ @ 852ca24"
+  # E3: Can it host a foreign agent (Claude Code, Codex, OpenHands, LangGraph, ADK)?
+  E3:
+    verdict: absent
+    note: "Cannot host foreign agents. Inverse of OpenHands."
+    evidence: "src/agent/ @ 852ca24"
+  # E4: Is there an event stream out of a running agent? What granularity?
+  E4:
+    verdict: first_class
+    note: "Subagent streams, channel core-stream and rich draft streaming; websocket command surface exposes state."
+    evidence: "src/agent/subagents/subagent-stream.ts @ 852ca24"
+  # E5: Are tool calls externally observable, or internal to the agent?
+  E5:
+    verdict: first_class
+    note: "Tool calls are permission-checked with a trace, and tool names canonicalised across harness dialects."
+    evidence: "src/permissions/canonical.ts @ 852ca24"
+  # E6: How is context injected at start?
+  E6:
+    verdict: first_class
+    note: "Context injected via memory system/ files (always resident) plus skills and mods."
+    evidence: "src/tools/descriptions/Memory.md @ 852ca24"
+  # E7: Is cancellation supported? Cooperative or forced? Does it propagate to subagents?
+  E7:
+    verdict: first_class
+    note: "Interrupt is latched and recoverable, with dedicated tests for both behaviours."
+    evidence: "src/headless-interrupt-latch.test.ts, src/headless-interrupt-recovery.test.ts @ 852ca24"
+  # E8: Can a run be checkpointed and restored by the platform, or only by the agent?
+  E8:
+    verdict: implicit
+    note: "Memory checkpointing is git; conversation state checkpointing is backend-dependent and not a declared contract."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # E9: Which of these would be hard to adapt, and why?
+  E9:
+    verdict: implicit
+    note: "Adapter tax appears even without adapters: canonicalToolName must map Codex/Gemini aliases into one vocabulary INSIDE the policy layer."
+    evidence: "src/permissions/cross-agent-guard.ts:6-8 @ 852ca24"
+
+  # --- F. Agent-to-agent communication ---
+  # F1: Direct messages between agents?
+  F1:
+    verdict: absent
+    note: "No direct agent-to-agent messaging."
+    evidence: "src/agent/subagents/ @ 852ca24"
+  # F2: Channels, topics, or pub/sub?
+  F2:
+    verdict: absent
+    note: "Channels are human surfaces (Slack/Discord/Telegram), not agent-to-agent transport."
+    evidence: "src/channels/ @ 852ca24"
+  # F3: Task delegation as a distinct mechanism from messaging?
+  F3:
+    verdict: implicit
+    note: "Delegation by spawning a subagent process with a context budget, not by assigning a task resource."
+    evidence: "src/agent/subagents/manager.ts @ 852ca24"
+  # F4: Synchronous RPC between agents?
+  F4:
+    verdict: implicit
+    note: "Parent-subagent interaction is stream-based, effectively synchronous."
+    evidence: "src/agent/subagents/subagent-stream.ts @ 852ca24"
+  # F5: Asynchronous inbox or mailbox?
+  F5:
+    verdict: absent
+    note: "No mailbox or inbox for agents."
+    evidence: "src/agent/subagents/ @ 852ca24"
+  # F6: Is delivery durable? Survives restart of sender and receiver?
+  F6:
+    verdict: absent
+    note: "No inter-agent delivery layer."
+    evidence: "src/agent/subagents/ @ 852ca24"
+  # F7: Is message ordering guaranteed? Per what scope?
+  F7:
+    verdict: implicit
+    note: "Turn queue provides ordering within a conversation."
+    evidence: "src/queue/turn-queue-runtime.ts @ 852ca24"
+  # F8: Acknowledgement or delivery receipts?
+  F8:
+    verdict: absent
+    note: "No acknowledgement between agents."
+    evidence: "src/agent/subagents/ @ 852ca24"
+  # F9: Correlation ids for request/response pairing?
+  F9:
+    verdict: implicit
+    note: "Conversation and agent ids correlate work; no message correlation id."
+    evidence: "src/cron/schedule-conversation-tag.ts @ 852ca24"
+  # F10: Conversation threading?
+  F10:
+    verdict: first_class
+    note: "Channel thread context entries provide threading on human surfaces."
+    evidence: "src/channels/types.ts:125 @ 852ca24"
+  # F11: Capability-based routing — address by what an agent *can do* rather than who it is?
+  F11:
+    verdict: absent
+    note: "No capability-based routing."
+    evidence: "src/agent/subagents/ @ 852ca24"
+
+  # --- G. Human-agent collaboration ---
+  # G1: Is a human modelled as a special kind of agent, a distinct principal type, or not modelled?
+  G1:
+    verdict: first_class
+    note: "Humans are first-class in channels with allowed users, admin users, dm|group scope, and an access decision of allow|deny|PAIR (pending authorisation). Agents are separate principals with kernel-enforced memory boundaries. Two distinct principal types with different mechanisms."
+    evidence: "src/channels/access-control.ts:23-95 @ 852ca24"
+  # G2: Shared rooms, channels, or workspaces?
+  G2:
+    verdict: first_class
+    note: "Slack, Discord and Telegram channels with per-channel configuration and permission modes; sessions follow the user across terminal, desktop, browser and phone."
+    evidence: "src/channels/ @ 852ca24"
+  # G3: Task threads humans can read and post into?
+  G3:
+    verdict: first_class
+    note: "Conversations are the shared thread; channels post into them and humans reply."
+    evidence: "src/channels/core-stream.ts @ 852ca24"
+  # G4: Mentions or directed addressing?
+  G4:
+    verdict: first_class
+    note: "DiscordChannelMode = 'open' | 'mention-only' makes mentions an addressing mechanism."
+    evidence: "src/channels/types.ts:92 @ 852ca24"
+  # G5: Approval gates. Blocking or advisory? Durable while pending?
+  G5:
+    verdict: first_class
+    note: "Durable approvals: PendingControlRequest persisted to disk with a control-request coordinator; recovery and bootstrap-with-pending-approval are explicitly tested."
+    evidence: "src/channels/pending-control-requests.ts @ 852ca24"
+  # G6: Mid-run intervention: can a human redirect without restarting?
+  G6:
+    verdict: first_class
+    note: "Interrupt latch, permission mode changes, and direct memory editing let a human redirect without restarting."
+    evidence: "src/headless-interrupt-latch.test.ts @ 852ca24"
+  # G7: Agent status and presence visible to humans?
+  G7:
+    verdict: implicit
+    note: "Agent info toggle in reminders and channel status surfaces; no formal presence model."
+    evidence: "src/reminders/agent-info-toggle.test.ts @ 852ca24"
+  # G8: Notifications or escalation when an agent is blocked?
+  G8:
+    verdict: first_class
+    note: "Control requests are delivered to the human through the channel where they are, and persist until answered."
+    evidence: "src/channels/control-request-coordinator.ts @ 852ca24"
+  # G9: Shared scratchpad or working surface?
+  G9:
+    verdict: first_class
+    note: "The memory filesystem is a genuine shared scratchpad: human-readable markdown, editable by both, with a web memory viewer."
+    evidence: "src/web/generate-memory-viewer.ts @ 852ca24"
+  # G10: Can a human see the context an agent is operating on?
+  G10:
+    verdict: first_class
+    note: "`letta memory status/diff/tokens` plus a memory viewer expose exactly what the agent has in context."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+
+  # --- H. Context and memory ---
+  # H1: Which of these exist as *separate* concepts: prompt context, working state, session history, ...
+  H1:
+    verdict: first_class
+    note: "Separated by RESIDENCY COST, not taxonomy: system/** always in the system prompt; other files metadata-only until read; memory_filesystem is a read-only projection block; skills and mods are separately installable."
+    evidence: "src/tools/descriptions/Memory.md @ 852ca24; src/agent/memory-constants.ts"
+  # H2: Who owns memory: agent, human, workspace, task, or tenant?
+  H2:
+    verdict: first_class
+    note: "Memory is owned per agent, one git repo each at ~/.letta/agents/<id>/ (API) or <storage>/memfs/<id>/ (local)."
+    evidence: "src/permissions/cross-agent-guard.ts:101-104 @ 852ca24"
+  # H3: Can memory be shared between agents? At what granularity?
+  H3:
+    verdict: implicit
+    note: "Agents can be SHARED with users (`agents list --shared`), but there is no shared memory between agents - cross-agent access is hard-denied."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # H4: Are there permissions on memory?
+  H4:
+    verdict: first_class
+    note: "FIRST first_class H4 in the study. Kernel-enforced: 'cannot read or write other agents' memory. Throws when no supported kernel sandbox is available rather than silently running with a weaker policy.' Deny runs at decision step 0 and is unbypassable by modes or rules."
+    evidence: "src/memory-confinement.ts:14-21 @ 852ca24; src/permissions/cross-agent-guard.ts:20-22"
+  # H5: Is provenance tracked — where a memory came from?
+  H5:
+    verdict: first_class
+    note: "Provenance is git (author, timestamp, diff, revert) AND the memory tool requires a `reason` argument on every mutation."
+    evidence: "src/tools/descriptions/Memory.md @ 852ca24"
+  # H6: Expiry, TTL, or forgetting?
+  H6:
+    verdict: absent
+    note: "No TTL or expiry on memory."
+    evidence: "src/tools/descriptions/Memory.md @ 852ca24"
+  # H7: Summarisation or compaction. Automatic or explicit?
+  H7:
+    verdict: first_class
+    note: "Compaction with local/API parity tests; `letta memory tokens` reports estimated system/ token size with --top N, explicitly leaving policy to the caller."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # H8: Retrieval mechanism: vector, keyword, structured, agent-driven?
+  H8:
+    verdict: first_class
+    note: "Filesystem retrieval: metadata in the system prompt, explicit reads, and [[path]] cross-references maintained by the agent for discoverability."
+    evidence: "src/tools/descriptions/Memory.md @ 852ca24"
+  # H9: Can an agent mutate its own memory mid-run?
+  H9:
+    verdict: first_class
+    note: "The memory tool mutates memory mid-run: str_replace, insert, delete, rename, update_description, create - and auto-commits."
+    evidence: "src/tools/impl/memory.ts @ 852ca24"
+  # H10: Conflict resolution on concurrent writes?
+  H10:
+    verdict: first_class
+    note: "Git conflicts. extractConflictDetail and conflict routing appear in the headless recovery paths, so concurrent writes surface as a conflict rather than silent last-write-wins."
+    evidence: "src/headless-approval-recovery.test.ts @ 852ca24"
+  # H11: Is memory in the same store as execution state, or separate?
+  H11:
+    verdict: first_class
+    note: "Entirely separate: memory in git repos, conversation state in the backend, approvals in a JSON file, cron in a lease-owned file."
+    evidence: "src/ @ 852ca24"
+
+  # --- I. Tools and capabilities ---
+  # I1: Are tools bound to agents statically, or resolved dynamically?
+  I1:
+    verdict: first_class
+    note: "Base tools attachable at agent creation (--base-tools memory,web_search,fetch_webpage); skills and mods installable per project or user."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # I2: Is there a capability abstraction distinct from tool implementation?
+  I2:
+    verdict: implicit
+    note: "Mods have a capabilities module; no capability abstraction separating agent tool identity from implementation."
+    evidence: "src/mods/capabilities.ts @ 852ca24"
+  # I3: Is there a registry of available tools?
+  I3:
+    verdict: first_class
+    note: "Tool schemas and descriptions are separate registry artifacts (src/tools/schemas/*.json, src/tools/descriptions/*.md); `letta skills` lists installed skills."
+    evidence: "src/tools/schemas/ @ 852ca24"
+  # I4: Tool scoping — can an agent be restricted to a subset?
+  I4:
+    verdict: first_class
+    note: "Permission rules scope tools by decision (allow|deny|ask|alwaysAsk) across project|local|user scopes, with modes layered on top."
+    evidence: "src/permissions/types.ts:9-30 @ 852ca24"
+  # I5: Are tools versioned?
+  I5:
+    verdict: implicit
+    note: "Skills and mods are installable packages so versioned by package; tools themselves are not versioned."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # I6: How are credentials supplied to a tool?
+  I6:
+    verdict: first_class
+    note: "Channel credential store plus `letta connect` for provider credentials."
+    evidence: "src/channels/credential-store.ts @ 852ca24"
+  # I7: OAuth or delegated user credentials?
+  I7:
+    verdict: implicit
+    note: "`letta connect` connects providers from the terminal; no MCP OAuth delegation in the read tree."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # I8: Can policy intercept a tool call before execution?
+  I8:
+    verdict: first_class
+    note: "Layered interception: cross-agent guard at decision step 0 (unbypassable), then permission rules and modes, with PermissionCheckTrace recording why. Kernel sandbox is the enforcement boundary for confined processes."
+    evidence: "src/permissions/cross-agent-guard.ts:20-22 @ 852ca24; src/permissions/types.ts:45"
+  # I9: Approval gates on specific tools?
+  I9:
+    verdict: first_class
+    note: "PermissionDecision includes 'ask' and 'alwaysAsk', delivered as durable control requests through whichever channel the human is on."
+    evidence: "src/permissions/types.ts:21 @ 852ca24"
+  # I10: Do tools execute inside or outside the agent's sandbox?
+  I10:
+    verdict: first_class
+    note: "Tools run inside the kernel sandbox when confinement is engaged; in-process file tools are additionally guarded because 'these never fork, so the kernel filesystem sandbox cannot see them'."
+    evidence: "src/permissions/cross-agent-guard.ts:5-9 @ 852ca24"
+
+  # --- J. Security and identity ---
+  # J1: What identity does an agent authenticate as?
+  J1:
+    verdict: first_class
+    note: "AGENT_ID is the agent's identity and a real security boundary determining which memory tree the process may access."
+    evidence: "src/permissions/memory-paths.ts:115 @ 852ca24"
+  # J2: Authentication mechanism for agent-to-platform?
+  J2:
+    verdict: implicit
+    note: "Local processes authenticate by environment and filesystem confinement; API backend uses provider auth via `letta connect`."
+    evidence: "src/auth/ @ 852ca24"
+  # J3: Authorisation model: RBAC, ABAC, capability tokens, none?
+  J3:
+    verdict: first_class
+    note: "Rule-based: PermissionDecision (allow|deny|ask|alwaysAsk) x PermissionScope (project|local|user) x PermissionMode (unrestricted|standard|acceptEdits|strict), with a versioned engine (v1|v2)."
+    evidence: "src/permissions/types.ts:9-30 @ 852ca24"
+  # J4: Secret storage and injection?
+  J4:
+    verdict: first_class
+    note: "Channel credential store; memory-git auth tested separately; secrets kept out of the memory tree by confinement policy."
+    evidence: "src/channels/credential-store.ts @ 852ca24; src/agent/memory-git.auth.test.ts"
+  # J5: Per-agent credentials, or shared platform credentials?
+  J5:
+    verdict: first_class
+    note: "Per-agent boundaries are the model: each agent has its own memory tree and its processes carry its AGENT_ID."
+    evidence: "src/permissions/cross-agent-guard.ts:24-26 @ 852ca24"
+  # J6: Can an agent act as a user? Is that impersonation or delegation?
+  J6:
+    verdict: absent
+    note: "No impersonation. Subagents act with their own identity plus explicit parent scope, which is delegation rather than impersonation."
+    evidence: "src/permissions/cross-agent-guard.ts:75-88 @ 852ca24"
+  # J7: Tenant isolation: logical, or enforced at runtime?
+  J7:
+    verdict: absent
+    note: "No tenant isolation in OSS; agent-level isolation is strong but there is no org resource."
+    evidence: "src/permissions/ @ 852ca24"
+  # J8: Network and filesystem isolation?
+  J8:
+    verdict: implicit
+    note: "Filesystem isolation via bwrap/seatbelt is strong, but shell confinement is OPT-IN (LETTA_FS_SANDBOX=1) and there is no network egress policy."
+    evidence: "src/permissions/cross-agent-guard.ts:13-16 @ 852ca24"
+  # J9: Is there an audit log? Is it tamper-evident?
+  J9:
+    verdict: first_class
+    note: "Git history is a genuine audit log for memory (author, timestamp, diff, revert), plus PermissionTraceEvent for policy decisions. Not tamper-evident, but real."
+    evidence: "src/permissions/types.ts:32 @ 852ca24"
+  # J10: Where are policy decisions enforced — control plane, runtime, or tool gateway?
+  J10:
+    verdict: first_class
+    note: "Three layers: cross-agent guard step 0 (unbypassable), permission rules/modes, kernel sandbox. Explicitly documented: 'The guard is the in-process safety net; the kernel is the enforcement boundary.'"
+    evidence: "src/permissions/cross-agent-guard.ts:17-19 @ 852ca24"
+
+  # --- K. Sandbox and isolation ---
+  # K1: Is there a workspace or sandbox concept? What is its lifecycle?
+  K1:
+    verdict: first_class
+    note: "Kernel filesystem sandbox with a per-process policy; wrap.ts wraps a launcher in a policy."
+    evidence: "src/sandbox/wrap.ts @ 852ca24"
+  # K2: Persistent filesystem across runs?
+  K2:
+    verdict: first_class
+    note: "Memory persists as a git repo across runs; memory worktrees are used for isolation."
+    evidence: "src/agent/memory-worktree.test.ts @ 852ca24"
+  # K3: Snapshot and restore?
+  K3:
+    verdict: implicit
+    note: "`letta memory backup/backups/restore` gives memory snapshots, but there is no sandbox environment snapshot."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # K4: Network egress rules?
+  K4:
+    verdict: absent
+    note: "No network egress rules."
+    evidence: "src/sandbox/policy.ts @ 852ca24"
+  # K5: Container, microVM, or none?
+  K5:
+    verdict: first_class
+    note: "Kernel-level rather than containers: bwrap (Linux user namespaces) and Seatbelt (macOS sandbox-exec)."
+    evidence: "src/sandbox/bwrap.ts, src/sandbox/seatbelt.ts @ 852ca24"
+  # K6: Resource quotas: CPU, memory, disk, wall clock?
+  K6:
+    verdict: absent
+    note: "No CPU, memory or pid quotas. Filesystem confinement is the whole story."
+    evidence: "src/sandbox/policy.ts @ 852ca24"
+  # K7: How are secrets injected without landing in the image or logs?
+  K7:
+    verdict: implicit
+    note: "Confinement policy keeps secrets out of the agent's writable memory tree; credential store is separate."
+    evidence: "src/memory-confinement.ts @ 852ca24"
+  # K8: Arbitrary code execution? Browser execution?
+  K8:
+    verdict: first_class
+    note: "Shell execution with read-only shell mode and shell command normalisation; LSP integration."
+    evidence: "src/permissions/read-only-shell.ts @ 852ca24"
+  # K9: Is the sandbox pluggable, or a fixed implementation?
+  K9:
+    verdict: first_class
+    note: "BEST capability signalling in the study: SandboxAvailability { backend: SandboxBackend|null, bwrapPath?, reason } detected by a REAL probe (bwrap: an actual user-namespace mount probe), cached per process, with a human-readable reason for the null case. Dependent code FAILS CLOSED rather than degrading."
+    evidence: "src/sandbox/availability.ts:7-45 @ 852ca24"
+
+  # --- L. Orchestration and scheduling ---
+  # L1: Does it distinguish agent coordination from workflow orchestration?
+  L1:
+    verdict: implicit
+    note: "No workflow engine; orchestration is scheduling plus subagent delegation."
+    evidence: "src/cron/ @ 852ca24"
+  # L2: Topology: DAG, cyclic graph, supervisor, planner, event-driven, queue?
+  L2:
+    verdict: first_class
+    note: "Queue plus cron plus event-driven channel triggers. No DAG or graph."
+    evidence: "src/queue/turn-queue-runtime.ts @ 852ca24"
+  # L3: Cron or scheduled triggers?
+  L3:
+    verdict: first_class
+    note: "Cron with IANA timezones, recurring and one-off, targeting default/new/specific conversations, with a run log."
+    evidence: "src/cron/cron-file.ts:53-80 @ 852ca24"
+  # L4: Dynamic task spawning at runtime?
+  L4:
+    verdict: first_class
+    note: "Subagents spawned dynamically with their own context budget."
+    evidence: "src/agent/subagents/manager.ts @ 852ca24"
+  # L5: Fan-out / fan-in?
+  L5:
+    verdict: absent
+    note: "No fan-out/fan-in primitive."
+    evidence: "src/agent/subagents/ @ 852ca24"
+  # L6: Subagents. Are they first-class, or just nested calls?
+  L6:
+    verdict: first_class
+    note: "Subagents are first-class: own process, own memory confinement, own context budget, builtin profiles."
+    evidence: "src/agent/subagents/ @ 852ca24"
+  # L7: Retry and backoff policy — declarative or hand-rolled?
+  L7:
+    verdict: implicit
+    note: "Cron names failure outcomes but there is no declarative retry/backoff."
+    evidence: "src/cron/cron-file.ts:33 @ 852ca24"
+  # L8: Compensation or rollback on failure?
+  L8:
+    verdict: absent
+    note: "No compensation or rollback for work; git revert covers memory only."
+    evidence: "src/cron/ @ 852ca24"
+  # L9: Does cancellation propagate through the whole tree?
+  L9:
+    verdict: implicit
+    note: "Interrupt is latched and recoverable for the main agent; no documented propagation to subagent processes."
+    evidence: "src/headless-interrupt-latch.test.ts @ 852ca24"
+  # L10: Could this be replaced by Temporal or Restate, or is orchestration inseparable from the agent...
+  L10:
+    verdict: absent
+    note: "No workflow engine to replace."
+    evidence: "src/cron/ @ 852ca24"
+
+  # --- M. Observability ---
+  # M1: Which of these are modelled as telemetry objects: trace, run, step, LLM call, tool call, mess...
+  M1:
+    verdict: implicit
+    note: "Error reporting, fatal error handling, input telemetry, permission trace events, cron run log. No trace/span/step model."
+    evidence: "src/telemetry/ @ 852ca24"
+  # M2: Is telemetry keyed to agent, run, model, task, user, or tenant?
+  M2:
+    verdict: implicit
+    note: "Keyed to agent id and conversation id; cron run log keyed to task."
+    evidence: "src/cron/run-log.ts @ 852ca24"
+  # M3: OpenTelemetry, proprietary, or none?
+  M3:
+    verdict: absent
+    note: "NO OpenTelemetry. src/telemetry/ is error reporting and product analytics with batched flushing. Third deep teardown in a row with no OTel."
+    evidence: "src/telemetry/ @ 852ca24"
+  # M4: Is there a documented, stable event schema?
+  M4:
+    verdict: implicit
+    note: "Typed events internally (PermissionTraceEvent, CronRunOutcome/Reason) but no published stable event schema."
+    evidence: "src/permissions/types.ts:32 @ 852ca24"
+  # M5: Cost and token accounting. Per what unit?
+  M5:
+    verdict: implicit
+    note: "`letta memory tokens` reports estimated context token size with --top N; subagents have context budgets. No cost accounting in currency."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # M6: Latency breakdown by phase?
+  M6:
+    verdict: absent
+    note: "No latency breakdown by phase."
+    evidence: "src/telemetry/ @ 852ca24"
+  # M7: Error taxonomy?
+  M7:
+    verdict: first_class
+    note: "Rich error taxonomy in cron: nine named run reasons (scheduler_inactive, started_too_late, queue_full, runtime_unavailable, invalid_cron, scheduler_error and more) plus provider error and timeout paths."
+    evidence: "src/cron/cron-file.ts:34-43 @ 852ca24"
+  # M8: Can the event stream reconstruct a run after the fact — replay or audit?
+  M8:
+    verdict: first_class
+    note: "Git history replays memory exactly; cron run log records outcomes. Conversation replay is backend-dependent."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+
+  # --- N. Multi-tenancy and enterprise ---
+  # N1: Resource hierarchy: org, workspace, project, environment?
+  N1:
+    verdict: absent
+    note: "No organization, project or tenant resource in OSS. Permission SCOPES are project|local|user, which is configuration scope rather than a tenancy hierarchy."
+    evidence: "src/permissions/types.ts:28 @ 852ca24"
+  # N2: RBAC model and its granularity?
+  N2:
+    verdict: implicit
+    note: "Channel admin users vs allowed users is a two-role model; no general RBAC."
+    evidence: "src/channels/access-control.ts:64 @ 852ca24"
+  # N3: Quotas and cost limits. Enforced or advisory?
+  N3:
+    verdict: absent
+    note: "No quotas or cost limits."
+    evidence: "src/ @ 852ca24"
+  # N4: dev / staging / prod separation?
+  N4:
+    verdict: implicit
+    note: "Remote environments with `letta teleport` provide environment separation in effect, though not dev/staging/prod semantics."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # N5: Deployment promotion path?
+  N5:
+    verdict: absent
+    note: "No deployment promotion path."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # N6: Agent catalog scoped to a tenant?
+  N6:
+    verdict: first_class
+    note: "`letta agents list` with tags and --shared acts as a per-user agent catalog."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # N7: Audit retention controls?
+  N7:
+    verdict: implicit
+    note: "Git history retention is under the operator's control; no audit retention policy."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # N8: Is multi-tenancy in the OSS core, or reserved for a commercial tier?
+  N8:
+    verdict: implicit
+    note: "No multi-tenancy in OSS. Letta Cloud provides cross-device identity and memory and is closed."
+    evidence: "https://docs.letta.com (read 2026-08-26)"
+
+  # --- O. API and protocol surface ---
+  # O1: List the actual primary endpoints or SDK entry points. Verbatim.
+  O1:
+    verdict: first_class
+    note: "CLI is the primary API: letta agents|memory|messages|environments|teleport|sandbox|server|connect|backend|install|skills|mods, with JSON-only output on machine-facing subcommands. Plus an App Server and a websocket command surface."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # O2: Is the API resource-oriented or RPC-flavoured?
+  O2:
+    verdict: first_class
+    note: "Resource-oriented CLI (noun then verb) with JSON output, effectively a scriptable API."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # O3: Streaming: SSE, WebSocket, long-poll, gRPC stream?
+  O3:
+    verdict: first_class
+    note: "Websocket listener with streaming; channel rich-draft streaming policy for progressive output."
+    evidence: "src/channels/channel-rich-draft-streamer.ts @ 852ca24"
+  # O4: Webhooks or outbound callbacks?
+  O4:
+    verdict: implicit
+    note: "Channel platforms deliver inbound events; no generic outbound webhook."
+    evidence: "src/channels/ @ 852ca24"
+  # O5: Which standards are implemented: MCP, A2A, ACP, OTel, OpenAI-compatible?
+  O5:
+    verdict: absent
+    note: "No MCP, A2A, ACP or OTel in the read tree. Letta is its own harness rather than a host for others - the inverse of OpenHands."
+    evidence: "src/ @ 852ca24"
+  # O6: Is the API versioned? Stability commitment?
+  O6:
+    verdict: implicit
+    note: "PermissionEngine is explicitly versioned (v1|v2) with shadow comparison; CLI subcommands are not versioned."
+    evidence: "src/permissions/types.ts:30 @ 852ca24"
+  # O7: Is there a separate northbound (client) and southbound (runtime) API?
+  O7:
+    verdict: implicit
+    note: "Northbound CLI/App Server; southbound is the sandbox launcher wrapper rather than a pluggable runtime API."
+    evidence: "src/sandbox/wrap.ts @ 852ca24"
+
+  # --- P. Storage ---
+  # P1: What datastores are required to run it?
+  P1:
+    verdict: first_class
+    note: "Git repositories for memory, JSON file for pending approvals, lease-owned file for cron, backend store for conversations (local|api|cloud)."
+    evidence: "src/channels/pending-control-requests.ts @ 852ca24"
+  # P2: What is treated as authoritative, strongly consistent state?
+  P2:
+    verdict: first_class
+    note: "Authoritative memory state is the git repo - the audit log IS the storage layer."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # P3: What is event-stream or append-only?
+  P3:
+    verdict: first_class
+    note: "Git commit history is append-only by construction; cron run log appends outcomes."
+    evidence: "src/cron/run-log.ts @ 852ca24"
+  # P4: Where do large artifacts go?
+  P4:
+    verdict: implicit
+    note: "Memory files live in git; `letta sandbox` transfers files to and from a Cloud sandbox. No blob store abstraction."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # P5: Is there a vector store? Required or optional?
+  P5:
+    verdict: absent
+    note: "No vector store. Retrieval is filesystem metadata plus explicit reads plus [[path]] references."
+    evidence: "src/tools/descriptions/Memory.md @ 852ca24"
+  # P6: Is storage pluggable, or hardcoded?
+  P6:
+    verdict: implicit
+    note: "Backends are pluggable (local|api|dev) and sandbox backends are pluggable; memory storage is git by design and not swappable."
+    evidence: "src/backend/backend-mode.ts @ 852ca24"
+
+  # --- Q. Licensing and commercial ---
+  # Q1: Exact license, including any per-directory variation.
+  Q1:
+    verdict: first_class
+    note: "Apache-2.0."
+    evidence: "LICENSE @ 852ca24"
+  # Q2: Are there enterprise-only components missing from the OSS repo?
+  Q2:
+    verdict: first_class
+    note: "Letta Cloud (hosted memory, identity, cross-device conversation continuity) is commercial and closed."
+    evidence: "https://docs.letta.com (read 2026-08-26)"
+  # Q3: SaaS or hosted-service restrictions?
+  Q3:
+    verdict: absent
+    note: "No SaaS restriction under Apache-2.0."
+    evidence: "LICENSE @ 852ca24"
+  # Q4: Trademark constraints on derived works?
+  Q4:
+    verdict: implicit
+    note: "Letta and MemGPT are marks of Letta. Apache-2.0 grants no trademark rights."
+    evidence: "LICENSE @ 852ca24"
+  # Q5: Network copyleft (AGPL, SSPL) implications for a hosted product?
+  Q5:
+    verdict: absent
+    note: "No network copyleft. Apache-2.0."
+    evidence: "LICENSE @ 852ca24"
+  # Q6: Verdict: `USE` / `INTEGRATE` / `REFERENCE_ONLY` / `AVOID`, with reasoning.
+  Q6:
+    verdict: first_class
+    note: "REFERENCE_ONLY on architectural grounds, not legal: TypeScript, and the design is tightly coupled to git-backed memory and OS-native sandboxes. The IDEAS are the most valuable in the study; the code is not what we would embed. NOTE: source moved from letta-ai/letta to letta-ai/letta-code; the Python V1 server is retired to an 'archive' branch."
+    evidence: "LICENSE @ 852ca24"
+
+  # --- R. Developer experience ---
+  # R1: Time from clone to a running agent. Actual elapsed minutes.
+  R1:
+    verdict: first_class
+    note: "npm install then `letta --help` worked immediately; CLI surface is discoverable and self-documenting."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # R2: How many concepts before "hello world"?
+  R2:
+    verdict: first_class
+    note: "Two concepts to start: agent and conversation. `letta` alone resumes the last conversation for the project."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # R3: Is there a local dev loop? Hot reload?
+  R3:
+    verdict: first_class
+    note: "Dev backend with smoke tests, fake headless backend for testing, Nix flake, and extensive parity tests between TUI and headless."
+    evidence: "src/dev-backend-smoke.test.ts, src/backend/fake-headless-backend.test.ts @ 852ca24"
+  # R4: How do you debug a stuck run?
+  R4:
+    verdict: first_class
+    note: "`letta memory status/diff/tokens`, `letta agents config`, `--info`, permission traces, and a web memory viewer. Excellent introspection."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # R5: Can an agent be unit tested? Is there a test harness?
+  R5:
+    verdict: first_class
+    note: "Extensive test suite including source-level wiring assertions (approval recovery tests read headless.ts and assert it uses shared extraction rather than inline parsing) plus engine parity tests."
+    evidence: "src/headless-approval-recovery.test.ts @ 852ca24"
+  # R6: Deployment story?
+  R6:
+    verdict: first_class
+    note: "npm global CLI, desktop app (macOS/Windows/Linux), chat.letta.com, `letta server` for self-hosting, Nix flake, Letta Cloud."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+  # R7: CLI ergonomics — try the equivalent of `init`, `agent add`, `run`.
+  R7:
+    verdict: first_class
+    note: "Strong: `letta --new-agent`, `--base-tools`, `letta agents create`, `letta install`, `letta backend`, `letta connect`. Close to the ideal 'platform agent add' journey."
+    evidence: "letta-code CLI 0.31.0 --help output, verified 2026-08-26"
+
+  # --- S. Hard scenarios ---
+  # S1: Delegated authority
+  S1:
+    verdict: inferable
+    note: "PARTIAL and the first answerable instance in the study. A subagent's memory authority is exactly {self, parent}, derived from LETTA_PARENT_AGENT_ID, kernel-enforced and unbypassable by modes or rules. A real delegation scope, narrower than the parent. Does NOT cover tool credentials or a delegation token, so incomplete."
+    evidence: "src/permissions/cross-agent-guard.ts:24-26,75-88 @ 852ca24"
+  # S2: Torn side effect
+  S2:
+    verdict: undefined
+    note: "Memory commits are atomic per git operation, but there is no idempotency key on tool calls and no documented replay contract."
+    evidence: "src/tools/impl/memory.ts @ 852ca24"
+  # S3: Upgrade mid-flight
+  S3:
+    verdict: undefined
+    note: "No version pin on a suspended conversation, despite system-prompt-versioning tests existing."
+    evidence: "src/agent/system-prompt-versioning.test.ts @ 852ca24"
+  # S4: Concurrent memory write
+  S4:
+    verdict: inferable
+    note: "Memory is git, so concurrent writes surface as a CONFLICT rather than silent last-write-wins. extractConflictDetail and conflict routing exist in the headless recovery paths. Best answer in the study."
+    evidence: "src/headless-approval-recovery.test.ts @ 852ca24"
+  # S5: Cancellation tree
+  S5:
+    verdict: inferable
+    note: "Interrupt is latched and recoverable for the main agent (dedicated tests), but propagation to in-flight subagent processes is not documented."
+    evidence: "src/headless-interrupt-latch.test.ts, src/headless-interrupt-recovery.test.ts @ 852ca24"
+  # S6: Silent context loss
+  S6:
+    verdict: inferable
+    note: "Compaction exists and `letta memory tokens` makes context cost measurable, but nothing detects a specific dropped constraint. Structurally mitigated: system/ files are permanently resident, so constraints placed there cannot be compacted away."
+    evidence: "src/tools/descriptions/Memory.md @ 852ca24"
+  # S7: Poison message
+  S7:
+    verdict: inferable
+    note: "No DLQ, but failures are NAMED rather than swallowed: queue_full, started_too_late, runtime_unavailable, scheduler_error, and tasks can reach 'missed'."
+    evidence: "src/cron/cron-file.ts:33-43 @ 852ca24"
+  # S8: Tenant leak
+  S8:
+    verdict: inferable
+    note: "No tenant, but cross-agent memory access is hard-denied at decision step 0 and kernel-confined. The enumeration case (bare agents-tree root or a recursive-search root) is explicitly handled with a sentinel id."
+    evidence: "src/permissions/cross-agent-guard.ts:107-110 @ 852ca24"
+  # S9: Runaway spend
+  S9:
+    verdict: undefined
+    note: "Subagent context budgets and token reporting exist, but no cost ceiling and no CPU/memory quota."
+    evidence: "src/agent/subagents/context-budget.ts @ 852ca24"
+  # S10: Zombie sandbox
+  S10:
+    verdict: inferable
+    note: "BEST in study: SchedulerOwner records pid + token + process_start_ticks + boot_id, so a stale owner is detectable across PID reuse AND host reboot. LockHandle governs takeover."
+    evidence: "src/cron/cron-file.ts:45-52,340 @ 852ca24"
+
+object_model: |
+  Agent                          (agent-<id>; durable, addressable, shareable)
+   |-- AGENT_ID                  (identity; propagated into processes as env)
+   |-- Memory                    (git repo per agent: ~/.letta/agents/<id>/
+   |    |                         or <storage>/memfs/<id>/)
+   |    |-- system/**            ALWAYS in system prompt (residency cost)
+   |    `-- **                   metadata only until read; [[path]] cross-refs
+   |-- Blocks                    (agent.blocks; memory_filesystem is read-only)
+   |-- Tags                      (filterable, ANY or ALL matching)
+   |-- Conversation[]            (target: default | new | specific id)
+   |    |-- Turn queue
+   |    `-- PendingControlRequest    (durable approvals, persisted to disk)
+   |-- Subagent[]                (own process; scope = {self, parent})
+   |-- CronTask[]                (scheduled prompts, lease-owned)
+   |-- Skills / Mods             (installable packages)
+   `-- Permissions               (rules x scope x mode, engine v1|v2)
+
+  Channel                        (Slack | Discord | Telegram | public)
+   |-- AccessControl             (allowed/admin users, scope dm|group,
+   |                              decision allow|deny|pair)
+   |-- ThreadContext
+   `-- CommandGate               (with floor-only guarantee)
+
+  Environment                    (remote; `letta teleport` moves conversations)
+  Backend                        (local | api | dev)
+
+strongest_ideas:
+  - "Git-backed memory: provenance, audit, diff, revert and conflict detection come free from the storage substrate. letta memory status/diff/backup/restore/export are thin wrappers over git."
+  - "system/ vs referenced memory as a CONTEXT-BUDGET mechanism rather than a taxonomy: always-resident versus metadata-only-until-read, with `letta memory tokens` measuring cost and explicitly leaving policy to the caller."
+  - "The memory tool requires a `reason` argument on every mutation - provenance enforced by tool signature."
+  - "Memory permissions enforced by kernel sandbox, FAIL-CLOSED: 'cannot read or write other agents memory. Throws when no supported kernel sandbox is available rather than silently running with a weaker policy.'"
+  - "SandboxAvailability { backend: SandboxBackend|null, reason } detected by a REAL user-namespace mount probe. Best capability signalling in the study: distinguishes unavailable from unknown AND explains which."
+  - "An unbypassable policy floor at decision step 0, beneath the configurable modes and rules."
+  - "PermissionShadowComparison: run the v2 policy engine in shadow against v1 and compare decisions before cutover."
+  - "SchedulerOwner with pid + token + process_start_ticks + boot_id - lease ownership that survives PID reuse and host reboot."
+  - "Nine named cron run reasons including started_too_late, queue_full and runtime_unavailable - the failure modes everyone else swallows."
+  - "ChannelSenderAccessDecision = allow | deny | PAIR: a pending-authorisation state for an unknown sender instead of a binary refusal."
+  - "floorOnlyChannelCommandGate(): a guaranteed minimum command set that no configuration can remove."
+  - "A DOCUMENTED ABANDONED DESIGN: the comment explaining why shell-command parsing was removed (bypassable by symlinks, command substitution, globbing, subprocesses) and why enforcement moved to the kernel."
+  - "letta teleport: moving a live conversation between environments."
+  - "JSON-only machine subcommands, making the CLI a scriptable API."
+
+weakest_choices:
+  - "DEFAULT_PERMISSION_MODE = 'unrestricted'. Defensible for a local developer tool, wrong for a platform, and a trap if the same code is later hosted."
+  - "Shell confinement is OPT-IN (LETTA_FS_SANDBOX=1); by default agent shells run unconfined, so the stated enforcement boundary is not engaged for shells by default."
+  - "No OpenTelemetry; telemetry is product analytics rather than tracing."
+  - "No agent versioning or revocation despite strong agent identity."
+  - "No resource quotas or cost ceilings - filesystem confinement only, so S9 is unanswered."
+  - "No inter-agent messaging: delegation is process spawning, with no mailbox, ordering or correlation."
+  - "Git as memory substrate cuts both ways: excellent provenance, but conflicts become the agent's problem and repository growth is unbounded."
+  - "No tenancy in OSS; agent sharing exists without an org model to scope it."
+
+reusable_components:
+  - component: "Git-backed memory with provenance"
+    decision: REUSE
+    note: "Strongest answer to H4/H5 in the study."
+  - component: "system/ vs referenced context budget"
+    decision: ADOPT_AS_STANDARD
+    note: "Cost model for prompt residency, not a taxonomy."
+  - component: "Required `reason` on memory mutation"
+    decision: REUSE
+    note: "Provenance by signature."
+  - component: "SandboxAvailability{backend|null, reason}"
+    decision: ADOPT_AS_STANDARD
+    note: "Reference implementation for ADR-0012."
+  - component: "Fail-closed confinement"
+    decision: ADOPT_AS_STANDARD
+    note: "Refuse to run degraded rather than silently weaken policy."
+  - component: "Unbypassable policy floor at step 0"
+    decision: REUSE
+    note: "Hard floor beneath configurable policy."
+  - component: "PermissionShadowComparison"
+    decision: REUSE
+    note: "Safe policy-engine migration; basis for ADR-0013."
+  - component: "SchedulerOwner lease fields"
+    decision: REUSE
+    note: "Liveness that survives reboot and PID reuse."
+  - component: "Named cron run reasons"
+    decision: ADOPT_AS_STANDARD
+    note: "Failure taxonomy for our scheduler."
+  - component: "allow|deny|pair access decision"
+    decision: REUSE
+    note: "Pending-authorisation state for unknown principals."
+  - component: "allow|deny|ask|alwaysAsk decisions"
+    decision: ADOPT_AS_STANDARD
+    note: "Policy decision vocabulary."
+  - component: "Kernel sandbox backends (bwrap/seatbelt)"
+    decision: INTEGRATE
+    note: "Provider options alongside containers."
+  - component: "Default unrestricted permission mode"
+    decision: BUILD
+    note: "Reject; a platform must default to restrictive."
+  - component: "Channels implementation"
+    decision: INTEGRATE
+    note: "Pattern for human surfaces; not our code."
+
+lessons:
+  - "THE affirmative ADR-0001 evidence the first two teardowns could not supply: agents are addressable, listable, tag-searchable, shareable, and identity is a SECURITY BOUNDARY - AGENT_ID decides which memory tree a process may touch, kernel-enforced. This is identity doing work a durable conversation cannot do, which is exactly the revised rationale (delegation, policy, audit) rather than durability. (confirms ADR-0001)"
+  - "Cron's nine named run reasons and the active/paused/fired/missed/cancelled status set show the value of naming failure modes explicitly. (confirms ADR-0002)"
+  - "Excellent HUMAN channels and zero inter-agent messaging suggests separating the two concerns: human collaboration surfaces and agent-to-agent transport are different problems, and one 'Channel' resource for both may be a modelling mistake. (amends ADR-0003)"
+  - "Adapter tax appears even without adapters: canonicalToolName must map Codex/Gemini aliases into one vocabulary INSIDE the policy layer. Tool-name canonicalisation is a prerequisite for policy under adapter neutrality, not an afterthought. (amends ADR-0004)"
+  - "Channels model humans as first-class participants with access control, admin roles and a `pair` authorisation state, while agents are separate principals with kernel-enforced boundaries. Two principal types, genuinely different mechanisms. (confirms ADR-0007)"
+  - "Memory separated by RESIDENCY COST and by OWNERSHIP, with cross-agent access hard-denied. First first_class H4 in the study. Skills/mods as separately installable packages validates keeping agent memory distinct from shared knowledge. (confirms ADR-0008 strongly)"
+  - "Sandbox providers should include KERNEL-LEVEL backends (bwrap, seatbelt), not only containers, and the interface should report availability with a reason rather than throwing on use. But filesystem confinement without CPU/memory quotas leaves S9 unanswered. (amends ADR-0009)"
+  - "Three deep teardowns, zero OpenTelemetry. The gap is industry-wide rather than a per-project oversight, which strengthens adopting it as a differentiator. (confirms ADR-0010)"
+  - "No version pin on suspended conversations here either, despite system-prompt-versioning tests existing. Three for three. (confirms ADR-0011)"
+  - "SandboxAvailability plus the fail-closed rule is the reference implementation of declared capabilities. Three projects, three designs, and this one is best. (confirms ADR-0012 strongly)"
+  - "NEW: policy engine changes must be verifiable before cutover. PermissionShadowComparison runs v2 against v1 on live traffic and compares decisions. Proposing ADR-0013."
+
+adr_impact:
+  - adr: ADR-0001
+    effect: confirms
+    note: "First affirmative evidence: agent identity is a kernel-enforced security boundary and agents are shareable, tag-searchable registry resources. Identity does work durability cannot."
+  - adr: ADR-0002
+    effect: confirms
+    note: "Nine named cron run reasons and a five-state task machine show the value of enumerating failure modes."
+  - adr: ADR-0003
+    effect: amends
+    note: "Strong human channels, zero agent-to-agent messaging. Separate the two concerns in the domain model."
+  - adr: ADR-0004
+    effect: amends
+    note: "Tool-name canonicalisation across harness dialects is a prerequisite for policy, not an afterthought."
+  - adr: ADR-0005
+    effect: neutral
+    note: "No MCP in the read tree; native tools with separate schema and description artifacts."
+  - adr: ADR-0006
+    effect: neutral
+    note: "No A2A or ACP. Letta is a harness, not a host."
+  - adr: ADR-0007
+    effect: confirms
+    note: "Humans are first-class in channels with access control and a `pair` state; agents are separate principals with kernel boundaries."
+  - adr: ADR-0008
+    effect: confirms
+    note: "Memory separated by residency cost and ownership; cross-agent access hard-denied. First first_class H4."
+  - adr: ADR-0009
+    effect: amends
+    note: "Include kernel-level sandbox backends, and report availability with a reason instead of throwing. But no CPU/memory quotas."
+  - adr: ADR-0010
+    effect: confirms
+    note: "Third project with no OTel. Industry-wide gap."
+  - adr: ADR-0011
+    effect: confirms
+    note: "No version pin on suspended conversations. Three for three."
+  - adr: ADR-0012
+    effect: confirms
+    note: "SandboxAvailability{backend|null, reason} with a real mount probe plus fail-closed dependent code is the reference implementation."

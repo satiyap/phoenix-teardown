@@ -1,0 +1,1032 @@
+# Machine-readable extraction. Schema: schema/facts.schema.yaml
+# Validate:  ./.venv/bin/python tools/validate_facts.py
+#
+# verdict:   first_class | implicit | absent | unknown
+# scenarios: first_class_answer | inferable | undefined | unknown
+# evidence:  'path/file.py:120 @ sha'  or  'URL (read YYYY-MM-DD)'
+
+schema_version: 1
+
+project:
+  slug: langgraph
+  name: LangGraph / LangSmith
+  depth: deep
+  evidence_class: A
+  read_on: 2026-08-26
+  repo: "https://github.com/langchain-ai/langgraph"
+  commit: 38031739e551638e373fb553453256c23feeb41f
+  docs: "https://langchain-ai.github.io/langgraph/"
+  version: "langgraph 1.2.11 / checkpoint 4.2.0 / sdk 0.4.3"
+  license: MIT
+  license_verdict: INTEGRATE
+  runtime_class: hybrid
+  one_line: Graph-based runtime for building resilient agents with pluggable checkpointers.
+  thesis: "Model execution as a Pregel super-step loop over versioned channels, and make the persistence boundary an explicit caller-selected tradeoff. Get the checkpoint contract right and durability, HITL, time-travel and forking all fall out of one mechanism."
+
+probes:
+
+  # --- A. Core abstraction and object model ---
+  # A1: What does this system think an agent *is*? State it in one sentence, in their vocabulary.
+  A1:
+    verdict: first_class
+    note: "A graph of nodes over versioned channels. An 'agent' is not a runtime concept; the unit is a compiled Pregel graph executing super-steps."
+    evidence: "libs/langgraph/langgraph/pregel/main.py @ 3803173"
+  # A2: What is the root resource — the thing everything else hangs off?
+  A2:
+    verdict: first_class
+    note: "Thread is the root in OSS, but it is only a thread_id string in a config dict, not a stored object. Becomes a real resource only in the closed Platform."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:300 @ 3803173"
+  # A3: Is `Agent` persistent or ephemeral? Can it exist while not executing?
+  A3:
+    verdict: absent
+    note: "No Agent resource exists in the OSS runtime. Platform 'Assistant' is config-over-graph, not a persistent agent."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:246 @ 3803173"
+  # A4: Is `Task` a separate resource from `Run`? If not, which concept is missing and what fills the...
+  A4:
+    verdict: absent
+    note: "No Task resource. A Run exists only at the Platform layer; in OSS a run is a function call with no durable identity."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:362 @ 3803173"
+  # A5: What is a `Session` attached to: user, agent, task, or execution?
+  A5:
+    verdict: implicit
+    note: "Thread is the session analogue, attached to nothing in particular - the caller supplies an arbitrary thread_id."
+    evidence: "libs/langgraph/langgraph/types.py @ 3803173"
+  # A6: Are messages first-class durable resources, or transient function arguments?
+  A6:
+    verdict: absent
+    note: "Messages are ordinary channel values, not durable addressable resources. No mailbox, no delivery guarantee."
+    evidence: "libs/checkpoint/langgraph/checkpoint/base/__init__.py:92 @ 3803173"
+  # A7: Are artifacts (files, outputs, deliverables) first-class?
+  A7:
+    verdict: absent
+    note: "No artifact concept. Outputs are channel values or Store items."
+    evidence: "libs/checkpoint/langgraph/checkpoint/store/base/__init__.py:51 @ 3803173"
+  # A8: Can multiple agents participate in one task? How is that represented?
+  A8:
+    verdict: implicit
+    note: "Multiple agents = multiple nodes in one graph sharing channel state, or subgraphs. Not modelled as distinct participants."
+    evidence: "libs/langgraph/langgraph/pregel/_algo.py @ 3803173"
+  # A9: Draw the object model as a tree. Only nodes that exist in their code or API.
+  A9:
+    verdict: first_class
+    note: "Graph > Node/Channel > Thread > Checkpoint > PendingWrite. Store is separate. See teardown section 3."
+    evidence: "libs/checkpoint/langgraph/checkpoint/base/__init__.py:38-160 @ 3803173"
+
+  # --- B. Runtime model ---
+  # B1: Does the platform launch agents, host them, or attach to external ones?
+  B1:
+    verdict: absent
+    note: "Neither launches, hosts, nor attaches to external agents. The agent IS Python inside the graph; no adapter concept."
+    evidence: "libs/langgraph/langgraph/pregel/main.py @ 3803173"
+  # B2: Execution substrate: process, container, microVM, serverless, in-process library, remote HTTP?
+  B2:
+    verdict: first_class
+    note: "In-process library. Platform wraps it in containers with Postgres+Redis."
+    evidence: "libs/cli/langgraph_cli/deploy.py @ 3803173"
+  # B3: Who owns the event loop — platform or agent?
+  B3:
+    verdict: first_class
+    note: "Caller owns the event loop. invoke/stream drive the super-step loop synchronously from the caller's view."
+    evidence: "libs/langgraph/langgraph/pregel/_loop.py @ 3803173"
+  # B4: Who decides when an agent wakes?
+  B4:
+    verdict: first_class
+    note: "Caller decides. No autonomous wake; Platform Cron provides scheduled triggers."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:383 @ 3803173"
+  # B5: Can an agent run indefinitely? What is the actual ceiling?
+  B5:
+    verdict: implicit
+    note: "Bounded by recursion_limit on super-steps, not by wall clock. No indefinite background execution in OSS."
+    evidence: "libs/langgraph/langgraph/pregel/main.py @ 3803173"
+  # B6: Are there background or unattended agents?
+  B6:
+    verdict: absent
+    note: "No background agents in OSS. Cron exists only in the closed Platform."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:383 @ 3803173"
+  # B7: Is execution synchronous or asynchronous from the caller's view?
+  B7:
+    verdict: first_class
+    note: "Synchronous from the caller's view; async variants exist but the caller still awaits."
+    evidence: "libs/langgraph/langgraph/pregel/main.py @ 3803173"
+  # B8: Can in-flight work migrate between workers?
+  B8:
+    verdict: absent
+    note: "No work migration in OSS. Any such behaviour lives in the closed Platform."
+    evidence: "libs/langgraph/langgraph/pregel/_loop.py @ 3803173"
+  # B9: Can an agent survive a machine restart? Automatically, or with operator action?
+  B9:
+    verdict: first_class
+    note: "Yes via checkpointer: a new process resumes the thread from its last checkpoint."
+    evidence: "libs/checkpoint/langgraph/checkpoint/base/__init__.py:176 @ 3803173"
+  # B10: Classify: worker/queue, durable actor, attached harness, or in-process library.
+  B10:
+    verdict: first_class
+    note: "in_process library; Platform layers worker_queue on top."
+    evidence: "libs/langgraph/langgraph/pregel/main.py @ 3803173"
+
+  # --- C. Durability and failure semantics ---
+  # C1: What state is durable, and what is lost on crash?
+  C1:
+    verdict: first_class
+    note: "Durable: channel_values, channel_versions, versions_seen, pending_writes, metadata (source/step/parents/run_id). Lost: in-flight node locals."
+    evidence: "libs/checkpoint/langgraph/checkpoint/base/__init__.py:38-125 @ 3803173"
+  # C2: *When* is state persisted — every step, every tool call, on checkpoint, never?
+  C2:
+    verdict: first_class
+    note: "Caller-selected: Durability = sync (before next step) | async (during next step) | exit (on exit only). Excellent design - names a real tradeoff."
+    evidence: "libs/langgraph/langgraph/types.py:89 @ 3803173"
+  # C3: Checkpointing or event sourcing? Can state be rebuilt from a log?
+  C3:
+    verdict: first_class
+    note: "Checkpointing, not event sourcing. Snapshot of channel values plus pending writes; monotonically increasing checkpoint ids allow ordering and replay."
+    evidence: "libs/checkpoint/langgraph/checkpoint/base/__init__.py:97 @ 3803173"
+  # C4: Retry semantics, and at what granularity: run, step, tool call?
+  C4:
+    verdict: first_class
+    note: "Declarative RetryPolicy(initial_interval, backoff_factor, max_interval) applied per node."
+    evidence: "libs/langgraph/langgraph/types.py:418 @ 3803173"
+  # C5: At-least-once or exactly-once? What do the docs claim versus what the code does?
+  C5:
+    verdict: implicit
+    note: "At-least-once at NODE granularity. Verified: a side effect before interrupt() executes twice on resume."
+    evidence: "verified empirically 2026-08-26, langgraph 1.2.11; libs/langgraph/langgraph/types.py:864 @ 3803173"
+  # C6: Is there an idempotency model for tool side effects?
+  C6:
+    verdict: absent
+    note: "No idempotency model for side effects. CachePolicy is a perf cache keyed on node input, not an idempotency barrier."
+    evidence: "libs/langgraph/langgraph/types.py:521 @ 3803173"
+  # C7: Process crash recovery: what resumes, and from where?
+  C7:
+    verdict: first_class
+    note: "Deterministic task IDs hashed from checkpoint_id + namespace + step (xxhash for v>1, uuid5 below), with a task_id_checksum assertion. Completed tasks are skipped on resume."
+    evidence: "libs/langgraph/langgraph/pregel/_algo.py:550,616,662 @ 3803173"
+  # C8: Node loss: is work re-dispatched, and how is it detected?
+  C8:
+    verdict: unknown
+    note: "No node-loss detection in OSS (no nodes). Platform lease/heartbeat behaviour is closed source."
+    evidence: "libs/langgraph/langgraph/pregel/_loop.py @ 3803173"
+  # C9: Context-window overflow: truncation, summarisation, or failure?
+  C9:
+    verdict: absent
+    note: "No automatic context-overflow handling. Summarisation is left to user code."
+    evidence: "libs/langgraph/langgraph/pregel/main.py @ 3803173"
+  # C10: Timers, scheduled execution, long sleeps — durable across restart?
+  C10:
+    verdict: implicit
+    note: "No durable timers in OSS. Platform Cron provides scheduling; durability closed."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:383 @ 3803173"
+  # C11: Human-in-the-loop pause and resume: durable, or in-memory only?
+  C11:
+    verdict: first_class
+    note: "interrupt() is durable: requires a checkpointer, surfaces value to client, resumes via Command(resume=...). Pending interrupts queryable as thread state."
+    evidence: "libs/langgraph/langgraph/types.py:851 @ 3803173 and libs/sdk-py/langgraph_sdk/schema.py:300"
+  # C12: Can a definition be upgraded while runs are in flight? What happens to them?
+  C12:
+    verdict: absent
+    note: "No definition version on checkpoints. Verified: same-topology change silently runs new code; a RENAMED node silently drops the pending task and returns empty with no error. Genuine hazard."
+    evidence: "verified empirically 2026-08-26, langgraph 1.2.11"
+
+  # --- D. Agent identity and lifecycle ---
+  # D1: Is an agent globally addressable? By what identifier?
+  D1:
+    verdict: absent
+    note: "No agent_id anywhere in the OSS runtime. Platform assistant_id is the nearest analogue."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:246 @ 3803173"
+  # D2: Does identity survive process restart?
+  D2:
+    verdict: implicit
+    note: "Thread state survives restart; agent identity does not exist to survive."
+    evidence: "libs/checkpoint/langgraph/checkpoint/base/__init__.py:176 @ 3803173"
+  # D3: Is identity distinct from runtime instance?
+  D3:
+    verdict: absent
+    note: "No identity/instance distinction because there is no identity."
+    evidence: "libs/langgraph/langgraph/pregel/main.py @ 3803173"
+  # D4: Are agents versioned? Immutable or mutable definitions?
+  D4:
+    verdict: first_class
+    note: "Platform only: Assistant has integer version and AssistantVersion history. Versions config, NOT graph topology - see C12."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:269 @ 3803173"
+  # D5: Is there a registry or catalog?
+  D5:
+    verdict: implicit
+    note: "Platform assistant search acts as a registry; nothing in OSS."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:282 @ 3803173"
+  # D6: Can agents discover each other at runtime?
+  D6:
+    verdict: absent
+    note: "No runtime agent discovery."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py @ 3803173"
+  # D7: Can agents advertise capabilities? In what format?
+  D7:
+    verdict: absent
+    note: "No capability advertisement for agents. (The Capability enum in the conformance suite is about storage ops, different concept.)"
+    evidence: "libs/checkpoint-conformance/langgraph/checkpoint/conformance/capabilities.py @ 3803173"
+  # D8: Is there an owner, team, or tenant on the agent record?
+  D8:
+    verdict: absent
+    note: "No owner, team, or tenant on any resource in OSS."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:246 @ 3803173"
+  # D9: Can an agent be suspended, revoked, or deprecated?
+  D9:
+    verdict: absent
+    note: "No suspend/revoke/deprecate lifecycle."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py @ 3803173"
+  # D10: Is there anything resembling a declarative agent manifest?
+  D10:
+    verdict: absent
+    note: "No declarative agent manifest. Graphs are defined in Python code."
+    evidence: "libs/langgraph/langgraph/graph @ 3803173"
+
+  # --- E. Harness and runtime interoperability ---
+  # E1: What is the minimum interface an agent implementation must satisfy?
+  E1:
+    verdict: absent
+    note: "No agent interface to implement; you write Python nodes. No adapter boundary exists."
+    evidence: "libs/langgraph/langgraph/pregel/main.py @ 3803173"
+  # E2: Transport: stdin/stdout, HTTP, gRPC, WebSocket, in-process, ACP, A2A?
+  E2:
+    verdict: first_class
+    note: "In-process Python for OSS; HTTP+SSE for Platform. No stdio/gRPC/ACP/A2A."
+    evidence: "libs/sdk-py/langgraph_sdk/client.py @ 3803173"
+  # E3: Can it host a foreign agent (Claude Code, Codex, OpenHands, LangGraph, ADK)?
+  E3:
+    verdict: absent
+    note: "Cannot host a foreign agent. LangGraph is the harness, not a host for others."
+    evidence: "libs/langgraph/langgraph/pregel/main.py @ 3803173"
+  # E4: Is there an event stream out of a running agent? What granularity?
+  E4:
+    verdict: first_class
+    note: "Rich stream/debug event stream: _DebugCheckpointPayload, _DebugTaskPayload, _DebugTaskResultPayload, RunMetadataPayload."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:686-723 @ 3803173"
+  # E5: Are tool calls externally observable, or internal to the agent?
+  E5:
+    verdict: first_class
+    note: "Tool calls are observable as node executions in the stream."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:697 @ 3803173"
+  # E6: How is context injected at start?
+  E6:
+    verdict: first_class
+    note: "Context injected via config/context on invoke; Assistant carries static context at Platform layer."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:246 @ 3803173"
+  # E7: Is cancellation supported? Cooperative or forced? Does it propagate to subagents?
+  E7:
+    verdict: implicit
+    note: "No cooperative cancel token for sync nodes; async path can propagate CancelledError. Verified: abandoning a sync invoke leaves the worker running and the task pending."
+    evidence: "verified empirically 2026-08-26, langgraph 1.2.11"
+  # E8: Can a run be checkpointed and restored by the platform, or only by the agent?
+  E8:
+    verdict: first_class
+    note: "Platform-side checkpoint/restore via the checkpointer; the runtime owns it, not the agent."
+    evidence: "libs/checkpoint/langgraph/checkpoint/base/__init__.py:176 @ 3803173"
+  # E9: Which of these would be hard to adapt, and why?
+  E9:
+    verdict: implicit
+    note: "Adapting LangGraph as a guest harness is feasible via the SDK; adapting foreign agents INTO LangGraph is not supported."
+    evidence: "libs/sdk-py/langgraph_sdk/client.py @ 3803173"
+
+  # --- F. Agent-to-agent communication ---
+  # F1: Direct messages between agents?
+  F1:
+    verdict: absent
+    note: "No direct agent-to-agent messages."
+    evidence: "libs/langgraph/langgraph/pregel/_algo.py @ 3803173"
+  # F2: Channels, topics, or pub/sub?
+  F2:
+    verdict: absent
+    note: "No channels in the messaging sense. LangGraph 'channels' are state slots, not pub/sub topics."
+    evidence: "libs/checkpoint/langgraph/checkpoint/base/__init__.py:92 @ 3803173"
+  # F3: Task delegation as a distinct mechanism from messaging?
+  F3:
+    verdict: absent
+    note: "No task delegation primitive. Send() is intra-graph fan-out."
+    evidence: "libs/langgraph/langgraph/types.py @ 3803173"
+  # F4: Synchronous RPC between agents?
+  F4:
+    verdict: absent
+    note: "No inter-agent RPC."
+    evidence: "libs/langgraph/langgraph/pregel/main.py @ 3803173"
+  # F5: Asynchronous inbox or mailbox?
+  F5:
+    verdict: absent
+    note: "No mailbox or inbox."
+    evidence: "libs/langgraph/langgraph/pregel/_algo.py @ 3803173"
+  # F6: Is delivery durable? Survives restart of sender and receiver?
+  F6:
+    verdict: absent
+    note: "No message delivery layer, hence no durability guarantee."
+    evidence: "libs/langgraph/langgraph/pregel/_algo.py @ 3803173"
+  # F7: Is message ordering guaranteed? Per what scope?
+  F7:
+    verdict: implicit
+    note: "Ordering exists only as super-step sequencing within one graph."
+    evidence: "libs/langgraph/langgraph/pregel/_loop.py @ 3803173"
+  # F8: Acknowledgement or delivery receipts?
+  F8:
+    verdict: absent
+    note: "No acknowledgement mechanism."
+    evidence: "libs/langgraph/langgraph/pregel/_algo.py @ 3803173"
+  # F9: Correlation ids for request/response pairing?
+  F9:
+    verdict: implicit
+    note: "run_id in checkpoint metadata correlates checkpoints to a run; not a message correlation id."
+    evidence: "libs/checkpoint/langgraph/checkpoint/base/__init__.py:61 @ 3803173"
+  # F10: Conversation threading?
+  F10:
+    verdict: implicit
+    note: "Thread is the threading construct, but for human conversation, not agent-to-agent."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:300 @ 3803173"
+  # F11: Capability-based routing — address by what an agent *can do* rather than who it is?
+  F11:
+    verdict: absent
+    note: "No capability-based routing."
+    evidence: "libs/langgraph/langgraph/pregel/_algo.py @ 3803173"
+
+  # --- G. Human-agent collaboration ---
+  # G1: Is a human modelled as a special kind of agent, a distinct principal type, or not modelled?
+  G1:
+    verdict: absent
+    note: "Humans are not modelled in the runtime. Auth subject is BaseUser (identity, is_authenticated, permissions) - no Principal abstraction and no agent principal."
+    evidence: "libs/sdk-py/langgraph_sdk/auth/types.py:152-202 @ 3803173"
+  # G2: Shared rooms, channels, or workspaces?
+  G2:
+    verdict: absent
+    note: "No shared workspace or room concept."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py @ 3803173"
+  # G3: Task threads humans can read and post into?
+  G3:
+    verdict: implicit
+    note: "A Thread is readable and updatable by a human via update_state, functioning as a shared surface."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:333 @ 3803173"
+  # G4: Mentions or directed addressing?
+  G4:
+    verdict: absent
+    note: "No mentions or directed addressing."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py @ 3803173"
+  # G5: Approval gates. Blocking or advisory? Durable while pending?
+  G5:
+    verdict: first_class
+    note: "interrupt() is a durable blocking approval gate; pending interrupts exposed as thread.interrupts keyed by task id."
+    evidence: "libs/langgraph/langgraph/types.py:851 @ 3803173; libs/sdk-py/langgraph_sdk/schema.py:300"
+  # G6: Mid-run intervention: can a human redirect without restarting?
+  G6:
+    verdict: first_class
+    note: "update_state allows a human to modify thread state mid-run and resume, including forking (metadata source='update'|'fork')."
+    evidence: "libs/checkpoint/langgraph/checkpoint/base/__init__.py:41 @ 3803173"
+  # G7: Agent status and presence visible to humans?
+  G7:
+    verdict: first_class
+    note: "ThreadStatus = idle | busy | interrupted | error gives visible agent status."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:34 @ 3803173"
+  # G8: Notifications or escalation when an agent is blocked?
+  G8:
+    verdict: absent
+    note: "No notification or escalation mechanism."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py @ 3803173"
+  # G9: Shared scratchpad or working surface?
+  G9:
+    verdict: implicit
+    note: "Channel state acts as a shared scratchpad, but it is execution state rather than a collaboration surface."
+    evidence: "libs/checkpoint/langgraph/checkpoint/base/__init__.py:92 @ 3803173"
+  # G10: Can a human see the context an agent is operating on?
+  G10:
+    verdict: first_class
+    note: "get_state exposes the full context the agent is operating on."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:333 @ 3803173"
+
+  # --- H. Context and memory ---
+  # H1: Which of these exist as *separate* concepts: prompt context, working state, session history, ...
+  H1:
+    verdict: first_class
+    note: "Three separated concepts: checkpointer channels (working execution state), BaseStore (cross-thread memory), BaseCache (node-output cache). Supports the ADR-0008 split."
+    evidence: "libs/checkpoint/langgraph/checkpoint/store/base/__init__.py:708 @ 3803173"
+  # H2: Who owns memory: agent, human, workspace, task, or tenant?
+  H2:
+    verdict: implicit
+    note: "Store items are owned by whatever namespace tuple the caller chooses - 'user IDs, assistant IDs, or other arbitrary namespaces'. Ownership is convention, not enforced."
+    evidence: "libs/checkpoint/langgraph/checkpoint/store/base/__init__.py:711 @ 3803173"
+  # H3: Can memory be shared between agents? At what granularity?
+  H3:
+    verdict: first_class
+    note: "Store is explicitly shared across threads via namespaces."
+    evidence: "libs/checkpoint/langgraph/checkpoint/store/base/__init__.py:711 @ 3803173"
+  # H4: Are there permissions on memory?
+  H4:
+    verdict: absent
+    note: "No permissions on Store namespaces. Any holder of the store handle can read any namespace - looks like an isolation boundary but is not one."
+    evidence: "libs/checkpoint/langgraph/checkpoint/store/base/__init__.py:708 @ 3803173"
+  # H5: Is provenance tracked — where a memory came from?
+  H5:
+    verdict: absent
+    note: "No provenance field on Item (value/key/namespace/timestamps only)."
+    evidence: "libs/checkpoint/langgraph/checkpoint/store/base/__init__.py:51 @ 3803173"
+  # H6: Expiry, TTL, or forgetting?
+  H6:
+    verdict: first_class
+    note: "TTLConfig: refresh_on_read, omit_expired, default_ttl, sweep_interval_minutes."
+    evidence: "libs/checkpoint/langgraph/checkpoint/store/base/__init__.py:545 @ 3803173"
+  # H7: Summarisation or compaction. Automatic or explicit?
+  H7:
+    verdict: absent
+    note: "No built-in summarisation or compaction of history."
+    evidence: "libs/langgraph/langgraph/pregel/main.py @ 3803173"
+  # H8: Retrieval mechanism: vector, keyword, structured, agent-driven?
+  H8:
+    verdict: first_class
+    note: "Store search with optional semantic index (IndexConfig), plus filtered search and namespace listing."
+    evidence: "libs/checkpoint/langgraph/checkpoint/store/base/__init__.py:578 @ 3803173"
+  # H9: Can an agent mutate its own memory mid-run?
+  H9:
+    verdict: first_class
+    note: "Nodes can write to the Store mid-run via the injected store handle."
+    evidence: "libs/checkpoint/langgraph/checkpoint/store/base/__init__.py:708 @ 3803173"
+  # H10: Conflict resolution on concurrent writes?
+  H10:
+    verdict: absent
+    note: "No versioning, CAS, or conflict policy on Store items. Last-write-wins by implementation default."
+    evidence: "libs/checkpoint/langgraph/checkpoint/store/base/__init__.py:431 @ 3803173"
+  # H11: Is memory in the same store as execution state, or separate?
+  H11:
+    verdict: first_class
+    note: "Separate stores: checkpointer for execution state, BaseStore for memory. Good separation."
+    evidence: "libs/checkpoint/langgraph/checkpoint/store/base/__init__.py:708 @ 3803173"
+
+  # --- I. Tools and capabilities ---
+  # I1: Are tools bound to agents statically, or resolved dynamically?
+  I1:
+    verdict: first_class
+    note: "Tools are Python callables bound statically at graph construction."
+    evidence: "libs/langgraph/langgraph/prebuilt @ 3803173"
+  # I2: Is there a capability abstraction distinct from tool implementation?
+  I2:
+    verdict: absent
+    note: "No capability abstraction distinct from tool implementation. NOTE the vocabulary collision: the conformance Capability enum concerns checkpointer storage ops."
+    evidence: "libs/checkpoint-conformance/langgraph/checkpoint/conformance/capabilities.py @ 3803173"
+  # I3: Is there a registry of available tools?
+  I3:
+    verdict: absent
+    note: "No tool registry."
+    evidence: "libs/langgraph/langgraph/prebuilt @ 3803173"
+  # I4: Tool scoping — can an agent be restricted to a subset?
+  I4:
+    verdict: absent
+    note: "No tool scoping or restriction mechanism."
+    evidence: "libs/langgraph/langgraph/prebuilt @ 3803173"
+  # I5: Are tools versioned?
+  I5:
+    verdict: absent
+    note: "No tool versioning."
+    evidence: "libs/langgraph/langgraph/prebuilt @ 3803173"
+  # I6: How are credentials supplied to a tool?
+  I6:
+    verdict: absent
+    note: "Credentials are ambient in the host process; no injection model."
+    evidence: "libs/langgraph/langgraph/pregel/main.py @ 3803173"
+  # I7: OAuth or delegated user credentials?
+  I7:
+    verdict: absent
+    note: "No OAuth or delegated credential support in the runtime."
+    evidence: "libs/sdk-py/langgraph_sdk/auth/types.py @ 3803173"
+  # I8: Can policy intercept a tool call before execution?
+  I8:
+    verdict: absent
+    note: "No policy interception of tool calls. Platform auth covers API resources (threads/assistants/store), not tool invocation."
+    evidence: "libs/sdk-py/langgraph_sdk/auth/__init__.py:98 @ 3803173"
+  # I9: Approval gates on specific tools?
+  I9:
+    verdict: implicit
+    note: "Achievable by placing interrupt() before a tool node, but not a first-class per-tool gate."
+    evidence: "libs/langgraph/langgraph/types.py:851 @ 3803173"
+  # I10: Do tools execute inside or outside the agent's sandbox?
+  I10:
+    verdict: absent
+    note: "No sandbox, so tools execute in the host process."
+    evidence: "libs/langgraph/langgraph/pregel/main.py @ 3803173"
+
+  # --- J. Security and identity ---
+  # J1: What identity does an agent authenticate as?
+  J1:
+    verdict: absent
+    note: "Agents have no identity and cannot authenticate. Auth subject is always a human BaseUser."
+    evidence: "libs/sdk-py/langgraph_sdk/auth/types.py:182 @ 3803173"
+  # J2: Authentication mechanism for agent-to-platform?
+  J2:
+    verdict: first_class
+    note: "Platform: @auth.authenticate handler runs on every request, returning a user with identity/permissions."
+    evidence: "libs/sdk-py/langgraph_sdk/auth/__init__.py:225 @ 3803173"
+  # J3: Authorisation model: RBAC, ABAC, capability tokens, none?
+  J3:
+    verdict: first_class
+    note: "Resource/action authorisation with specificity fallback: @auth.on.threads.create -> @auth.on.threads -> @auth.on. Resources: threads, assistants, store. Good pattern."
+    evidence: "libs/sdk-py/langgraph_sdk/auth/__init__.py:98-212 @ 3803173"
+  # J4: Secret storage and injection?
+  J4:
+    verdict: absent
+    note: "No secret management. Serde-layer encryption exists for checkpoint data only."
+    evidence: "libs/checkpoint/langgraph/checkpoint/serde/encrypted.py @ 3803173"
+  # J5: Per-agent credentials, or shared platform credentials?
+  J5:
+    verdict: absent
+    note: "No per-agent credentials."
+    evidence: "libs/sdk-py/langgraph_sdk/auth/types.py @ 3803173"
+  # J6: Can an agent act as a user? Is that impersonation or delegation?
+  J6:
+    verdict: absent
+    note: "No impersonation or delegation model."
+    evidence: "libs/sdk-py/langgraph_sdk/auth/types.py @ 3803173"
+  # J7: Tenant isolation: logical, or enforced at runtime?
+  J7:
+    verdict: absent
+    note: "No tenant concept in OSS. Store namespaces are convention, not enforcement."
+    evidence: "libs/checkpoint/langgraph/checkpoint/store/base/__init__.py:708 @ 3803173"
+  # J8: Network and filesystem isolation?
+  J8:
+    verdict: absent
+    note: "No network or filesystem isolation."
+    evidence: "libs/langgraph/langgraph/pregel/main.py @ 3803173"
+  # J9: Is there an audit log? Is it tamper-evident?
+  J9:
+    verdict: implicit
+    note: "Checkpoint history is an audit trail of state changes, but not a tamper-evident security audit log."
+    evidence: "libs/checkpoint/langgraph/checkpoint/base/__init__.py:38 @ 3803173"
+  # J10: Where are policy decisions enforced — control plane, runtime, or tool gateway?
+  J10:
+    verdict: first_class
+    note: "Policy enforced at the Platform API boundary via auth handlers. Nothing at the runtime or tool layer."
+    evidence: "libs/sdk-py/langgraph_sdk/auth/__init__.py:98 @ 3803173"
+
+  # --- K. Sandbox and isolation ---
+  # K1: Is there a workspace or sandbox concept? What is its lifecycle?
+  K1:
+    verdict: absent
+    note: "No sandbox or workspace concept. Nodes are Python functions in the host process."
+    evidence: "libs/langgraph/langgraph/pregel/main.py @ 3803173"
+  # K2: Persistent filesystem across runs?
+  K2:
+    verdict: absent
+    note: "No sandbox filesystem."
+    evidence: "libs/langgraph/langgraph/pregel/main.py @ 3803173"
+  # K3: Snapshot and restore?
+  K3:
+    verdict: absent
+    note: "No sandbox snapshot. (Thread checkpoint/copy_thread is state, not environment.)"
+    evidence: "libs/checkpoint/langgraph/checkpoint/base/__init__.py:350 @ 3803173"
+  # K4: Network egress rules?
+  K4:
+    verdict: absent
+    note: "No network egress controls."
+    evidence: "libs/langgraph/langgraph/pregel/main.py @ 3803173"
+  # K5: Container, microVM, or none?
+  K5:
+    verdict: absent
+    note: "No container or microVM isolation in the runtime."
+    evidence: "libs/langgraph/langgraph/pregel/main.py @ 3803173"
+  # K6: Resource quotas: CPU, memory, disk, wall clock?
+  K6:
+    verdict: implicit
+    note: "recursion_limit bounds super-steps. No CPU, memory, disk, or wall-clock quota."
+    evidence: "libs/langgraph/langgraph/pregel/main.py @ 3803173"
+  # K7: How are secrets injected without landing in the image or logs?
+  K7:
+    verdict: absent
+    note: "No secret injection mechanism."
+    evidence: "libs/langgraph/langgraph/pregel/main.py @ 3803173"
+  # K8: Arbitrary code execution? Browser execution?
+  K8:
+    verdict: absent
+    note: "No managed code or browser execution."
+    evidence: "libs/langgraph/langgraph/pregel/main.py @ 3803173"
+  # K9: Is the sandbox pluggable, or a fixed implementation?
+  K9:
+    verdict: absent
+    note: "No sandbox at all, hence not pluggable. Zero evidence for ADR-0009."
+    evidence: "libs/langgraph/langgraph/pregel/main.py @ 3803173"
+
+  # --- L. Orchestration and scheduling ---
+  # L1: Does it distinguish agent coordination from workflow orchestration?
+  L1:
+    verdict: absent
+    note: "Does not distinguish them: agent coordination IS workflow orchestration here. Both are graph edges."
+    evidence: "libs/langgraph/langgraph/graph @ 3803173"
+  # L2: Topology: DAG, cyclic graph, supervisor, planner, event-driven, queue?
+  L2:
+    verdict: first_class
+    note: "Cyclic graph with conditional edges, Pregel super-step semantics."
+    evidence: "libs/langgraph/langgraph/pregel/_loop.py @ 3803173"
+  # L3: Cron or scheduled triggers?
+  L3:
+    verdict: implicit
+    note: "Cron at the Platform layer only; nothing in OSS."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:383 @ 3803173"
+  # L4: Dynamic task spawning at runtime?
+  L4:
+    verdict: first_class
+    note: "Send() enables dynamic task spawning and fan-out at runtime."
+    evidence: "libs/langgraph/langgraph/types.py @ 3803173"
+  # L5: Fan-out / fan-in?
+  L5:
+    verdict: first_class
+    note: "Fan-out via Send, fan-in via channel reducers."
+    evidence: "libs/langgraph/langgraph/pregel/_algo.py:295 @ 3803173"
+  # L6: Subagents. Are they first-class, or just nested calls?
+  L6:
+    verdict: first_class
+    note: "Subgraphs are first-class with independently controllable checkpointing (Checkpointer = None inherits | True enables | False disables)."
+    evidence: "libs/langgraph/langgraph/types.py:102 @ 3803173"
+  # L7: Retry and backoff policy — declarative or hand-rolled?
+  L7:
+    verdict: first_class
+    note: "Declarative RetryPolicy per node."
+    evidence: "libs/langgraph/langgraph/types.py:418 @ 3803173"
+  # L8: Compensation or rollback on failure?
+  L8:
+    verdict: absent
+    note: "No compensation or rollback (Platform multitask_strategy='rollback' cancels a run, not a saga)."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:81 @ 3803173"
+  # L9: Does cancellation propagate through the whole tree?
+  L9:
+    verdict: implicit
+    note: "Async path propagates CancelledError to children; sync path cannot interrupt a running node. Not durable."
+    evidence: "verified empirically 2026-08-26, langgraph 1.2.11"
+  # L10: Could this be replaced by Temporal or Restate, or is orchestration inseparable from the agent...
+  L10:
+    verdict: implicit
+    note: "Not cleanly replaceable by Temporal: channel versioning is inseparable from the state model. But the checkpointer layer beneath IS replaceable."
+    evidence: "libs/checkpoint/langgraph/checkpoint/base/__init__.py:176 @ 3803173"
+
+  # --- M. Observability ---
+  # M1: Which of these are modelled as telemetry objects: trace, run, step, LLM call, tool call, mess...
+  M1:
+    verdict: first_class
+    note: "Modelled: checkpoint, task, task result, run metadata, stream events. Not modelled: message, handoff, artifact, cost."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:686-723 @ 3803173"
+  # M2: Is telemetry keyed to agent, run, model, task, user, or tenant?
+  M2:
+    verdict: first_class
+    note: "Keyed to thread_id, checkpoint_id, task_id, run_id. Not to agent, user, or tenant."
+    evidence: "libs/checkpoint/langgraph/checkpoint/base/__init__.py:38 @ 3803173"
+  # M3: OpenTelemetry, proprietary, or none?
+  M3:
+    verdict: absent
+    note: "NO OpenTelemetry anywhere in libs/. Telemetry goes to LangSmith via LangSmithTracing config over a proprietary protocol; LangSmith server is closed."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:111 @ 3803173; grep opentelemetry libs/ finds nothing"
+  # M4: Is there a documented, stable event schema?
+  M4:
+    verdict: implicit
+    note: "Debug payload TypedDicts are structured but prefixed with underscore, signalling internal/unstable."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:686 @ 3803173"
+  # M5: Cost and token accounting. Per what unit?
+  M5:
+    verdict: absent
+    note: "No cost or token accounting in the runtime."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:723 @ 3803173"
+  # M6: Latency breakdown by phase?
+  M6:
+    verdict: implicit
+    note: "Checkpoint timestamps and step numbers permit phase reconstruction; no first-class latency breakdown."
+    evidence: "libs/checkpoint/langgraph/checkpoint/base/__init__.py:100 @ 3803173"
+  # M7: Error taxonomy?
+  M7:
+    verdict: implicit
+    note: "RunStatus includes error and timeout; errors recorded as ERROR channel writes on the task."
+    evidence: "libs/langgraph/langgraph/pregel/_algo.py:784 @ 3803173"
+  # M8: Can the event stream reconstruct a run after the fact — replay or audit?
+  M8:
+    verdict: first_class
+    note: "Checkpoint history plus pending writes allows full run reconstruction and time-travel replay."
+    evidence: "libs/checkpoint/langgraph/checkpoint/base/__init__.py:253 @ 3803173"
+
+  # --- N. Multi-tenancy and enterprise ---
+  # N1: Resource hierarchy: org, workspace, project, environment?
+  N1:
+    verdict: absent
+    note: "No org/workspace/project/environment hierarchy in OSS."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py @ 3803173"
+  # N2: RBAC model and its granularity?
+  N2:
+    verdict: implicit
+    note: "Permission strings on BaseUser plus resource/action handlers; no role model."
+    evidence: "libs/sdk-py/langgraph_sdk/auth/types.py:201 @ 3803173"
+  # N3: Quotas and cost limits. Enforced or advisory?
+  N3:
+    verdict: absent
+    note: "No quotas or cost limits."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py @ 3803173"
+  # N4: dev / staging / prod separation?
+  N4:
+    verdict: absent
+    note: "No environment separation primitive."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py @ 3803173"
+  # N5: Deployment promotion path?
+  N5:
+    verdict: implicit
+    note: "AssistantVersion enables config promotion; no environment promotion path."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:269 @ 3803173"
+  # N6: Agent catalog scoped to a tenant?
+  N6:
+    verdict: implicit
+    note: "Assistant search functions as a catalog, but is not tenant-scoped in OSS."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:282 @ 3803173"
+  # N7: Audit retention controls?
+  N7:
+    verdict: implicit
+    note: "prune and delete_for_runs give retention control over checkpoint data."
+    evidence: "libs/checkpoint/langgraph/checkpoint/base/__init__.py:374 @ 3803173"
+  # N8: Is multi-tenancy in the OSS core, or reserved for a commercial tier?
+  N8:
+    verdict: first_class
+    note: "Multi-tenancy is entirely absent from OSS and reserved for the commercial Platform. Classic open-core boundary."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py @ 3803173"
+
+  # --- O. API and protocol surface ---
+  # O1: List the actual primary endpoints or SDK entry points. Verbatim.
+  O1:
+    verdict: first_class
+    note: "OSS: StateGraph, compile, invoke, stream, get_state, update_state, Command. Platform: /assistants, /threads, /threads/{id}/runs, /crons, /store."
+    evidence: "libs/sdk-py/langgraph_sdk/client.py @ 3803173"
+  # O2: Is the API resource-oriented or RPC-flavoured?
+  O2:
+    verdict: first_class
+    note: "Platform API is resource-oriented; OSS surface is a Python library API."
+    evidence: "libs/sdk-py/langgraph_sdk/client.py @ 3803173"
+  # O3: Streaming: SSE, WebSocket, long-poll, gRPC stream?
+  O3:
+    verdict: first_class
+    note: "SSE streaming with typed StreamPart; ThreadStreamMode = run_modes | lifecycle | state_update."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:43,595 @ 3803173"
+  # O4: Webhooks or outbound callbacks?
+  O4:
+    verdict: implicit
+    note: "Platform webhook support referenced in run creation options."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py:522 @ 3803173"
+  # O5: Which standards are implemented: MCP, A2A, ACP, OTel, OpenAI-compatible?
+  O5:
+    verdict: absent
+    note: "None of MCP, A2A, ACP, or OTel implemented in the runtime. MCP is available through separate LangChain packages."
+    evidence: "libs/sdk-py/langgraph_sdk/schema.py @ 3803173"
+  # O6: Is the API versioned? Stability commitment?
+  O6:
+    verdict: first_class
+    note: "Checkpoint format carries an explicit version field v (currently 1), and task-id hashing branches on it."
+    evidence: "libs/checkpoint/langgraph/checkpoint/base/__init__.py:95 @ 3803173"
+  # O7: Is there a separate northbound (client) and southbound (runtime) API?
+  O7:
+    verdict: first_class
+    note: "Yes: northbound Platform HTTP API vs the southbound BaseCheckpointSaver/BaseStore storage interfaces."
+    evidence: "libs/checkpoint/langgraph/checkpoint/base/__init__.py:176 @ 3803173"
+
+  # --- P. Storage ---
+  # P1: What datastores are required to run it?
+  P1:
+    verdict: first_class
+    note: "Checkpointers: InMemory, SQLite, Postgres (+shallow variant). Cache: memory, Redis. Platform needs Postgres+Redis."
+    evidence: "libs/checkpoint-postgres/, libs/checkpoint/langgraph/cache/ @ 3803173"
+  # P2: What is treated as authoritative, strongly consistent state?
+  P2:
+    verdict: first_class
+    note: "The checkpoint row keyed by (thread_id, checkpoint_ns, checkpoint_id) is authoritative."
+    evidence: "libs/checkpoint/langgraph/checkpoint/base/__init__.py:139 @ 3803173"
+  # P3: What is event-stream or append-only?
+  P3:
+    verdict: implicit
+    note: "Checkpoints form an append-only chain via parent links, but it is snapshot-based rather than an event log."
+    evidence: "libs/checkpoint/langgraph/checkpoint/base/__init__.py:59 @ 3803173"
+  # P4: Where do large artifacts go?
+  P4:
+    verdict: absent
+    note: "No blob/artifact storage; large values are serialised into the checkpoint."
+    evidence: "libs/checkpoint/langgraph/checkpoint/serde/_msgpack.py @ 3803173"
+  # P5: Is there a vector store? Required or optional?
+  P5:
+    verdict: implicit
+    note: "Optional embedding index in Store via IndexConfig; not required."
+    evidence: "libs/checkpoint/langgraph/checkpoint/store/base/__init__.py:578 @ 3803173"
+  # P6: Is storage pluggable, or hardcoded?
+  P6:
+    verdict: first_class
+    note: "Fully pluggable: BaseCheckpointSaver, BaseStore, BaseCache, and pluggable serde (msgpack, jsonplus, encrypted)."
+    evidence: "libs/checkpoint/langgraph/checkpoint/serde/base.py @ 3803173"
+
+  # --- Q. Licensing and commercial ---
+  # Q1: Exact license, including any per-directory variation.
+  Q1:
+    verdict: first_class
+    note: "MIT."
+    evidence: "https://github.com/langchain-ai/langgraph (GitHub API, read 2026-08-26; 40479★, pushed 2026-08-26)"
+  # Q2: Are there enterprise-only components missing from the OSS repo?
+  Q2:
+    verdict: first_class
+    note: "LangSmith server is closed; LangGraph Platform is commercial. Checkpointers and graph runtime are open."
+    evidence: "https://github.com/langchain-ai/langgraph (GitHub API, read 2026-08-26; 40479★, pushed 2026-08-26)"
+  # Q3: SaaS or hosted-service restrictions?
+  Q3:
+    verdict: absent
+    note: "No SaaS or hosted-service restriction. MIT imposes none."
+    evidence: "libs/*/pyproject.toml @ 3803173; https://langchain-ai.github.io/langgraph/ (read 2026-08-26)"
+  # Q4: Trademark constraints on derived works?
+  Q4:
+    verdict: implicit
+    note: "LangChain/LangGraph/LangSmith are marks of LangChain Inc. No trademark grant in MIT; avoid implying endorsement in derived works."
+    evidence: "libs/*/pyproject.toml @ 3803173; https://langchain-ai.github.io/langgraph/ (read 2026-08-26)"
+  # Q5: Network copyleft (AGPL, SSPL) implications for a hosted product?
+  Q5:
+    verdict: absent
+    note: "No network copyleft. Apache-2.0/MIT only across the whole study."
+    evidence: "https://github.com/langchain-ai/langgraph (GitHub API, read 2026-08-26; 40479★, pushed 2026-08-26)"
+  # Q6: Verdict: `USE` / `INTEGRATE` / `REFERENCE_ONLY` / `AVOID`, with reasoning.
+  Q6:
+    verdict: first_class
+    note: "INTEGRATE — MIT for the runtime. libs/checkpoint-conformance is a durability specification worth close reading."
+    evidence: "https://github.com/langchain-ai/langgraph (GitHub API, read 2026-08-26; 40479★, pushed 2026-08-26)"
+
+  # --- R. Developer experience ---
+  # R1: Time from clone to a running agent. Actual elapsed minutes.
+  R1:
+    verdict: first_class
+    note: "pip install langgraph then a ~15-line graph runs immediately. Under 5 minutes."
+    evidence: "verified empirically 2026-08-26, langgraph 1.2.11"
+  # R2: How many concepts before "hello world"?
+  R2:
+    verdict: first_class
+    note: "Four concepts minimum: State schema, node function, edges, compile+invoke. Checkpointer adds a fifth for durability."
+    evidence: "verified empirically 2026-08-26, langgraph 1.2.11"
+  # R3: Is there a local dev loop? Hot reload?
+  R3:
+    verdict: implicit
+    note: "langgraph_cli provides a dev server; the library itself is a normal Python import loop."
+    evidence: "libs/cli/langgraph_cli @ 3803173"
+  # R4: How do you debug a stuck run?
+  R4:
+    verdict: first_class
+    note: "get_state exposes values and next tasks; the debug stream shows per-task detail. Genuinely good for diagnosing a stuck run."
+    evidence: "verified empirically 2026-08-26, langgraph 1.2.11"
+  # R5: Can an agent be unit tested? Is there a test harness?
+  R5:
+    verdict: first_class
+    note: "Graphs are plain callables and InMemorySaver makes durable behaviour testable without infrastructure. All three scenario probes were written in minutes."
+    evidence: "verified empirically 2026-08-26, langgraph 1.2.11"
+  # R6: Deployment story?
+  R6:
+    verdict: implicit
+    note: "langgraph_cli builds a container; managed deploy is the commercial path."
+    evidence: "libs/cli/langgraph_cli/deploy.py @ 3803173"
+  # R7: CLI ergonomics — try the equivalent of `init`, `agent add`, `run`.
+  R7:
+    verdict: implicit
+    note: "CLI is deployment-oriented (build/deploy/dev) rather than agent-oriented; no 'agent add' equivalent because there are no agents."
+    evidence: "libs/cli/langgraph_cli @ 3803173"
+
+  # --- S. Hard scenarios ---
+  # S1: Delegated authority
+  S1:
+    verdict: undefined
+    note: "No agent principal exists, so the delegated-authority question cannot even be posed. Auth subject is always a human user."
+    evidence: "libs/sdk-py/langgraph_sdk/auth/types.py:182 @ 3803173"
+  # S2: Torn side effect
+  S2:
+    verdict: inferable
+    note: "VERIFIED: side effect ran twice. A node appending to a list then calling interrupt() produced ['EFFECT'] then ['EFFECT','EFFECT'] after resume. At-least-once at node granularity; no dedupe key. Any effect before an interrupt in the same node runs twice."
+    evidence: "verified empirically 2026-08-26, langgraph 1.2.11"
+  # S3: Upgrade mid-flight
+  S3:
+    verdict: inferable
+    note: "VERIFIED: no version pinning. Same-topology change silently runs NEW code. A RENAMED node makes resume return [] with NO ERROR - pending work silently dropped. Genuine hazard for long-suspended runs."
+    evidence: "verified empirically 2026-08-26, langgraph 1.2.11"
+  # S4: Concurrent memory write
+  S4:
+    verdict: undefined
+    note: "BaseStore has no versioning, CAS, or documented conflict policy. Last-write-wins by implementation default."
+    evidence: "libs/checkpoint/langgraph/checkpoint/store/base/__init__.py:431 @ 3803173"
+  # S5: Cancellation tree
+  S5:
+    verdict: inferable
+    note: "VERIFIED: no cooperative cancel token for sync nodes. Abandoning an invoke left the worker thread running; state showed log=[] with next=('child',), so the task stays pending. Async path can propagate CancelledError. No durable CANCELLING state."
+    evidence: "verified empirically 2026-08-26, langgraph 1.2.11"
+  # S6: Silent context loss
+  S6:
+    verdict: undefined
+    note: "Nothing detects a dropped constraint; no compaction in the runtime, so no loss detection either."
+    evidence: "libs/langgraph/langgraph/pregel/main.py @ 3803173"
+  # S7: Poison message
+  S7:
+    verdict: undefined
+    note: "No queue in OSS, hence no dead-letter concept. RetryPolicy retries with backoff then surfaces the error."
+    evidence: "libs/langgraph/langgraph/types.py:418 @ 3803173"
+  # S8: Tenant leak
+  S8:
+    verdict: undefined
+    note: "No tenant concept. Store namespace is a string tuple with no authorisation check, so a wrong namespace is simply read."
+    evidence: "libs/checkpoint/langgraph/checkpoint/store/base/__init__.py:708 @ 3803173"
+  # S9: Runaway spend
+  S9:
+    verdict: undefined
+    note: "No budget or token ceiling. recursion_limit bounds super-steps, not spend; a node looping model calls inside one super-step is unbounded."
+    evidence: "libs/langgraph/langgraph/pregel/main.py @ 3803173"
+  # S10: Zombie sandbox
+  S10:
+    verdict: undefined
+    note: "No sandbox, so no orphan-reaping question in OSS. Platform worker liveness is closed source."
+    evidence: "libs/langgraph/langgraph/pregel/_loop.py @ 3803173"
+
+object_model: |
+  # OSS runtime - no agent, no user, no tenant
+  Graph (compiled Pregel)
+   |-- Node
+   |-- Channel               (named, versioned)
+   `-- Thread                (only a thread_id string in config)
+        `-- Checkpoint       (id, ts, channel_values, channel_versions, versions_seen)
+             |-- PendingWrite        (task_id, channel, value)
+             `-- CheckpointMetadata  (source, step, parents, run_id)
+  Store (separate from checkpointer)
+   `-- Item (namespace tuple, key, value, TTL)
+
+  # Platform (closed) - where resources actually appear
+  Assistant (assistant_id, graph_id, config, context, version)
+   `-- AssistantVersion
+  Thread (thread_id, status, values, interrupts)
+   `-- Run (run_id, thread_id, assistant_id, status, multitask_strategy)
+  Cron
+
+strongest_ideas:
+  - "Checkpointer conformance suite: BASE vs EXTENDED capabilities, detected at runtime by method-override check, with spec tests gated on detected capabilities. Directly applicable to harness adapters."
+  - "Durability as a caller-selected mode (sync|async|exit) rather than a hidden internal detail."
+  - "Deterministic task IDs hashed from checkpoint_id + namespace + step, with a checksum assertion guarding the invariant."
+  - "MultitaskStrategy (reject|interrupt|rollback|enqueue) names the concurrent-run policy explicitly."
+  - "Interrupts exposed as queryable thread state (thread.interrupts keyed by task id) rather than a suspended coroutine."
+  - "Auth handler specificity fallback: exact resource+action -> resource -> global."
+  - "Store separated from checkpointer, with hierarchical namespaces and TTL."
+
+weakest_choices:
+  - "Node-granularity resume with no side-effect protection: any effect before interrupt() runs twice, and the docs treat this as a note rather than a warning."
+  - "No definition version on checkpoints: renaming a node silently drops pending work with no error."
+  - "No agent or principal concept, so identity, delegation and audit are all impossible; S1 cannot be posed."
+  - "Proprietary telemetry with no OTel, so the best observability is locked behind a commercial product."
+  - "Store namespaces look like an isolation boundary but carry no permissions."
+  - "No budget or cost controls; recursion_limit bounds steps, not spend."
+  - "Thread is not a resource in OSS, just a config string, so lifecycle operations have nowhere to live."
+
+reusable_components:
+  - component: "Conformance-suite pattern for capability negotiation"
+    decision: REUSE
+    note: "Best available answer to heterogeneous backend capabilities; adopt for harness adapters."
+  - component: "Durability mode vocabulary (sync|async|exit)"
+    decision: ADOPT_AS_STANDARD
+    note: "Good public contract for a real tradeoff."
+  - component: "Deterministic task ID scheme"
+    decision: REUSE
+    note: "Prerequisite for correct resume."
+  - component: "MultitaskStrategy vocabulary"
+    decision: ADOPT_AS_STANDARD
+    note: "Names a decision most systems leave implicit."
+  - component: "Auth specificity fallback chain"
+    decision: REUSE
+    note: "Predictable policy resolution."
+  - component: "Checkpointer implementations"
+    decision: INTEGRATE
+    note: "Use when hosting LangGraph agents; not our storage layer."
+  - component: "Graph runtime"
+    decision: INTEGRATE
+    note: "One harness among several per ADR-0004."
+
+lessons:
+  - "A widely successful agent runtime shipped with NO agent identity. Durable thread state delivered the value. Our case for agent identity must rest on delegation, policy and audit, not on durability. (challenges ADR-0001)"
+  - "Absence of Task and durable Run is exactly why 'retry this intent' has nowhere to live. (confirms ADR-0002)"
+  - "Multi-agent via shared mutable channel state provides no ordering, delivery or correlation guarantees. (confirms ADR-0003)"
+  - "The conformance suite is a concrete, proven design for adapter capability negotiation: base + extended + runtime detection + spec tests. (confirms ADR-0004)"
+  - "Auth principal is BaseUser only, so agents cannot hold permissions. (confirms ADR-0007)"
+  - "Checkpointer/Store separation validates the context split, but no permissions or provenance on Store leaves H4/H5 unanswered by precedent. (confirms ADR-0008 partially)"
+  - "Proprietary telemetry locked the best observability behind a commercial product - the outcome OTel avoids. (confirms ADR-0010)"
+  - "NEW: checkpoints must record the definition version that produced them and resume must fail loudly on incompatible change. Proposing ADR-0011."
+  - "AMENDMENT: the Run state machine needs an explicit CANCELLING state, or cancellation is indistinguishable from abandonment."
+
+adr_impact:
+  - adr: ADR-0001
+    effect: challenges
+    note: "No agent identity whatsoever, yet successful. Durable thread state was sufficient for its use case. Rebase our justification on delegation/policy/audit rather than durability."
+  - adr: ADR-0002
+    effect: confirms
+    note: "No Task and no durable Run in OSS; retry has no home. Also needs a CANCELLING state per S5."
+  - adr: ADR-0003
+    effect: confirms
+    note: "Shared channel state gives no delivery or ordering guarantees."
+  - adr: ADR-0004
+    effect: confirms
+    note: "Conformance suite supplies the capability-negotiation pattern the adapter interface needs."
+  - adr: ADR-0005
+    effect: neutral
+    note: "No capability model; MCP lives outside the runtime."
+  - adr: ADR-0006
+    effect: neutral
+    note: "No A2A."
+  - adr: ADR-0007
+    effect: confirms
+    note: "BaseUser-only principal makes S1 unanswerable."
+  - adr: ADR-0008
+    effect: confirms
+    note: "Checkpointer/Store separation is real and useful; permissions and provenance still missing."
+  - adr: ADR-0009
+    effect: neutral
+    note: "No sandbox at all."
+  - adr: ADR-0010
+    effect: confirms
+    note: "No OTel anywhere; observability is commercial-only. Counter-example that supports the decision."

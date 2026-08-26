@@ -1,0 +1,948 @@
+# Machine-readable extraction. Schema: schema/facts.schema.yaml
+# Validate:  ./.venv/bin/python tools/validate_facts.py
+#
+# verdict:   first_class | implicit | absent | unknown
+# scenarios: first_class_answer | inferable | undefined | unknown
+# evidence:  'path/file.py:120 @ sha'  or  'URL (read YYYY-MM-DD)'
+
+schema_version: 1
+
+project:
+  slug: agent-control
+  name: Agent Control
+  depth: targeted
+  evidence_class: A
+  read_on: 2026-08-26
+  repo: "https://github.com/agentcontrol/agent-control"
+  commit:                  # SHA the claims were read against
+  docs:
+  version:
+  license: Apache-2.0
+  license_verdict: INTEGRATE
+  runtime_class: unknown
+  one_line: "Centralized agent control plane for governing runtime; TypeScript SDK published as npm agent-control v3.1.0."
+  thesis:                  # the core architectural bet
+
+probes:
+
+  # --- A. Core abstraction and object model ---
+  # A1: What does this system think an agent *is*? State it in one sentence, in their vocabulary.
+  A1:
+    verdict: unknown
+    note:
+    evidence:
+  # A2: What is the root resource — the thing everything else hangs off?
+  A2:
+    verdict: unknown
+    note:
+    evidence:
+  # A3: Is `Agent` persistent or ephemeral? Can it exist while not executing?
+  A3:
+    verdict: unknown
+    note:
+    evidence:
+  # A4: Is `Task` a separate resource from `Run`? If not, which concept is missing and what fills the...
+  A4:
+    verdict: unknown
+    note:
+    evidence:
+  # A5: What is a `Session` attached to: user, agent, task, or execution?
+  A5:
+    verdict: unknown
+    note:
+    evidence:
+  # A6: Are messages first-class durable resources, or transient function arguments?
+  A6:
+    verdict: unknown
+    note:
+    evidence:
+  # A7: Are artifacts (files, outputs, deliverables) first-class?
+  A7:
+    verdict: unknown
+    note:
+    evidence:
+  # A8: Can multiple agents participate in one task? How is that represented?
+  A8:
+    verdict: unknown
+    note:
+    evidence:
+  # A9: Draw the object model as a tree. Only nodes that exist in their code or API.
+  A9:
+    verdict: unknown
+    note:
+    evidence:
+
+  # --- B. Runtime model ---
+  # B1: Does the platform launch agents, host them, or attach to external ones?
+  B1:
+    verdict: unknown
+    note:
+    evidence:
+  # B2: Execution substrate: process, container, microVM, serverless, in-process library, remote HTTP?
+  B2:
+    verdict: unknown
+    note:
+    evidence:
+  # B3: Who owns the event loop — platform or agent?
+  B3:
+    verdict: unknown
+    note:
+    evidence:
+  # B4: Who decides when an agent wakes?
+  B4:
+    verdict: unknown
+    note:
+    evidence:
+  # B5: Can an agent run indefinitely? What is the actual ceiling?
+  B5:
+    verdict: unknown
+    note:
+    evidence:
+  # B6: Are there background or unattended agents?
+  B6:
+    verdict: unknown
+    note:
+    evidence:
+  # B7: Is execution synchronous or asynchronous from the caller's view?
+  B7:
+    verdict: unknown
+    note:
+    evidence:
+  # B8: Can in-flight work migrate between workers?
+  B8:
+    verdict: unknown
+    note:
+    evidence:
+  # B9: Can an agent survive a machine restart? Automatically, or with operator action?
+  B9:
+    verdict: unknown
+    note:
+    evidence:
+  # B10: Classify: worker/queue, durable actor, attached harness, or in-process library.
+  B10:
+    verdict: unknown
+    note:
+    evidence:
+
+  # --- C. Durability and failure semantics ---
+  # C1: What state is durable, and what is lost on crash?
+  C1:
+    verdict: unknown
+    note:
+    evidence:
+  # C2: *When* is state persisted — every step, every tool call, on checkpoint, never?
+  C2:
+    verdict: unknown
+    note:
+    evidence:
+  # C3: Checkpointing or event sourcing? Can state be rebuilt from a log?
+  C3:
+    verdict: unknown
+    note:
+    evidence:
+  # C4: Retry semantics, and at what granularity: run, step, tool call?
+  C4:
+    verdict: unknown
+    note:
+    evidence:
+  # C5: At-least-once or exactly-once? What do the docs claim versus what the code does?
+  C5:
+    verdict: unknown
+    note:
+    evidence:
+  # C6: Is there an idempotency model for tool side effects?
+  C6:
+    verdict: unknown
+    note:
+    evidence:
+  # C7: Process crash recovery: what resumes, and from where?
+  C7:
+    verdict: unknown
+    note:
+    evidence:
+  # C8: Node loss: is work re-dispatched, and how is it detected?
+  C8:
+    verdict: unknown
+    note:
+    evidence:
+  # C9: Context-window overflow: truncation, summarisation, or failure?
+  C9:
+    verdict: unknown
+    note:
+    evidence:
+  # C10: Timers, scheduled execution, long sleeps — durable across restart?
+  C10:
+    verdict: unknown
+    note:
+    evidence:
+  # C11: Human-in-the-loop pause and resume: durable, or in-memory only?
+  C11:
+    verdict: unknown
+    note:
+    evidence:
+  # C12: Can a definition be upgraded while runs are in flight? What happens to them?
+  C12:
+    verdict: unknown
+    note:
+    evidence:
+
+  # --- D. Agent identity and lifecycle ---
+  # D1: Is an agent globally addressable? By what identifier?
+  D1:
+    verdict: unknown
+    note:
+    evidence:
+  # D2: Does identity survive process restart?
+  D2:
+    verdict: unknown
+    note:
+    evidence:
+  # D3: Is identity distinct from runtime instance?
+  D3:
+    verdict: unknown
+    note:
+    evidence:
+  # D4: Are agents versioned? Immutable or mutable definitions?
+  D4:
+    verdict: unknown
+    note:
+    evidence:
+  # D5: Is there a registry or catalog?
+  D5:
+    verdict: unknown
+    note:
+    evidence:
+  # D6: Can agents discover each other at runtime?
+  D6:
+    verdict: unknown
+    note:
+    evidence:
+  # D7: Can agents advertise capabilities? In what format?
+  D7:
+    verdict: unknown
+    note:
+    evidence:
+  # D8: Is there an owner, team, or tenant on the agent record?
+  D8:
+    verdict: unknown
+    note:
+    evidence:
+  # D9: Can an agent be suspended, revoked, or deprecated?
+  D9:
+    verdict: unknown
+    note:
+    evidence:
+  # D10: Is there anything resembling a declarative agent manifest?
+  D10:
+    verdict: unknown
+    note:
+    evidence:
+
+  # --- E. Harness and runtime interoperability ---
+  # E1: What is the minimum interface an agent implementation must satisfy?
+  E1:
+    verdict: unknown
+    note:
+    evidence:
+  # E2: Transport: stdin/stdout, HTTP, gRPC, WebSocket, in-process, ACP, A2A?
+  E2:
+    verdict: unknown
+    note:
+    evidence:
+  # E3: Can it host a foreign agent (Claude Code, Codex, OpenHands, LangGraph, ADK)?
+  E3:
+    verdict: unknown
+    note:
+    evidence:
+  # E4: Is there an event stream out of a running agent? What granularity?
+  E4:
+    verdict: unknown
+    note:
+    evidence:
+  # E5: Are tool calls externally observable, or internal to the agent?
+  E5:
+    verdict: unknown
+    note:
+    evidence:
+  # E6: How is context injected at start?
+  E6:
+    verdict: unknown
+    note:
+    evidence:
+  # E7: Is cancellation supported? Cooperative or forced? Does it propagate to subagents?
+  E7:
+    verdict: unknown
+    note:
+    evidence:
+  # E8: Can a run be checkpointed and restored by the platform, or only by the agent?
+  E8:
+    verdict: unknown
+    note:
+    evidence:
+  # E9: Which of these would be hard to adapt, and why?
+  E9:
+    verdict: unknown
+    note:
+    evidence:
+
+  # --- F. Agent-to-agent communication ---
+  # F1: Direct messages between agents?
+  F1:
+    verdict: unknown
+    note:
+    evidence:
+  # F2: Channels, topics, or pub/sub?
+  F2:
+    verdict: unknown
+    note:
+    evidence:
+  # F3: Task delegation as a distinct mechanism from messaging?
+  F3:
+    verdict: unknown
+    note:
+    evidence:
+  # F4: Synchronous RPC between agents?
+  F4:
+    verdict: unknown
+    note:
+    evidence:
+  # F5: Asynchronous inbox or mailbox?
+  F5:
+    verdict: unknown
+    note:
+    evidence:
+  # F6: Is delivery durable? Survives restart of sender and receiver?
+  F6:
+    verdict: unknown
+    note:
+    evidence:
+  # F7: Is message ordering guaranteed? Per what scope?
+  F7:
+    verdict: unknown
+    note:
+    evidence:
+  # F8: Acknowledgement or delivery receipts?
+  F8:
+    verdict: unknown
+    note:
+    evidence:
+  # F9: Correlation ids for request/response pairing?
+  F9:
+    verdict: unknown
+    note:
+    evidence:
+  # F10: Conversation threading?
+  F10:
+    verdict: unknown
+    note:
+    evidence:
+  # F11: Capability-based routing — address by what an agent *can do* rather than who it is?
+  F11:
+    verdict: unknown
+    note:
+    evidence:
+
+  # --- G. Human-agent collaboration ---
+  # G1: Is a human modelled as a special kind of agent, a distinct principal type, or not modelled?
+  G1:
+    verdict: unknown
+    note:
+    evidence:
+  # G2: Shared rooms, channels, or workspaces?
+  G2:
+    verdict: unknown
+    note:
+    evidence:
+  # G3: Task threads humans can read and post into?
+  G3:
+    verdict: unknown
+    note:
+    evidence:
+  # G4: Mentions or directed addressing?
+  G4:
+    verdict: unknown
+    note:
+    evidence:
+  # G5: Approval gates. Blocking or advisory? Durable while pending?
+  G5:
+    verdict: unknown
+    note:
+    evidence:
+  # G6: Mid-run intervention: can a human redirect without restarting?
+  G6:
+    verdict: unknown
+    note:
+    evidence:
+  # G7: Agent status and presence visible to humans?
+  G7:
+    verdict: unknown
+    note:
+    evidence:
+  # G8: Notifications or escalation when an agent is blocked?
+  G8:
+    verdict: unknown
+    note:
+    evidence:
+  # G9: Shared scratchpad or working surface?
+  G9:
+    verdict: unknown
+    note:
+    evidence:
+  # G10: Can a human see the context an agent is operating on?
+  G10:
+    verdict: unknown
+    note:
+    evidence:
+
+  # --- H. Context and memory ---
+  # H1: Which of these exist as *separate* concepts: prompt context, working state, session history, ...
+  H1:
+    verdict: unknown
+    note:
+    evidence:
+  # H2: Who owns memory: agent, human, workspace, task, or tenant?
+  H2:
+    verdict: unknown
+    note:
+    evidence:
+  # H3: Can memory be shared between agents? At what granularity?
+  H3:
+    verdict: unknown
+    note:
+    evidence:
+  # H4: Are there permissions on memory?
+  H4:
+    verdict: unknown
+    note:
+    evidence:
+  # H5: Is provenance tracked — where a memory came from?
+  H5:
+    verdict: unknown
+    note:
+    evidence:
+  # H6: Expiry, TTL, or forgetting?
+  H6:
+    verdict: unknown
+    note:
+    evidence:
+  # H7: Summarisation or compaction. Automatic or explicit?
+  H7:
+    verdict: unknown
+    note:
+    evidence:
+  # H8: Retrieval mechanism: vector, keyword, structured, agent-driven?
+  H8:
+    verdict: unknown
+    note:
+    evidence:
+  # H9: Can an agent mutate its own memory mid-run?
+  H9:
+    verdict: unknown
+    note:
+    evidence:
+  # H10: Conflict resolution on concurrent writes?
+  H10:
+    verdict: unknown
+    note:
+    evidence:
+  # H11: Is memory in the same store as execution state, or separate?
+  H11:
+    verdict: unknown
+    note:
+    evidence:
+
+  # --- I. Tools and capabilities ---
+  # I1: Are tools bound to agents statically, or resolved dynamically?
+  I1:
+    verdict: unknown
+    note:
+    evidence:
+  # I2: Is there a capability abstraction distinct from tool implementation?
+  I2:
+    verdict: unknown
+    note:
+    evidence:
+  # I3: Is there a registry of available tools?
+  I3:
+    verdict: unknown
+    note:
+    evidence:
+  # I4: Tool scoping — can an agent be restricted to a subset?
+  I4:
+    verdict: unknown
+    note:
+    evidence:
+  # I5: Are tools versioned?
+  I5:
+    verdict: unknown
+    note:
+    evidence:
+  # I6: How are credentials supplied to a tool?
+  I6:
+    verdict: unknown
+    note:
+    evidence:
+  # I7: OAuth or delegated user credentials?
+  I7:
+    verdict: unknown
+    note:
+    evidence:
+  # I8: Can policy intercept a tool call before execution?
+  I8:
+    verdict: unknown
+    note:
+    evidence:
+  # I9: Approval gates on specific tools?
+  I9:
+    verdict: unknown
+    note:
+    evidence:
+  # I10: Do tools execute inside or outside the agent's sandbox?
+  I10:
+    verdict: unknown
+    note:
+    evidence:
+
+  # --- J. Security and identity ---
+  # J1: What identity does an agent authenticate as?
+  J1:
+    verdict: unknown
+    note:
+    evidence:
+  # J2: Authentication mechanism for agent-to-platform?
+  J2:
+    verdict: unknown
+    note:
+    evidence:
+  # J3: Authorisation model: RBAC, ABAC, capability tokens, none?
+  J3:
+    verdict: unknown
+    note:
+    evidence:
+  # J4: Secret storage and injection?
+  J4:
+    verdict: unknown
+    note:
+    evidence:
+  # J5: Per-agent credentials, or shared platform credentials?
+  J5:
+    verdict: unknown
+    note:
+    evidence:
+  # J6: Can an agent act as a user? Is that impersonation or delegation?
+  J6:
+    verdict: unknown
+    note:
+    evidence:
+  # J7: Tenant isolation: logical, or enforced at runtime?
+  J7:
+    verdict: unknown
+    note:
+    evidence:
+  # J8: Network and filesystem isolation?
+  J8:
+    verdict: unknown
+    note:
+    evidence:
+  # J9: Is there an audit log? Is it tamper-evident?
+  J9:
+    verdict: unknown
+    note:
+    evidence:
+  # J10: Where are policy decisions enforced — control plane, runtime, or tool gateway?
+  J10:
+    verdict: unknown
+    note:
+    evidence:
+
+  # --- K. Sandbox and isolation ---
+  # K1: Is there a workspace or sandbox concept? What is its lifecycle?
+  K1:
+    verdict: unknown
+    note:
+    evidence:
+  # K2: Persistent filesystem across runs?
+  K2:
+    verdict: unknown
+    note:
+    evidence:
+  # K3: Snapshot and restore?
+  K3:
+    verdict: unknown
+    note:
+    evidence:
+  # K4: Network egress rules?
+  K4:
+    verdict: unknown
+    note:
+    evidence:
+  # K5: Container, microVM, or none?
+  K5:
+    verdict: unknown
+    note:
+    evidence:
+  # K6: Resource quotas: CPU, memory, disk, wall clock?
+  K6:
+    verdict: unknown
+    note:
+    evidence:
+  # K7: How are secrets injected without landing in the image or logs?
+  K7:
+    verdict: unknown
+    note:
+    evidence:
+  # K8: Arbitrary code execution? Browser execution?
+  K8:
+    verdict: unknown
+    note:
+    evidence:
+  # K9: Is the sandbox pluggable, or a fixed implementation?
+  K9:
+    verdict: unknown
+    note:
+    evidence:
+
+  # --- L. Orchestration and scheduling ---
+  # L1: Does it distinguish agent coordination from workflow orchestration?
+  L1:
+    verdict: unknown
+    note:
+    evidence:
+  # L2: Topology: DAG, cyclic graph, supervisor, planner, event-driven, queue?
+  L2:
+    verdict: unknown
+    note:
+    evidence:
+  # L3: Cron or scheduled triggers?
+  L3:
+    verdict: unknown
+    note:
+    evidence:
+  # L4: Dynamic task spawning at runtime?
+  L4:
+    verdict: unknown
+    note:
+    evidence:
+  # L5: Fan-out / fan-in?
+  L5:
+    verdict: unknown
+    note:
+    evidence:
+  # L6: Subagents. Are they first-class, or just nested calls?
+  L6:
+    verdict: unknown
+    note:
+    evidence:
+  # L7: Retry and backoff policy — declarative or hand-rolled?
+  L7:
+    verdict: unknown
+    note:
+    evidence:
+  # L8: Compensation or rollback on failure?
+  L8:
+    verdict: unknown
+    note:
+    evidence:
+  # L9: Does cancellation propagate through the whole tree?
+  L9:
+    verdict: unknown
+    note:
+    evidence:
+  # L10: Could this be replaced by Temporal or Restate, or is orchestration inseparable from the agent...
+  L10:
+    verdict: unknown
+    note:
+    evidence:
+
+  # --- M. Observability ---
+  # M1: Which of these are modelled as telemetry objects: trace, run, step, LLM call, tool call, mess...
+  M1:
+    verdict: unknown
+    note:
+    evidence:
+  # M2: Is telemetry keyed to agent, run, model, task, user, or tenant?
+  M2:
+    verdict: unknown
+    note:
+    evidence:
+  # M3: OpenTelemetry, proprietary, or none?
+  M3:
+    verdict: unknown
+    note:
+    evidence:
+  # M4: Is there a documented, stable event schema?
+  M4:
+    verdict: unknown
+    note:
+    evidence:
+  # M5: Cost and token accounting. Per what unit?
+  M5:
+    verdict: unknown
+    note:
+    evidence:
+  # M6: Latency breakdown by phase?
+  M6:
+    verdict: unknown
+    note:
+    evidence:
+  # M7: Error taxonomy?
+  M7:
+    verdict: unknown
+    note:
+    evidence:
+  # M8: Can the event stream reconstruct a run after the fact — replay or audit?
+  M8:
+    verdict: unknown
+    note:
+    evidence:
+
+  # --- N. Multi-tenancy and enterprise ---
+  # N1: Resource hierarchy: org, workspace, project, environment?
+  N1:
+    verdict: unknown
+    note:
+    evidence:
+  # N2: RBAC model and its granularity?
+  N2:
+    verdict: unknown
+    note:
+    evidence:
+  # N3: Quotas and cost limits. Enforced or advisory?
+  N3:
+    verdict: unknown
+    note:
+    evidence:
+  # N4: dev / staging / prod separation?
+  N4:
+    verdict: unknown
+    note:
+    evidence:
+  # N5: Deployment promotion path?
+  N5:
+    verdict: unknown
+    note:
+    evidence:
+  # N6: Agent catalog scoped to a tenant?
+  N6:
+    verdict: unknown
+    note:
+    evidence:
+  # N7: Audit retention controls?
+  N7:
+    verdict: unknown
+    note:
+    evidence:
+  # N8: Is multi-tenancy in the OSS core, or reserved for a commercial tier?
+  N8:
+    verdict: unknown
+    note:
+    evidence:
+
+  # --- O. API and protocol surface ---
+  # O1: List the actual primary endpoints or SDK entry points. Verbatim.
+  O1:
+    verdict: unknown
+    note:
+    evidence:
+  # O2: Is the API resource-oriented or RPC-flavoured?
+  O2:
+    verdict: unknown
+    note:
+    evidence:
+  # O3: Streaming: SSE, WebSocket, long-poll, gRPC stream?
+  O3:
+    verdict: unknown
+    note:
+    evidence:
+  # O4: Webhooks or outbound callbacks?
+  O4:
+    verdict: unknown
+    note:
+    evidence:
+  # O5: Which standards are implemented: MCP, A2A, ACP, OTel, OpenAI-compatible?
+  O5:
+    verdict: unknown
+    note:
+    evidence:
+  # O6: Is the API versioned? Stability commitment?
+  O6:
+    verdict: unknown
+    note:
+    evidence:
+  # O7: Is there a separate northbound (client) and southbound (runtime) API?
+  O7:
+    verdict: unknown
+    note:
+    evidence:
+
+  # --- P. Storage ---
+  # P1: What datastores are required to run it?
+  P1:
+    verdict: unknown
+    note:
+    evidence:
+  # P2: What is treated as authoritative, strongly consistent state?
+  P2:
+    verdict: unknown
+    note:
+    evidence:
+  # P3: What is event-stream or append-only?
+  P3:
+    verdict: unknown
+    note:
+    evidence:
+  # P4: Where do large artifacts go?
+  P4:
+    verdict: unknown
+    note:
+    evidence:
+  # P5: Is there a vector store? Required or optional?
+  P5:
+    verdict: unknown
+    note:
+    evidence:
+  # P6: Is storage pluggable, or hardcoded?
+  P6:
+    verdict: unknown
+    note:
+    evidence:
+
+  # --- Q. Licensing and commercial ---
+  # Q1: Exact license, including any per-directory variation.
+  Q1:
+    verdict: first_class
+    note: "Apache-2.0."
+    evidence: "https://github.com/agentcontrol/agent-control (GitHub API + npm registry, read 2026-08-26; 299 stars, pushed 2026-08-24)"
+  # Q2: Are there enterprise-only components missing from the OSS repo?
+  Q2:
+    verdict: unknown
+    note: "Not yet assessed; hosted offering unknown."
+    evidence: "https://github.com/agentcontrol/agent-control (GitHub API + npm registry, read 2026-08-26; 299 stars, pushed 2026-08-24)"
+  # Q3: SaaS or hosted-service restrictions?
+  Q3:
+    verdict: unknown
+    note:
+    evidence:
+  # Q4: Trademark constraints on derived works?
+  Q4:
+    verdict: unknown
+    note:
+    evidence:
+  # Q5: Network copyleft (AGPL, SSPL) implications for a hosted product?
+  Q5:
+    verdict: absent
+    note: "No network copyleft. Apache-2.0/MIT only across the whole study."
+    evidence: "https://github.com/agentcontrol/agent-control (GitHub API + npm registry, read 2026-08-26; 299 stars, pushed 2026-08-24)"
+  # Q6: Verdict: `USE` / `INTEGRATE` / `REFERENCE_ONLY` / `AVOID`, with reasoning.
+  Q6:
+    verdict: first_class
+    note: "INTEGRATE - Apache-2.0. Located on re-check via the npm registry after GitHub search proved unusable. Restored from recon to targeted depth for policy-enforcement questions."
+    evidence: "https://github.com/agentcontrol/agent-control (GitHub API + npm registry, read 2026-08-26; 299 stars, pushed 2026-08-24)"
+
+  # --- R. Developer experience ---
+  # R1: Time from clone to a running agent. Actual elapsed minutes.
+  R1:
+    verdict: unknown
+    note:
+    evidence:
+  # R2: How many concepts before "hello world"?
+  R2:
+    verdict: unknown
+    note:
+    evidence:
+  # R3: Is there a local dev loop? Hot reload?
+  R3:
+    verdict: unknown
+    note:
+    evidence:
+  # R4: How do you debug a stuck run?
+  R4:
+    verdict: unknown
+    note:
+    evidence:
+  # R5: Can an agent be unit tested? Is there a test harness?
+  R5:
+    verdict: unknown
+    note:
+    evidence:
+  # R6: Deployment story?
+  R6:
+    verdict: unknown
+    note:
+    evidence:
+  # R7: CLI ergonomics — try the equivalent of `init`, `agent add`, `run`.
+  R7:
+    verdict: unknown
+    note:
+    evidence:
+
+  # --- S. Hard scenarios ---
+  # S1: Delegated authority
+  S1:
+    verdict: unknown
+    note:
+    evidence:
+  # S2: Torn side effect
+  S2:
+    verdict: unknown
+    note:
+    evidence:
+  # S3: Upgrade mid-flight
+  S3:
+    verdict: unknown
+    note:
+    evidence:
+  # S4: Concurrent memory write
+  S4:
+    verdict: unknown
+    note:
+    evidence:
+  # S5: Cancellation tree
+  S5:
+    verdict: unknown
+    note:
+    evidence:
+  # S6: Silent context loss
+  S6:
+    verdict: unknown
+    note:
+    evidence:
+  # S7: Poison message
+  S7:
+    verdict: unknown
+    note:
+    evidence:
+  # S8: Tenant leak
+  S8:
+    verdict: unknown
+    note:
+    evidence:
+  # S9: Runaway spend
+  S9:
+    verdict: unknown
+    note:
+    evidence:
+  # S10: Zombie sandbox
+  S10:
+    verdict: unknown
+    note:
+    evidence:
+
+object_model: |
+  # ASCII tree of resources that actually exist
+
+strongest_ideas: []
+
+weakest_choices: []
+
+reusable_components: []
+  # - component: 
+  #   decision: INTEGRATE   # BUILD|INTEGRATE|ADOPT_AS_STANDARD|REUSE|DEFER
+  #   note: 
+
+lessons: []
+
+adr_impact: []
+  # - adr: ADR-0001
+  #   effect: confirms      # confirms|amends|challenges|neutral
+  #   note: 

@@ -1,0 +1,123 @@
+# facts.yaml schema — LOCKED as of Phase 0.
+#
+# Changing this after teardowns exist means re-reading finished projects.
+# If a change is unavoidable: bump schema_version, add a migration note in
+# synthesis/schema-changelog.md, and re-validate every project.
+#
+# This is a hand-written spec, not JSON Schema. tools/validate_facts.py
+# enforces it. Keep the two in sync.
+
+schema_version: 1
+
+# ---------------------------------------------------------------------------
+# Controlled vocabularies. A value outside these lists is a validation error.
+# ---------------------------------------------------------------------------
+
+vocabularies:
+
+  verdict:
+    - first_class   # explicit named concept, visible in API/schema/docs
+    - implicit      # behaviour exists but emergent/undocumented; cite source
+    - absent        # read the source, genuinely does not do this
+    - unknown       # not determined; requires an open-questions.md entry
+
+  scenario_verdict:
+    - first_class_answer
+    - inferable
+    - undefined
+    - unknown
+
+  depth:
+    - deep          # full template, Phase 2/3 primary
+    - targeted      # scoped questions only, Phase 4
+    - recon         # Phase 1 triage only
+
+  evidence_class:
+    - A             # source + docs both readable
+    - B             # docs only, no usable source
+    - C             # thin: announcements, marketing, or nothing
+
+  runtime_class:
+    - worker_queue      # control plane dispatches to pooled workers
+    - durable_actor     # addressable identity with durable state, wakes on event
+    - attached_harness  # adapts an external agent process it did not author
+    - in_process        # library inside the caller's process
+    - hybrid            # justify in notes
+    - unknown
+
+  license_verdict:
+    - USE               # safe to vendor or embed
+    - INTEGRATE         # call across a boundary, do not embed
+    - REFERENCE_ONLY    # read for ideas, take no code
+    - AVOID             # licence or trademark makes it a liability
+    - unknown
+
+  build_decision:
+    - BUILD
+    - INTEGRATE
+    - ADOPT_AS_STANDARD
+    - REUSE
+    - DEFER
+    - unknown
+
+# ---------------------------------------------------------------------------
+# Required document shape
+# ---------------------------------------------------------------------------
+
+required_top_level:
+  - schema_version
+  - project
+  - probes
+
+project_fields:
+  required:
+    - slug              # lowercase, dashes; must equal directory name
+    - name
+    - depth             # vocabularies.depth
+    - evidence_class    # vocabularies.evidence_class
+    - read_on           # ISO date of primary reading session
+  optional:
+    - repo              # canonical source URL
+    - commit            # SHA the claims were read against
+    - docs              # primary docs URL
+    - version           # release/tag examined
+    - license           # SPDX id where possible
+    - license_verdict   # vocabularies.license_verdict
+    - runtime_class     # vocabularies.runtime_class
+    - one_line          # what it is, in their vocabulary
+    - thesis            # core architectural bet, one sentence
+
+# Each probe id from probes/probe-set.md maps to an entry.
+# Partial coverage is allowed and expected mid-teardown; the validator reports
+# a coverage percentage rather than failing.
+probe_entry:
+  required:
+    - verdict           # vocabularies.verdict
+  optional:
+    - note              # 1-3 sentences. Prose, not a essay.
+    - evidence          # "path/file.py:120 @ a1b2c3d" or "URL (read YYYY-MM-DD)"
+    - confidence        # high | medium | low
+  rules:
+    - "verdict first_class or implicit SHOULD carry evidence"
+    - "verdict unknown on a deep project MUST appear in open-questions.md"
+
+# Hard scenarios S1-S10.
+scenario_entry:
+  required:
+    - verdict           # vocabularies.scenario_verdict
+  optional:
+    - note
+    - evidence
+
+# Free-form but structured takeaways. These feed the synthesis phase directly.
+optional_sections:
+  object_model: "string; ASCII tree of resources that actually exist"
+  strongest_ideas: "list of strings"
+  weakest_choices: "list of strings"
+  reusable_components: "list of {component, decision(build_decision), note}"
+  lessons: "list of strings; each SHOULD name an ADR it supports or challenges"
+  adr_impact:
+    description: "How this project moved our provisional decisions"
+    entry:
+      required: [adr, effect]     # effect: confirms | amends | challenges | neutral
+      optional: [note]
