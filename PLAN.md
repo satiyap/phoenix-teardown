@@ -30,10 +30,10 @@ teardown; substitute a system that answers the same architectural question.
 | 0 | Scaffold, probe set, schema, tooling, provisional ADRs | This repo | 0.5–1d | ✅ done |
 | 1 | Recon and triage all 14; licence review | `synthesis/recon.md`, `synthesis/licensing.md`, revised depth budget | 1d | ✅ done — 13/14 inspectable |
 | 2 | Three deep probes: LangGraph, OpenHands, Letta | 3 teardowns @ 99.4% coverage, revised domain model, ADR-0011/0012/0013 raised | ~6d | ✅ done |
-| 3 | Seven falsification passes | 7 teardowns, ADR evidence logs, amendments | ~7d | next |
-| 4 | Four targeted validations | Scoped answers only | ~2d | |
-| 5 | Synthesis | Matrix, domain model, reference architecture, build/reuse map, v0.1 boundary; ADRs → Accepted; exit criteria answered | 3–4d | |
-| 6 | Handoff | v0.1 architecture & design document, ideal developer journey | 1–2d | |
+| 3 | Six falsification passes | 6 teardowns @ 100% coverage, ADR evidence logs, 13 amendments, ADR-0014 raised | ~7d | **complete** |
+| 4 | Four targeted validations | 4 teardowns; ADR-0015 raised; Cedar and `observe` found | ~2d | **complete** |
+| 5 | Synthesis | Matrix, domain model, reference architecture, build/reuse map, v0.1 boundary; ADRs → Accepted; exit criteria answered | 3–4d | **complete** |
+| 6 | Handoff | v0.1 architecture & design document, ideal developer journey | 1–2d | **complete** |
 
 ~22–25 working days solo. Roughly two weeks with three people, but only if
 Phase 0 lands first.

@@ -152,6 +152,10 @@ the only evidence that counts.
 
 ### Read next
 
+**Start with [`DESIGN.md`](DESIGN.md)** — the v0.1 architecture and design document,
+including the ideal developer journey. It is the handoff artefact; everything below is
+the evidence behind it.
+
 | Document | What it answers |
 |---|---|
 | [`synthesis/v01-boundary.md`](synthesis/v01-boundary.md) | What ships, what waits, what we never build |
