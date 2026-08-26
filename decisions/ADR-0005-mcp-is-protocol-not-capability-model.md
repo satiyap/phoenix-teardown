@@ -55,6 +55,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | Google Agent Platform | confirms | `src/google/adk/tools/ @ 85b52f6` | MCP plus OpenAPI-derived tool generation as protocols, with no capability-claim model at all. Protocol and capability model cleanly separate by omission. |
 | HumanLayer | neutral | `hld/mcp/ @ 99abe67` | MCP appears in an inverted role worth noting: not as a way for the agent to reach tools, but as **a surface by which another agent can answer a human-in-the-loop approval request.** |
 | AWS AgentCore | confirms | `src/bedrock_agentcore/gateway/ @ 826416a` | A managed **gateway** service fronts tools — architecturally the right place for credential injection and policy enforcement. Protocol-shaped, with no capability-claim model. |
+| Microsoft Agent Framework | confirms | `declarative-agents/agent-samples/foundry/MicrosoftLearnAgent.yaml @ e34bf48` | MCP as a tool `kind` in the manifest, scoped by `allowedTools` and gated by `approvalMode` — protocol plus declared scoping, with no capability-claim model. |
 
 ## Open questions
 

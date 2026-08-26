@@ -55,6 +55,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | Google Agent Platform | neutral | `src/google/adk/agents/ @ 85b52f6` | Agents are Python objects with a `name`; no id, registry, persistence or lifecycle. Identity of *scope* is strong — everything keyed `(app_name, user_id, session_id)` — but that is tenancy, not agent identity. |
 | HumanLayer | neutral | `hld/store/sqlite.go:95-100 @ 99abe67` | No agent resource — the agent is Claude Code. Sessions and runs carry ids; the agent does not. |
 | AWS AgentCore | confirms | `src/bedrock_agentcore/services/identity.py:140-155 @ 826416a` | **The best vindication of this ADR's *rebased* rationale.** Phase 2 concluded that agent identity is required for **delegation, policy attachment and audit** rather than for durability, after two projects delivered durable execution with no agent identity at all. AgentCore is precisely that case in the affirmative: the agent is a **workload** with its own identity whose entire purpose is obtaining scoped tokens and being nameable as a Cedar `principal`. Nothing about its durability needs it; everything about its authorization does. |
+| Microsoft Agent Framework | neutral | `python/packages/core/agent_framework/_agents.py @ e34bf48` | Agents are objects with names; no identity, registry or lifecycle. Note the asymmetry with §durability: MAF versions and pins *workflows* rigorously and does nothing for agent identity — the same split as ADK. |
 
 ## Open questions
 

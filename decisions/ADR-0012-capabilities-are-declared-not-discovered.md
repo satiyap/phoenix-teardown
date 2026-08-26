@@ -361,6 +361,7 @@ cannot act on is a bug report waiting to be filed.
 | Google Agent Platform | confirms | `src/google/adk/memory/base_memory_service.py:64-95 @ 85b52f6` | No capability-claim model, but **the best example in the study of the fail-closed *message* rule**: the optional `add_events_to_memory` delta method raises `NotImplementedError` naming the fallback — "This memory service does not support adding event deltas. Call `add_session_to_memory(session)` to ingest the full session." Compare OpenHands' `LocalWorkspace.pause()` silently reporting success. Same situation, opposite handling. Also `custom_metadata` as a documented staging area for fields "that may later become first-class API parameters" — an escape hatch that admits it is one. |
 | HumanLayer | neutral | `hld/approval/types.go @ 99abe67` | No capability model. |
 | AWS AgentCore | neutral | `src/bedrock_agentcore/ @ 826416a` | No declared capability model for agents or runtimes. |
+| Microsoft Agent Framework | neutral | `python/packages/core/agent_framework/_feature_stage.py @ e34bf48` | No declared capability model. `_feature_stage.py` marks *feature* stability in code — the same instinct as ADK's module-path stability tiers, but a different concept from a capability claim. |
 
 ## Open questions
 

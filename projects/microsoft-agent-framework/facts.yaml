@@ -14,935 +14,1076 @@ project:
   evidence_class: A
   read_on: 2026-08-26
   repo: "https://github.com/microsoft/agent-framework"
-  commit:                  # SHA the claims were read against
+  commit: e34bf48fa369a5b8d1f66a1558d8e03498153633
   docs: "https://learn.microsoft.com/en-us/agent-framework/"
-  version:
+  version: "agent-framework-core (Python); repo @ 2026-08-26"
   license: MIT
   license_verdict: REFERENCE_ONLY
-  runtime_class: unknown
+  runtime_class: hybrid
   one_line: Framework for building, orchestrating and deploying agents; successor to the Semantic Kernel and AutoGen lineage.
-  thesis:                  # the core architectural bet
+  thesis: "A multi-agent system is a typed graph executed in Pregel supersteps, and a checkpoint is only valid for the exact graph that produced it - with the graph version derived from a hash of its own code rather than a declared counter."
 
 probes:
 
   # --- A. Core abstraction and object model ---
   # A1: What does this system think an agent *is*? State it in one sentence, in their vocabulary.
   A1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Agents are objects with names, hooks, middleware, skills and tools. No agent id or persisted identity record."
+    evidence: "python/packages/core/agent_framework/_agents.py @ e34bf48"
   # A2: What is the root resource — the thing everything else hangs off?
   A2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Sessions are a modelled concern (_sessions.py), and a Workflow carries durable checkpointed state across supersteps."
+    evidence: "python/packages/core/agent_framework/_sessions.py @ e34bf48"
   # A3: Is `Agent` persistent or ephemeral? Can it exist while not executing?
   A3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Checkpoints persist to injected storage and are explicitly NOT tied to a workflow instance, so state outlives any process."
+    evidence: "python/packages/core/agent_framework/_workflows/_checkpoint.py:36-41 @ e34bf48"
   # A4: Is `Task` a separate resource from `Run`? If not, which concept is missing and what fills the...
   A4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A Workflow definition (name + graph_signature_hash) is distinct from a workflow instance, and checkpoints bind to the DEFINITION - the closest thing to Task/Run separation here, though intent does not survive as its own resource."
+    evidence: "python/packages/core/agent_framework/_workflows/_checkpoint.py:36-49 @ e34bf48"
   # A5: What is a `Session` attached to: user, agent, task, or execution?
   A5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Session plus Workflow, with supersteps as the iteration unit and a checkpoint at each boundary."
+    evidence: "python/packages/core/agent_framework/_workflows/_runner.py:46,110 @ e34bf48"
   # A6: Are messages first-class durable resources, or transient function arguments?
   A6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Messages exchanged between executors are a named part of the checkpoint, so intra-workflow messages are durable by construction."
+    evidence: "python/packages/core/agent_framework/_workflows/_checkpoint.py:54 @ e34bf48; verified live against agent-framework-core (PyPI, 2026-08-26); graph_signature_hash reproduced locally"
   # A7: Are artifacts (files, outputs, deliverables) first-class?
   A7:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # A8: Can multiple agents participate in one task? How is that represented?
   A8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Executors are graph nodes that may be agents, functions, or nested workflows (WorkflowExecutor), composed by typed edge groups."
+    evidence: "python/packages/core/agent_framework/_workflows/_workflow_executor.py @ e34bf48"
   # A9: Draw the object model as a tree. Only nodes that exist in their code or API.
   A9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Agent + Session; Workflow > Executor + EdgeGroup{Single|FanOut|FanIn|SwitchCase} > superstep; WorkflowCheckpoint{workflow_name, graph_signature_hash, checkpoint_id, previous_checkpoint_id, timestamp, messages, state, pending_request_info_events, iteration_count, metadata, version}; DeclarativeAgent YAML. See teardown section 3."
+    evidence: "python/packages/core/agent_framework/_workflows/ @ e34bf48; verified live against agent-framework-core (PyPI, 2026-08-26); graph_signature_hash reproduced locally"
 
   # --- B. Runtime model ---
   # B1: Does the platform launch agents, host them, or attach to external ones?
   B1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "In-process agents driven by a workflow runner; an extensive hosting surface (hosting, hosting-a2a, hosting-mcp, hosting-responses, foundry_hosting, foundry_local) covers deployment."
+    evidence: "python/packages/hosting/ @ e34bf48"
   # B2: Execution substrate: process, container, microVM, serverless, in-process library, remote HTTP?
   B2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "In-process by default; a hyperlight package (Microsoft micro-VM technology) exists but its integration depth was not read."
+    evidence: "python/packages/hyperlight/ @ e34bf48"
   # B3: Who owns the event loop — platform or agent?
   B3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The Runner owns the loop, advancing the graph in Pregel supersteps and emitting superstep_started events."
+    evidence: "python/packages/core/agent_framework/_workflows/_runner.py:46,122-123 @ e34bf48"
   # B4: Who decides when an agent wakes?
   B4:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/_workflows/_runner.py @ e34bf48"
   # B5: Can an agent run indefinitely? What is the actual ceiling?
   B5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Workflows pause and resume from checkpoints, including a named IDLE_WITH_PENDING_REQUESTS state while waiting on a human."
+    evidence: "python/packages/core/agent_framework/_workflows/_checkpoint.py:64-66 @ e34bf48"
   # B6: Are there background or unattended agents?
   B6:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # B7: Is execution synchronous or asynchronous from the caller's view?
   B7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The runner yields WorkflowEvents as it advances (superstep_started and others), so progress streams."
+    evidence: "python/packages/core/agent_framework/_workflows/_events.py @ e34bf48"
   # B8: Can in-flight work migrate between workers?
   B8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Because a checkpoint binds to a workflow DEFINITION rather than an instance, it 'can be shared and restored across different workflow instances of the same workflow definition' - work can resume in a different process."
+    evidence: "python/packages/core/agent_framework/_workflows/_checkpoint.py:36-41 @ e34bf48"
   # B9: Can an agent survive a machine restart? Automatically, or with operator action?
   B9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Restore from a checkpoint, with graph-signature validation, step-cache and user-state restoration, and pending HITL requests reinstated."
+    evidence: "python/packages/core/agent_framework/_workflows/_functional.py:980-1000 @ e34bf48"
   # B10: Classify: worker/queue, durable actor, attached harness, or in-process library.
   B10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "hybrid: in-process agents plus a Pregel-superstep workflow engine with checkpointing, across Python, .NET and Go."
+    evidence: "python/packages/core/agent_framework/_workflows/_runner.py:46 @ e34bf48"
 
   # --- C. Durability and failure semantics ---
   # C1: What state is durable, and what is lost on crash?
   C1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "WorkflowCheckpoint persisted through injected storage with load(checkpoint_id); backends via azure-cosmos, redis and others."
+    evidence: "python/packages/core/agent_framework/_workflows/_checkpoint.py:31-82 @ e34bf48"
   # C2: *When* is state persisted — every step, every tool call, on checkpoint, never?
   C2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A checkpoint is written at each superstep boundary, with the entry checkpoint capturing the starting state."
+    evidence: "python/packages/core/agent_framework/_workflows/_runner.py:110 @ e34bf48"
   # C3: Checkpointing or event sourcing? Can state be rebuilt from a log?
   C3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Checkpoint-and-restore over Pregel supersteps, with previous_checkpoint_id chaining checkpoints into a history - a checkpoint chain rather than an event log."
+    evidence: "python/packages/core/agent_framework/_workflows/_checkpoint.py:51-53 @ e34bf48"
   # C4: Retry semantics, and at what granularity: run, step, tool call?
   C4:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # C5: At-least-once or exactly-once? What do the docs claim versus what the code does?
   C5:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/_workflows/_runner.py @ e34bf48"
   # C6: Is there an idempotency model for tool side effects?
   C6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "No effect ledger for tool calls, but ONLY COMMITTED STATE is checkpointed - 'pending state changes are not included' - so a checkpoint never captures a half-applied mutation."
+    evidence: "python/packages/core/agent_framework/_workflows/_checkpoint.py:55-58 @ e34bf48"
   # C7: Process crash recovery: what resumes, and from where?
   C7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Restore rebuilds step cache, user state, executor states and pending request-info events from the checkpoint, after validating graph compatibility."
+    evidence: "python/packages/core/agent_framework/_workflows/_functional.py:986-1000 @ e34bf48"
   # C8: Node loss: is work re-dispatched, and how is it detected?
   C8:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # C9: Context-window overflow: truncation, summarisation, or failure?
   C9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "_compaction.py is a first-class core module; third project in the study to ship a compaction strategy rather than only a hook."
+    evidence: "python/packages/core/agent_framework/_compaction.py @ e34bf48"
   # C10: Timers, scheduled execution, long sleeps — durable across restart?
   C10:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # C11: Human-in-the-loop pause and resume: durable, or in-memory only?
   C11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "RequestInfoMixin lets a workflow pause mid-graph to ask a human, and pending_request_info_events are stored IN THE CHECKPOINT so an unanswered request survives a restart - durable HITL integrated into the orchestration rather than bolted alongside it. Plus a named IDLE_WITH_PENDING_REQUESTS state."
+    evidence: "python/packages/core/agent_framework/_workflows/_checkpoint.py:59-66 @ e34bf48; python/packages/core/agent_framework/_workflows/_request_info_mixin.py:29"
   # C12: Can a definition be upgraded while runs are in flight? What happens to them?
   C12:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "THE ONLY WORKING VERSION-AND-PIN IN THIRTEEN PROJECTS. A checkpoint carries graph_signature_hash - a SHA-256 over the workflow name, sorted step names, a digest of the function's BYTECODE (__code__.co_code) and sorted co_names - and restore RAISES if it differs: 'created by a different version of workflow ... The workflow's step structure may have changed since this checkpoint was saved.' Verified by reproducing the hash: identical body gives the same hash, a changed body gives a different one."
+    evidence: "python/packages/core/agent_framework/_workflows/_functional.py:987-992,1210-1230 @ e34bf48; verified live against agent-framework-core (PyPI, 2026-08-26); graph_signature_hash reproduced locally"
 
   # --- D. Agent identity and lifecycle ---
   # D1: Is an agent globally addressable? By what identifier?
   D1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Agents have names; workflows have a name plus a content-derived signature hash. No agent id."
+    evidence: "python/packages/core/agent_framework/_agents.py @ e34bf48"
   # D2: Does identity survive process restart?
   D2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No persisted agent identity record."
+    evidence: "python/packages/core/agent_framework/_agents.py @ e34bf48"
   # D3: Is identity distinct from runtime instance?
   D3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Declarative agent YAML is the definition and a constructed agent is the execution; for workflows, definition identity (name + graph_signature_hash) is explicitly separated from instance identity."
+    evidence: "declarative-agents/agent-samples/foundry/MicrosoftLearnAgent.yaml @ e34bf48; python/packages/core/agent_framework/_workflows/_checkpoint.py:36-41"
   # D4: Are agents versioned? Immutable or mutable definitions?
   D4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Agents have no version. WORKFLOWS effectively do: graph_signature_hash is a content-derived version that cannot drift from the code, which is stronger than a counter for compatibility purposes but is not a human-facing version."
+    evidence: "python/packages/core/agent_framework/_workflows/_functional.py:1210-1230 @ e34bf48"
   # D5: Is there a registry or catalog?
   D5:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # D6: Can agents discover each other at runtime?
   D6:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # D7: Can agents advertise capabilities? In what format?
   D7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No declared capability model. _feature_stage.py marks FEATURE stability, which is a different concept."
+    evidence: "python/packages/core/agent_framework/_feature_stage.py @ e34bf48"
   # D8: Is there an owner, team, or tenant on the agent record?
   D8:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # D9: Can an agent be suspended, revoked, or deprecated?
   D9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No revocation or deprecation lifecycle for agents. THIRTEEN PROJECTS absent. Note the asymmetry: MAF versions and pins WORKFLOWS with real rigour and does nothing for agent lifecycle - the same split as ADK."
+    evidence: "python/packages/core/agent_framework/_agents.py @ e34bf48"
   # D10: Is there anything resembling a declarative agent manifest?
   D10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Declarative agent manifests in YAML: kind-discriminated, with name, instructions, model (id, options, connection) and typed tools - and crucially approvalMode and allowedTools IN THE MANIFEST, so tool scoping and approval policy are part of the declared agent. =Env. expressions supply deployment-time values. workflow-samples/ makes workflows declarable too."
+    evidence: "declarative-agents/agent-samples/foundry/MicrosoftLearnAgent.yaml @ e34bf48"
 
   # --- E. Harness and runtime interoperability ---
   # E1: What is the minimum interface an agent implementation must satisfy?
   E1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Not an adapter contract for third-party agents; Executor is the node abstraction and agents are written against the framework. A very wide provider surface (anthropic, gemini, bedrock, claude, ollama, mistral, openai, copilotstudio, github_copilot) adapts MODELS rather than agents."
+    evidence: "python/packages/ @ e34bf48"
   # E2: Transport: stdin/stdout, HTTP, gRPC, WebSocket, in-process, ACP, A2A?
   E2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Hosting adapters for A2A, MCP, OpenAI Responses, ChatKit and Telegram; in-process execution otherwise."
+    evidence: "python/packages/hosting-a2a/ @ e34bf48"
   # E3: Can it host a foreign agent (Claude Code, Codex, OpenHands, LangGraph, ADK)?
   E3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A2A lets external agents interoperate as edge participants; there is no pluggable agent-harness registry."
+    evidence: "python/packages/a2a/ @ e34bf48"
   # E4: Is there an event stream out of a running agent? What granularity?
   E4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Typed WorkflowEvents emitted per superstep, plus agent hooks and middleware around model and tool calls."
+    evidence: "python/packages/core/agent_framework/_workflows/_events.py @ e34bf48; python/packages/core/agent_framework/_agent_hooks.py"
   # E5: Are tool calls externally observable, or internal to the agent?
   E5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "_tools.py and _middleware.py give interception around tool calls; the declarative manifest scopes them with allowedTools and approvalMode."
+    evidence: "python/packages/core/agent_framework/_middleware.py @ e34bf48"
   # E6: How is context injected at start?
   E6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Declarative YAML for agents and workflows, with =Env. expressions and a kind discriminator."
+    evidence: "declarative-agents/ @ e34bf48"
   # E7: Is cancellation supported? Cooperative or forced? Does it propagate to subagents?
   E7:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # E8: Can a run be checkpointed and restored by the platform, or only by the agent?
   E8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A full checkpoint/restore contract: WorkflowCheckpoint with graph compatibility validation, committed-state-only semantics, checkpoint chaining and pending-request preservation."
+    evidence: "python/packages/core/agent_framework/_workflows/_checkpoint.py:31-82 @ e34bf48"
   # E9: Which of these would be hard to adapt, and why?
   E9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Docstrings that state contracts and their limits precisely - notably that a checkpoint binds to a definition not an instance, that only committed state is captured, and that iteration_count is NOT unique per lifecycle with the concrete case that breaks the assumption."
+    evidence: "python/packages/core/agent_framework/_workflows/_checkpoint.py:36-66 @ e34bf48"
 
   # --- F. Agent-to-agent communication ---
   # F1: Direct messages between agents?
   F1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A DIFFERENT ANSWER FROM AG2's, worth stating precisely: messages between EXECUTORS are a named part of the workflow checkpoint, so intra-graph agent messaging is durable BECAUSE THE WORKFLOW IS. But there is no messaging substrate outside a graph - no mailbox, no addressing, no independent delivery guarantee. AG2 has durable messages between peers; MAF has durable messages between nodes."
+    evidence: "python/packages/core/agent_framework/_workflows/_checkpoint.py:54 @ e34bf48"
   # F2: Channels, topics, or pub/sub?
   F2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Edges are the channels, and they are typed and declared - but they are graph topology, not agent-addressable channels."
+    evidence: "python/packages/core/agent_framework/_workflows/_edge.py:76,295 @ e34bf48"
   # F3: Task delegation as a distinct mechanism from messaging?
   F3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Delegation is graph structure: an Executor may be an agent, a function, or a nested workflow (WorkflowExecutor), so handing work to a sub-workflow is first-class and composable."
+    evidence: "python/packages/core/agent_framework/_workflows/_workflow_executor.py @ e34bf48"
   # F4: Synchronous RPC between agents?
   F4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A2A provides RPC-shaped interop at the edge; internally executors exchange messages along edges."
+    evidence: "python/packages/a2a/ @ e34bf48"
   # F5: Asynchronous inbox or mailbox?
   F5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No mailbox or inbox for an agent outside a workflow."
+    evidence: "python/packages/core/agent_framework/_workflows/ @ e34bf48"
   # F6: Is delivery durable? Survives restart of sender and receiver?
   F6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Delivery within a superstep is the runner's guarantee and messages are checkpointed, but there is no stated inter-agent delivery semantic."
+    evidence: "python/packages/core/agent_framework/_workflows/_runner.py:110 @ e34bf48"
   # F7: Is message ordering guaranteed? Per what scope?
   F7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Pregel supersteps give a total order by construction: all messages for a superstep are delivered before the next begins, and the checkpoint sits on the boundary."
+    evidence: "python/packages/core/agent_framework/_workflows/_runner.py:46,110 @ e34bf48"
   # F8: Acknowledgement or delivery receipts?
   F8:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/_workflows/ @ e34bf48"
   # F9: Correlation ids for request/response pairing?
   F9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "checkpoint_id plus previous_checkpoint_id chain execution history; iteration_count locates a checkpoint on a superstep boundary; workflow_name plus graph_signature_hash identify the definition."
+    evidence: "python/packages/core/agent_framework/_workflows/_checkpoint.py:50-66 @ e34bf48"
   # F10: Conversation threading?
   F10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Because checkpoints bind to a definition rather than an instance and chain via previous_checkpoint_id, a workflow can be restored and continued as a new instance from any point - branching by construction."
+    evidence: "python/packages/core/agent_framework/_workflows/_checkpoint.py:36-53 @ e34bf48"
   # F11: Capability-based routing — address by what an agent *can do* rather than who it is?
   F11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "SwitchCaseEdgeGroup routes by declared conditions with an explicit Default, which is conditional routing over topology rather than routing to agents by capability."
+    evidence: "python/packages/core/agent_framework/_workflows/_edge.py:650-808 @ e34bf48"
 
   # --- G. Human-agent collaboration ---
   # G1: Is a human modelled as a special kind of agent, a distinct principal type, or not modelled?
   G1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No principals in the framework; identity is Azure's, externally."
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # G2: Shared rooms, channels, or workspaces?
   G2:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # G3: Task threads humans can read and post into?
   G3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "devui provides local inspection and interaction; hosting adapters expose agents through ChatKit, Telegram and AG-UI surfaces."
+    evidence: "python/packages/devui/ @ e34bf48"
   # G4: Mentions or directed addressing?
   G4:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # G5: Approval gates. Blocking or advisory? Durable while pending?
   G5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "RequestInfo pauses a workflow mid-graph to ask a human, with pending_request_info_events preserved across checkpoints and a named IDLE_WITH_PENDING_REQUESTS state. Declarative manifests also carry approvalMode per tool."
+    evidence: "python/packages/core/agent_framework/_workflows/_request_info_mixin.py:29 @ e34bf48; python/packages/core/agent_framework/_workflows/_checkpoint.py:59-61"
   # G6: Mid-run intervention: can a human redirect without restarting?
   G6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A human answers a RequestInfo to advance the workflow, and can restore from any checkpoint in the chain; no interrupt or steer surface examined."
+    evidence: "python/packages/core/agent_framework/_workflows/_request_info_mixin.py @ e34bf48"
   # G7: Agent status and presence visible to humans?
   G7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "IDLE_WITH_PENDING_REQUESTS names the waiting-on-human state, and typed WorkflowEvents report superstep progress."
+    evidence: "python/packages/core/agent_framework/_workflows/_checkpoint.py:64-66 @ e34bf48"
   # G8: Notifications or escalation when an agent is blocked?
   G8:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # G9: Shared scratchpad or working surface?
   G9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Workflow state is shared context between executors, with _conversation_history.py for the transcript."
+    evidence: "python/packages/core/agent_framework/_workflows/_conversation_history.py @ e34bf48"
   # G10: Can a human see the context an agent is operating on?
   G10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Checkpoint chains plus conversation history plus devui plus _viz.py graph rendering make a run inspectable."
+    evidence: "python/packages/core/agent_framework/_workflows/_viz.py @ e34bf48"
 
   # --- H. Context and memory ---
   # H1: Which of these exist as *separate* concepts: prompt context, working state, session history, ...
   H1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "No single memory service in core, but memory is pluggable through packages: azure-cosmos-memory, mem0, redis, azure-ai-search. Knowledge is _skills.py and _filesystem.py."
+    evidence: "python/packages/mem0/ @ e34bf48; python/packages/core/agent_framework/_skills.py"
   # H2: Who owns memory: agent, human, workspace, task, or tenant?
   H2:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # H3: Can memory be shared between agents? At what granularity?
   H3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Workflow state is shared across executors within a run; cross-run sharing depends on the memory backend chosen."
+    evidence: "python/packages/core/agent_framework/_workflows/_state.py @ e34bf48"
   # H4: Are there permissions on memory?
   H4:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # H5: Is provenance tracked — where a memory came from?
   H5:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # H6: Expiry, TTL, or forgetting?
   H6:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # H7: Summarisation or compaction. Automatic or explicit?
   H7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "_compaction.py is a core module, so history reduction is a first-class configured operation."
+    evidence: "python/packages/core/agent_framework/_compaction.py @ e34bf48"
   # H8: Retrieval mechanism: vector, keyword, structured, agent-driven?
   H8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Retrieval comes from pluggable backends (azure-ai-search, mem0, redis) rather than a core interface."
+    evidence: "python/packages/azure-ai-search/ @ e34bf48"
   # H9: Can an agent mutate its own memory mid-run?
   H9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Executors write workflow state, and _state.py distinguishes committed from pending state - only committed state is checkpointed."
+    evidence: "python/packages/core/agent_framework/_workflows/_state.py @ e34bf48; python/packages/core/agent_framework/_workflows/_checkpoint.py:55-58"
   # H10: Conflict resolution on concurrent writes?
   H10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Workflow state is shared mutable state across executors, with executor states under a reserved _executor_state key."
+    evidence: "python/packages/core/agent_framework/_workflows/_checkpoint.py:55-58 @ e34bf48"
   # H11: Is memory in the same store as execution state, or separate?
   H11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Execution state (checkpointed workflow state), knowledge (_skills.py, _filesystem.py) and memory (pluggable backends) are three separate concerns."
+    evidence: "python/packages/core/agent_framework/_skills.py @ e34bf48"
 
   # --- I. Tools and capabilities ---
   # I1: Are tools bound to agents statically, or resolved dynamically?
   I1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "_tools.py and _mcp.py in core plus a tools package; declarative manifests declare tools with a kind discriminator."
+    evidence: "python/packages/core/agent_framework/_tools.py @ e34bf48"
   # I2: Is there a capability abstraction distinct from tool implementation?
   I2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No declared capability model for agents or runtimes."
+    evidence: "python/packages/core/agent_framework/_tools.py @ e34bf48"
   # I3: Is there a registry of available tools?
   I3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Tools are attached per agent or declared in the manifest; there is no separate tool registry service."
+    evidence: "declarative-agents/agent-samples/foundry/MicrosoftLearnAgent.yaml @ e34bf48"
   # I4: Tool scoping — can an agent be restricted to a subset?
   I4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "allowedTools in the manifest restricts an MCP server to named tools, and approvalMode sets the gate per tool - declared rather than configured at runtime."
+    evidence: "declarative-agents/agent-samples/foundry/MicrosoftLearnAgent.yaml @ e34bf48"
   # I5: Are tools versioned?
   I5:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/_tools.py @ e34bf48"
   # I6: How are credentials supplied to a tool?
   I6:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # I7: OAuth or delegated user credentials?
   I7:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # I8: Can policy intercept a tool call before execution?
   I8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "_middleware.py is the interception layer, and agent-framework-purview uses it for real policy enforcement: PurviewPolicyMiddleware (agent level) and PurviewChatPolicyMiddleware (chat-client level) evaluating centrally managed DLP policy."
+    evidence: "python/packages/core/agent_framework/_middleware.py @ e34bf48; python/packages/purview/agent_framework_purview/_middleware.py:24,150"
   # I9: Approval gates on specific tools?
   I9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "approvalMode per tool in the declarative manifest, plus RequestInfo for mid-workflow human gates."
+    evidence: "declarative-agents/agent-samples/foundry/MicrosoftLearnAgent.yaml @ e34bf48"
   # I10: Do tools execute inside or outside the agent's sandbox?
   I10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A hyperlight package exists (micro-VM), but whether tool code runs inside it by default was not established."
+    evidence: "python/packages/hyperlight/ @ e34bf48"
 
   # --- J. Security and identity ---
   # J1: What identity does an agent authenticate as?
   J1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent principal in the framework."
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # J2: Authentication mechanism for agent-to-platform?
   J2:
     verdict: unknown
-    note:
-    evidence:
+    note: "Framework-level authentication was not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model); Azure identity is used by provider packages."
+    evidence: "python/packages/azure/ @ e34bf48"
   # J3: Authorisation model: RBAC, ABAC, capability tokens, none?
   J3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Purview enforces centrally managed data-governance policy through middleware, which is authorization over CONTENT rather than over operations; there is no operation-level authorization model in the framework."
+    evidence: "python/packages/purview/README.md @ e34bf48"
   # J4: Secret storage and injection?
   J4:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # J5: Per-agent credentials, or shared platform credentials?
   J5:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # J6: Can an agent act as a user? Is that impersonation or delegation?
   J6:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # J7: Tenant isolation: logical, or enforced at runtime?
   J7:
     verdict: unknown
-    note:
-    evidence:
+    note: "Tenancy is Azure's; not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)."
+    evidence: "python/packages/azure/ @ e34bf48"
   # J8: Network and filesystem isolation?
   J8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "hyperlight suggests a micro-VM boundary is available; integration depth not read."
+    evidence: "python/packages/hyperlight/ @ e34bf48"
   # J9: Is there an audit log? Is it tamper-evident?
   J9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Purview logs AI interactions for 'Audit, Communication Compliance, Insider Risk Management, eDiscovery, and Data Lifecycle Management' - audit into an existing enterprise compliance system rather than a bespoke log."
+    evidence: "python/packages/purview/README.md @ e34bf48"
   # J10: Where are policy decisions enforced — control plane, runtime, or tool gateway?
   J10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "BIDIRECTIONAL CONTENT POLICY, unique in the study: Purview 'blocks or allows content at both ingress (prompt) and egress (response)', enforced by middleware against centrally managed DLP policy, so an agent author cannot bypass an org policy by editing their agent."
+    evidence: "python/packages/purview/README.md @ e34bf48"
 
   # --- K. Sandbox and isolation ---
   # K1: Is there a workspace or sandbox concept? What is its lifecycle?
   K1:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/hyperlight/ @ e34bf48"
   # K2: Persistent filesystem across runs?
   K2:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/hyperlight/ @ e34bf48"
   # K3: Snapshot and restore?
   K3:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/hyperlight/ @ e34bf48"
   # K4: Network egress rules?
   K4:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # K5: Container, microVM, or none?
   K5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "hyperlight (Microsoft micro-VM technology) is packaged, implying a VM-grade isolation option rather than only process isolation - but its integration was not read."
+    evidence: "python/packages/hyperlight/ @ e34bf48"
   # K6: Resource quotas: CPU, memory, disk, wall clock?
   K6:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # K7: How are secrets injected without landing in the image or logs?
   K7:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # K8: Arbitrary code execution? Browser execution?
   K8:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/hyperlight/ @ e34bf48"
   # K9: Is the sandbox pluggable, or a fixed implementation?
   K9:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/hyperlight/ @ e34bf48"
 
   # --- L. Orchestration and scheduling ---
   # L1: Does it distinguish agent coordination from workflow orchestration?
   L1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The cleanest orchestration/agent separation in the study: agents are executors, the graph is data (validated and visualisable), and the runner owns superstep advancement."
+    evidence: "python/packages/core/agent_framework/_workflows/_workflow_builder.py @ e34bf48"
   # L2: Topology: DAG, cyclic graph, supervisor, planner, event-driven, queue?
   L2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "MOST COMPLETE WORKFLOW ENGINE IN THE STUDY: WorkflowBuilder producing a typed graph of Executors joined by EdgeGroups, run in Pregel supersteps, with _validation.py checking the graph before execution and _viz.py rendering it."
+    evidence: "python/packages/core/agent_framework/_workflows/_workflow_builder.py @ e34bf48; python/packages/core/agent_framework/_workflows/_validation.py; python/packages/core/agent_framework/_workflows/_viz.py"
   # L3: Cron or scheduled triggers?
   L3:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # L4: Dynamic task spawning at runtime?
   L4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Topology is declared up front and validated, so dynamic spawning is not the model; a nested WorkflowExecutor provides composition instead."
+    evidence: "python/packages/core/agent_framework/_workflows/_workflow_executor.py @ e34bf48"
   # L5: Fan-out / fan-in?
   L5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "FIRST DECLARATIVE FAN-OUT/FAN-IN IN THE STUDY: FanOutEdgeGroup and FanInEdgeGroup as typed topology, plus SwitchCaseEdgeGroup with explicit Case and Default types, and EdgeGroup.register() for custom topologies."
+    evidence: "python/packages/core/agent_framework/_workflows/_edge.py:501,616,650-808,399 @ e34bf48"
   # L6: Subagents. Are they first-class, or just nested calls?
   L6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "WorkflowExecutor makes a workflow itself a node, giving composable nesting without a second abstraction."
+    evidence: "python/packages/core/agent_framework/_workflows/_workflow_executor.py @ e34bf48"
   # L7: Retry and backoff policy — declarative or hand-rolled?
   L7:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # L8: Compensation or rollback on failure?
   L8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No compensation or rollback. ELEVEN PROJECTS absent - though restoring an earlier checkpoint in the chain is a partial analogue for conversational state (it undoes the record, not the effects)."
+    evidence: "python/packages/core/agent_framework/_workflows/_checkpoint.py:51-53 @ e34bf48"
   # L9: Does cancellation propagate through the whole tree?
   L9:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # L10: Could this be replaced by Temporal or Restate, or is orchestration inseparable from the agent...
   L10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The workflow engine IS the orchestration layer and it is deliberately separate from agent authoring - graphs are built, validated and visualised as data rather than expressed as agent control flow."
+    evidence: "python/packages/core/agent_framework/_workflows/_validation.py @ e34bf48"
 
   # --- M. Observability ---
   # M1: Which of these are modelled as telemetry objects: trace, run, step, LLM call, tool call, mess...
   M1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "_telemetry.py in core, _evaluation.py, and devui for local inspection; convention adherence not audited in this targeted pass."
+    evidence: "python/packages/core/agent_framework/_telemetry.py @ e34bf48"
   # M2: Is telemetry keyed to agent, run, model, task, user, or tenant?
   M2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Correlation via workflow_name, graph_signature_hash, checkpoint_id, previous_checkpoint_id and iteration_count - a checkpoint identifies both its definition and its position."
+    evidence: "python/packages/core/agent_framework/_workflows/_checkpoint.py:44-66 @ e34bf48"
   # M3: OpenTelemetry, proprietary, or none?
   M3:
     verdict: unknown
-    note:
-    evidence:
+    note: "OTel is present in the dependency surface but semantic-convention adherence was not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model). Recorded unknown rather than guessed. (see OQ-038)"
+    evidence: "python/packages/core/agent_framework/_telemetry.py @ e34bf48"
   # M4: Is there a documented, stable event schema?
   M4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "WorkflowCheckpoint is a typed dataclass with documented field semantics, checkpoint encoding is its own module, and events are typed."
+    evidence: "python/packages/core/agent_framework/_workflows/_checkpoint_encoding.py @ e34bf48"
   # M5: Cost and token accounting. Per what unit?
   M5:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # M6: Latency breakdown by phase?
   M6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Checkpoints carry ISO 8601 timestamps and superstep boundaries give phase structure; span timing not examined."
+    evidence: "python/packages/core/agent_framework/_workflows/_checkpoint.py:53 @ e34bf48"
   # M7: Error taxonomy?
   M7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The graph-incompatibility error names the likely cause rather than just failing: 'The workflow's step structure may have changed since this checkpoint was saved.'"
+    evidence: "python/packages/core/agent_framework/_workflows/_functional.py:988-992 @ e34bf48"
   # M8: Can the event stream reconstruct a run after the fact — replay or audit?
   M8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The checkpoint chain (previous_checkpoint_id) plus conversation history plus executor messages reconstruct a run, and _viz.py renders the topology it ran on."
+    evidence: "python/packages/core/agent_framework/_workflows/_checkpoint.py:51-53 @ e34bf48"
 
   # --- N. Multi-tenancy and enterprise ---
   # N1: Resource hierarchy: org, workspace, project, environment?
   N1:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # N2: RBAC model and its granularity?
   N2:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # N3: Quotas and cost limits. Enforced or advisory?
   N3:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # N4: dev / staging / prod separation?
   N4:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # N5: Deployment promotion path?
   N5:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # N6: Agent catalog scoped to a tenant?
   N6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "declarative-agents/ and workflow-samples/ are file-based catalogs of declared agents and workflows; there is no catalog service."
+    evidence: "declarative-agents/ @ e34bf48"
   # N7: Audit retention controls?
   N7:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # N8: Is multi-tenancy in the OSS core, or reserved for a commercial tier?
   N8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "The framework and workflow engine are fully usable standalone under MIT; Azure and Foundry are the commercial gravity, and purview requires an Azure subscription."
+    evidence: "LICENSE @ e34bf48; python/packages/purview/README.md"
 
   # --- O. API and protocol surface ---
   # O1: List the actual primary endpoints or SDK entry points. Verbatim.
   O1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Very wide: A2A, AG-UI, MCP (client and hosting), OpenAI Responses hosting, ChatKit, Telegram, CopilotStudio, GitHub Copilot, Foundry, plus devui."
+    evidence: "python/packages/ @ e34bf48"
   # O2: Is the API resource-oriented or RPC-flavoured?
   O2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Library APIs plus declarative YAML; hosting packages expose HTTP surfaces."
+    evidence: "python/packages/hosting-responses/ @ e34bf48"
   # O3: Streaming: SSE, WebSocket, long-poll, gRPC stream?
   O3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Event streaming from the runner per superstep, and streaming hosting adapters (AG-UI, ChatKit)."
+    evidence: "python/packages/core/agent_framework/_workflows/_events.py @ e34bf48"
   # O4: Webhooks or outbound callbacks?
   O4:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # O5: Which standards are implemented: MCP, A2A, ACP, OTel, OpenAI-compatible?
   O5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A2A, AG-UI, MCP, OpenAI Responses; declarative YAML with a kind discriminator. Fifth independent instance of A2A as an edge package beside a different internal model."
+    evidence: "python/packages/a2a/ @ e34bf48; python/packages/ag-ui/"
   # O6: Is the API versioned? Stability commitment?
   O6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "_feature_stage.py marks feature stability in code, checkpoints carry an explicit version field, and graph_signature_hash versions a workflow by content."
+    evidence: "python/packages/core/agent_framework/_feature_stage.py @ e34bf48; verified live against agent-framework-core (PyPI, 2026-08-26); graph_signature_hash reproduced locally"
   # O7: Is there a separate northbound (client) and southbound (runtime) API?
   O7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Northbound is the hosting surface and devui; southbound is the provider and memory packages. Real but not framed as a two-API split."
+    evidence: "python/packages/hosting/ @ e34bf48"
 
   # --- P. Storage ---
   # P1: What datastores are required to run it?
   P1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Checkpoint storage is injected (storage.load(checkpoint_id)); backends include azure-cosmos and redis, with dedicated checkpoint encoding."
+    evidence: "python/packages/core/agent_framework/_workflows/_checkpoint_encoding.py @ e34bf48"
   # P2: What is treated as authoritative, strongly consistent state?
   P2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The checkpoint is authoritative for workflow state, and only COMMITTED state is captured so it cannot record a half-applied mutation."
+    evidence: "python/packages/core/agent_framework/_workflows/_checkpoint.py:55-58 @ e34bf48"
   # P3: What is event-stream or append-only?
   P3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Checkpoints chain via previous_checkpoint_id, forming an append-style history of states rather than an event log."
+    evidence: "python/packages/core/agent_framework/_workflows/_checkpoint.py:51-53 @ e34bf48"
   # P4: Where do large artifacts go?
   P4:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # P5: Is there a vector store? Required or optional?
   P5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Vector retrieval via pluggable backends (azure-ai-search, mem0, redis) rather than a core abstraction."
+    evidence: "python/packages/azure-ai-search/ @ e34bf48"
   # P6: Is storage pluggable, or hardcoded?
   P6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Checkpoint storage, memory and model providers are all pluggable as separate packages - 35 in the Python tree."
+    evidence: "python/packages/ @ e34bf48"
 
   # --- Q. Licensing and commercial ---
   # Q1: Exact license, including any per-directory variation.
   Q1:
     verdict: first_class
-    note: "MIT."
-    evidence: "https://github.com/microsoft/agent-framework (GitHub API, read 2026-08-26; 13122★, pushed 2026-08-26)"
+    note: "MIT across the repository."
+    evidence: "LICENSE @ e34bf48"
   # Q2: Are there enterprise-only components missing from the OSS repo?
   Q2:
-    verdict: first_class
-    note: "Azure AI Foundry is the commercial hosted counterpart."
-    evidence: "https://github.com/microsoft/agent-framework (GitHub API, read 2026-08-26; 13122★, pushed 2026-08-26)"
+    verdict: implicit
+    note: "The core framework and workflow engine are fully usable standalone under MIT - better than AgentCore's position. But agent-framework-purview, the best governance story here, requires an Azure Purview subscription, so central policy enforcement is not independently usable."
+    evidence: "python/packages/purview/README.md @ e34bf48"
   # Q3: SaaS or hosted-service restrictions?
   Q3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No SaaS restriction under MIT."
+    evidence: "LICENSE @ e34bf48"
   # Q4: Trademark constraints on derived works?
   Q4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Microsoft and Azure naming; MIT grants no trademark rights."
+    evidence: "LICENSE @ e34bf48"
   # Q5: Network copyleft (AGPL, SSPL) implications for a hosted product?
   Q5:
     verdict: absent
-    note: "No network copyleft. Apache-2.0/MIT only across the whole study."
-    evidence: "https://github.com/microsoft/agent-framework (GitHub API, read 2026-08-26; 13122★, pushed 2026-08-26)"
+    note: "No network copyleft."
+    evidence: "LICENSE @ e34bf48"
   # Q6: Verdict: `USE` / `INTEGRATE` / `REFERENCE_ONLY` / `AVOID`, with reasoning.
   Q6:
     verdict: first_class
-    note: "REFERENCE_ONLY — MIT, but strongly .NET/Azure-shaped."
-    evidence: "https://github.com/microsoft/agent-framework (GitHub API, read 2026-08-26; 13122★, pushed 2026-08-26)"
+    note: "REUSE (targeted). MIT and Python. The graph_signature_hash mechanism and the typed edge groups port directly and are the most valuable findings; the 35-package provider surface does not."
+    evidence: "LICENSE @ e34bf48"
 
   # --- R. Developer experience ---
   # R1: Time from clone to a running agent. Actual elapsed minutes.
   R1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "VERIFIED: python -m venv, pip install agent-framework-core, import and inspect WorkflowCheckpoint - clean first try."
+    evidence: "verified live against agent-framework-core (PyPI, 2026-08-26); graph_signature_hash reproduced locally"
   # R2: How many concepts before "hello world"?
   R2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "An agent is a small start, but the workflow model adds executors, edge groups, supersteps and checkpoints, and the package surface is 35 Python packages plus .NET and Go trees."
+    evidence: "python/packages/ @ e34bf48"
   # R3: Is there a local dev loop? Hot reload?
   R3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "devui gives a local development UI, and _viz.py renders a workflow graph before running it."
+    evidence: "python/packages/devui/ @ e34bf48"
   # R4: How do you debug a stuck run?
   R4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Graph validation before execution, graph visualisation, typed superstep events, checkpoint chains for time-travel, and devui."
+    evidence: "python/packages/core/agent_framework/_workflows/_validation.py @ e34bf48; python/packages/core/agent_framework/_workflows/_viz.py"
   # R5: Can an agent be unit tested? Is there a test harness?
   R5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Extensive per-package tests exist; I ran none in this targeted pass, but reproduced the signature-hash computation independently to verify the C12 claim."
+    evidence: "verified live against agent-framework-core (PyPI, 2026-08-26); graph_signature_hash reproduced locally"
   # R6: Deployment story?
   R6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Many hosting targets (foundry_hosting, foundry_local, hosting-*), three language SDKs, and hyperlight for isolated execution."
+    evidence: "python/packages/foundry_hosting/ @ e34bf48"
   # R7: CLI ergonomics — try the equivalent of `init`, `agent add`, `run`.
   R7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "devui is the developer surface; no agent-management CLI examined."
+    evidence: "python/packages/devui/ @ e34bf48"
 
   # --- S. Hard scenarios ---
   # S1: Delegated authority
   S1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No principals in the framework; identity is Azure's, externally."
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # S2: Torn side effect
   S2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "No effect ledger, but checkpointing ONLY COMMITTED STATE means a checkpoint never captures a half-applied mutation - the same instinct at state granularity rather than effect granularity."
+    evidence: "python/packages/core/agent_framework/_workflows/_checkpoint.py:55-58 @ e34bf48"
   # S3: Upgrade mid-flight
   S3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class_answer
+    note: "BEST ANSWER IN THE STUDY, AND THE ONLY ONE NEEDING NO MANUAL VERSIONING. graph_signature_hash is a SHA-256 over a canonical JSON of {workflow name, sorted step names, sha256(__code__.co_code), sorted co_names}, stamped on every checkpoint and compared on restore, raising with a message that names the likely cause. Because the version is DERIVED FROM THE CODE there is nothing to forget to bump - which is exactly the failure that defeats Omnigent's monotonic Agent.version. VERIFIED: identical body gives the same hash, changed body gives a different hash."
+    evidence: "python/packages/core/agent_framework/_workflows/_functional.py:987-992,1210-1230 @ e34bf48; verified live against agent-framework-core (PyPI, 2026-08-26); graph_signature_hash reproduced locally"
   # S4: Concurrent memory write
   S4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)."
+    evidence: "python/packages/core/agent_framework/_workflows/_state.py @ e34bf48"
   # S5: Cancellation tree
   S5:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # S6: Silent context loss
   S6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "_compaction.py makes compaction a first-class configured operation rather than an implicit side effect; no loss signal examined."
+    evidence: "python/packages/core/agent_framework/_compaction.py @ e34bf48"
   # S7: Poison message
   S7:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # S8: Tenant leak
   S8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "Tenancy is not modelled in the framework."
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # S9: Runaway spend
   S9:
     verdict: unknown
-    note:
-    evidence:
+    note: "not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)"
+    evidence: "python/packages/core/agent_framework/ @ e34bf48"
   # S10: Zombie sandbox
   S10:
     verdict: unknown
-    note:
-    evidence:
+    note: "hyperlight exists but its lifecycle handling was not examined in this targeted pass (scoped to F, L, D9, D10 and the checkpoint model)."
+    evidence: "python/packages/hyperlight/ @ e34bf48"
 
 object_model: |
-  # ASCII tree of resources that actually exist
+  Agent                        with hooks, middleware, skills, tools
+  Session                      _sessions.py
+  Workflow                     built via WorkflowBuilder
+   |-- Executor                a node (agent, function, or nested workflow)
+   |-- EdgeGroup               typed topology:
+   |    |-- SingleEdgeGroup
+   |    |-- FanOutEdgeGroup
+   |    |-- FanInEdgeGroup
+   |    `-- SwitchCaseEdgeGroup  (+ Case, + Default)
+   |-- superstep               Pregel iteration; checkpoint boundary
+   `-- RequestInfo             HITL request/response mid-workflow
 
-strongest_ideas: []
+  WorkflowCheckpoint           (verified live)
+    workflow_name
+    graph_signature_hash       <- hash of the workflow CODE; checked on restore
+    checkpoint_id
+    previous_checkpoint_id     <- chain, so checkpoints form a history
+    timestamp
+    messages                   messages exchanged between executors
+    state                      committed only; pending changes excluded
+    pending_request_info_events   unanswered HITL requests survive
+    iteration_count            superstep boundary (NOT unique per lifecycle)
+    metadata
+    version
 
-weakest_choices: []
+  DeclarativeAgent (YAML)      kind, name, instructions, model, tools[]
+                               with approvalMode + allowedTools
 
-reusable_components: []
-  # - component: 
-  #   decision: INTEGRATE   # BUILD|INTEGRATE|ADOPT_AS_STANDARD|REUSE|DEFER
-  #   note: 
+strongest_ideas:
+  - "graph_signature_hash stamped on every checkpoint and ENFORCED on restore - the only working version-and-pin in thirteen projects."
+  - "Deriving the version from a BYTECODE DIGEST (sha256 of __code__.co_code plus sorted co_names, mixed with workflow name and step names), so there is no version to forget to bump and no drift between the recorded version and the actual code."
+  - "Explaining WHY the bytecode digest is needed: it catches body changes that step-name discovery misses, e.g. steps referenced via attribute access (my_steps.fetch)."
+  - "A canonical JSON digest (sort_keys, tight separators) so the hash is reproducible across runs and machines."
+  - "Binding a checkpoint to a workflow DEFINITION rather than an instance, so checkpoints are portable across instances of the same definition - a property I had not thought to want."
+  - "previous_checkpoint_id chaining checkpoints into a history rather than keeping only a latest."
+  - "Checkpointing ONLY COMMITTED STATE - 'pending state changes are not included' - so a checkpoint can never capture a half-applied mutation."
+  - "pending_request_info_events stored IN the checkpoint, so an unanswered human request survives a restart without a separate approval store."
+  - "Documenting that iteration_count is NOT unique across a lifecycle, with the concrete case that breaks the assumption (a run pausing at IDLE_WITH_PENDING_REQUESTS)."
+  - "Typed edge groups - Single, FanOut, FanIn, SwitchCase with explicit Case and Default - making topology DECLARED rather than emergent control flow."
+  - "EdgeGroup.register() so custom topologies are first-class rather than forks."
+  - "Graph validation before execution (_validation.py) and graph visualisation (_viz.py) - both only possible because topology is data."
+  - "WorkflowExecutor: a workflow is itself a node, giving composable nesting without inventing a second abstraction."
+  - "IDLE_WITH_PENDING_REQUESTS as a named state - HumanLayer's waiting_input, reached independently."
+  - "BIDIRECTIONAL content policy (Purview): blocking at both prompt ingress and response egress, against a centrally managed DLP policy the agent author cannot edit or bypass."
+  - "Auditing into an existing enterprise compliance system (Audit, Communication Compliance, Insider Risk, eDiscovery, Data Lifecycle) rather than a bespoke log."
+  - "_feature_stage.py - an explicit feature-stability marker in code, the same instinct as ADK putting stability in the module path."
+  - "Declarative agent manifests carrying approvalMode and allowedTools, so tool scoping and approval policy are part of the DECLARED agent rather than runtime configuration."
+  - "=Env. expressions in manifests for deployment-time values."
 
-lessons: []
+weakest_choices:
+  - "No agent identity, version or revocation - while versioning WORKFLOWS with real rigour. The same asymmetry as ADK (which versions storage and telemetry schemas but not agents)."
+  - "No agent-to-agent messaging outside a workflow graph: no mailbox, no addressing, no independent delivery guarantee."
+  - "Enormous surface: 35 Python packages plus .NET and Go trees, with lab/ and monty/ shipped alongside stable code."
+  - "agent-framework-purview requires an Azure Purview subscription, so the best governance story is not independently usable."
+  - "A bytecode hash is brittle in the SAFE direction - a comment-only edit that changes bytecode invalidates checkpoints. Correct default, but it needs an escape hatch for deliberate compatible changes and I found none."
+  - "No compensation or rollback."
 
-adr_impact: []
-  # - adr: ADR-0001
-  #   effect: confirms      # confirms|amends|challenges|neutral
-  #   note: 
+reusable_components:
+  - component: "graph_signature_hash pinned on the checkpoint, enforced on restore"
+    decision: ADOPT_AS_STANDARD
+    note: "The only working precedent for ADR-0011 in thirteen projects."
+  - component: "Version derived from a code digest, not a manual counter"
+    decision: ADOPT_AS_STANDARD
+    note: "Removes the 'forgot to bump' failure that defeats Omnigent."
+  - component: "Canonical JSON digest for hash stability"
+    decision: REUSE
+    note: "A pin must be reproducible across machines."
+  - component: "Checkpoint bound to a definition, not an instance"
+    decision: ADOPT_AS_STANDARD
+    note: "Makes checkpoints portable across runs of the same definition."
+  - component: "previous_checkpoint_id chaining"
+    decision: REUSE
+    note: "A checkpoint history, not just a latest."
+  - component: "Checkpoint only committed state"
+    decision: ADOPT_AS_STANDARD
+    note: "Never persist a half-applied mutation."
+  - component: "Pending HITL requests inside the checkpoint"
+    decision: ADOPT_AS_STANDARD
+    note: "Durable approval for free; second route to ADR-0015 rule 1."
+  - component: "Typed edge groups (single/fan-out/fan-in/switch-case)"
+    decision: REUSE
+    note: "Declared topology is what enables validation and visualisation."
+  - component: "Graph validation + visualisation"
+    decision: REUSE
+    note: "Only possible when topology is data."
+  - component: "Workflow-as-executor nesting"
+    decision: REUSE
+    note: "Composability without a second abstraction."
+  - component: "Bidirectional (ingress + egress) content policy"
+    decision: ADOPT_AS_STANDARD
+    note: "Centrally managed policy the agent cannot bypass."
+  - component: "Feature-stability marker in code"
+    decision: REUSE
+    note: "Same instinct as ADK's module-path stability tiers."
+  - component: "Manifest carrying approvalMode + allowedTools"
+    decision: ADOPT_AS_STANDARD
+    note: "Tool scope and approval policy belong to the declared agent."
+  - component: "35-package provider surface"
+    decision: BUILD
+    note: "Reject as a scope model."
+
+lessons:
+  - "THE FIRST AND ONLY PRECEDENT FOR ADR-0011, and it is better than my design. Thirteen projects: AX pins adapter identity without versions, Omnigent versions agents without pinning, ADK versions storage and telemetry schemas but not agents, Cloudflare versions its schema but leaves snapshots unversioned. MAF does the whole thing - graph_signature_hash computed from the workflow's BYTECODE, stamped on the checkpoint, compared on restore, raising with a message naming the likely cause. Deriving the version from code removes the manual-bump failure mode entirely. AMEND ADR-0011 to derive pins from content digests wherever possible. (confirms ADR-0011)"
+  - "A GENUINELY DIFFERENT ANSWER TO ADR-0003 from AG2's. Messages between executors are part of the workflow checkpoint, so intra-graph agent messaging is durable BECAUSE THE WORKFLOW IS; AG2's envelope is durable independently of any orchestration. The amendment: if all agent interaction happens inside an orchestration we already checkpoint, message durability is FREE - a cheaper v0.1 option, at the cost of agents that cannot talk outside a graph. (amends ADR-0003)"
+  - "Purview adds an axis Omnigent's per-phase model lacks: policy at INGRESS AND EGRESS of the model call, evaluated against a CENTRALLY MANAGED policy the agent author cannot edit. Omnigent answers WHERE in the enforcement path to fail closed; Purview answers WHO OWNS THE RULE. Our policy model needs explicit precedence - organisation policies bind agent policies and an agent cannot weaken one. (amends ADR-0013)"
+  - "MOST COMPLETE WORKFLOW ENGINE IN THE STUDY, and the first declarative fan-out/fan-in: typed EdgeGroups, Pregel supersteps, graph validation before execution, graph visualisation, and workflow-as-executor nesting. Confirms that keeping orchestration separate from agent authoring pays off - a graph you can check and draw is only possible when topology is data. (confirms L10)"
+  - "IDLE_WITH_PENDING_REQUESTS is HumanLayer's waiting_input reached independently, and the note that iteration_count is not unique per boundary is a precision our Run model needs: a checkpoint marks a boundary, and a boundary can carry several checkpoints. (confirms ADR-0002)"
+  - "pending_request_info_events inside the checkpoint means an unanswered human request survives a restart by virtue of the checkpoint - a second route to ADR-0015 rule 1 alongside HumanLayer's reconciler. (confirms ADR-0015)"
+  - "FIFTH independent instance of A2A/AG-UI as edge packages beside a different internal model. Settled beyond doubt. (confirms ADR-0006)"
+  - "Checkpointing only COMMITTED state is the effect-ledger instinct at state granularity: never persist a half-applied mutation. (confirms ADR-0014 weakly)"
+  - "SCOPE NOTE: this was a targeted pass and 52 probes are recorded unknown rather than absent because I did not read those subsystems. With a 75MB three-language repo that discipline matters more than usual - it would have been easy to record absences I never checked."
+
+adr_impact:
+  - adr: ADR-0001
+    effect: neutral
+    note: "Agents are objects with names; no identity, registry or lifecycle."
+  - adr: ADR-0002
+    effect: confirms
+    note: "IDLE_WITH_PENDING_REQUESTS reached independently; iteration_count is not unique per boundary - a precision our Run model needs."
+  - adr: ADR-0003
+    effect: amends
+    note: "Durable messages between graph NODES rather than between peers. If interaction lives inside a checkpointed orchestration, message durability is free."
+  - adr: ADR-0004
+    effect: neutral
+    note: "Not an adapter contract; agents are written against the framework."
+  - adr: ADR-0005
+    effect: confirms
+    note: "MCP as protocol, with allowedTools scoping in the manifest rather than a capability model."
+  - adr: ADR-0006
+    effect: confirms
+    note: "Fifth independent instance of A2A/AG-UI as edge packages beside a different internal model."
+  - adr: ADR-0007
+    effect: neutral
+    note: "No principals in the framework; Azure identity is external."
+  - adr: ADR-0008
+    effect: confirms
+    note: "Filesystem skills plus pluggable memory backends plus first-class _compaction.py."
+  - adr: ADR-0009
+    effect: neutral
+    note: "hyperlight suggests a micro-VM boundary; integration depth not read."
+  - adr: ADR-0010
+    effect: neutral
+    note: "_telemetry.py and devui exist; convention adherence not audited in a targeted pass (OQ-038)."
+  - adr: ADR-0011
+    effect: confirms
+    note: "THE only precedent, and better than my design: a bytecode-derived graph_signature_hash enforced on restore."
+  - adr: ADR-0012
+    effect: neutral
+    note: "No declared capability model; _feature_stage.py marks feature stability, a different concept."
+  - adr: ADR-0013
+    effect: amends
+    note: "Purview: bidirectional ingress/egress content policy, centrally managed and not overridable by the agent author. Policy needs ownership precedence."
+  - adr: ADR-0014
+    effect: confirms
+    note: "Checkpoints capture only committed state - the same instinct at state granularity."
+  - adr: ADR-0015
+    effect: confirms
+    note: "pending_request_info_events survive in the checkpoint, so a pending approval is durable without a separate store."

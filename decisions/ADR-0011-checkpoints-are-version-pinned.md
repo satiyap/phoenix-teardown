@@ -133,6 +133,113 @@ The distinction that matters: **the version lives on the definition, the pin
 lives on the run.** A version counter alone answers "what changed?" after the
 fact; only the pin answers "may this resume?" before work is lost.
 
+## Amendment 3 — 2026-08-26 (Phase 4, Microsoft Agent Framework): derive the pin from content
+
+**This ADR spent the whole study as the strongest differentiator on the grounds
+that nobody did it. That is now false, and the prior art is better than my design.**
+
+Microsoft Agent Framework stamps `graph_signature_hash` on every
+`WorkflowCheckpoint` and refuses to restore across a mismatch
+(`_workflows/_functional.py:987-992 @ e34bf48`):
+
+```
+Checkpoint '…' was created by a different version of workflow '…' and is not
+compatible with the current version. The workflow's step structure may have
+changed since this checkpoint was saved.
+```
+
+And the hash is **derived from the code** (`_functional.py:1210-1230`):
+
+```python
+sig_data = {
+    "workflow":  self.name,
+    "steps":     sorted(self._step_names),
+    "co_code":   sha256(code.co_code).hexdigest(),   # BYTECODE digest
+    "co_names":  sorted(code.co_names),
+}
+return sha256(json.dumps(sig_data, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+```
+
+Verified by reproducing it: identical function body → same hash; changed body →
+different hash.
+
+### Why this beats Amendment 2's design
+
+Amendment 2 specified a pin of six declared fields:
+
+```text
+agent_id, agent_version, agent_digest, adapter_id, adapter_version,
+checkpoint_schema_version
+```
+
+Four of those depend on somebody maintaining them. **Omnigent is the proof that
+this fails**: it has the only monotonic `Agent.version` in the study and still
+cannot detect a mid-flight upgrade, because a counter that nobody increments — or
+that increments without the run recording it — provides nothing.
+
+A content digest cannot drift from the thing it describes. There is no bump to
+forget, no version field to leave stale, and no way for the recorded version and
+the actual code to disagree.
+
+The MAF comment also captures a subtlety I would have missed: the digest covers
+**bytecode**, not just discovered step names, because "the code digest catches body
+changes that step-name discovery misses (e.g. attribute-access step references)".
+Static discovery of a graph's nodes is incomplete whenever a node is reached
+through an attribute; hashing the code is complete by construction.
+
+### Amended decision
+
+**Pins are content digests wherever the pinned thing has content. Declared versions
+exist for human communication, never for compatibility checks.**
+
+```text
+run.pinned = {
+  definition_digest        sha256 of the canonicalised agent/workflow definition
+                           (structure + code + declared tools + instructions)
+  adapter_identity         which adapter (AX's lesson)
+  adapter_digest           sha256 of the adapter's declared contract
+  checkpoint_schema_version   OUR envelope format — a real version, ours to bump
+  definition_version       INFORMATIONAL only; never compared
+}
+```
+
+Three rules:
+
+1. **Canonicalise before hashing.** MAF sorts step names and `co_names` and uses
+   `json.dumps(sort_keys=True, separators=(",", ":"))`. A pin that varies by
+   dict ordering or whitespace is worse than no pin, because it fails randomly.
+2. **Compare on resume and refuse loudly**, naming the field that differed and the
+   likely cause — MAF's message says *"the workflow's step structure may have
+   changed"*, which tells the operator what to look at.
+3. **The only hand-maintained version is our own checkpoint envelope format**,
+   because that is the one thing whose compatibility rules we define rather than
+   discover.
+
+### The tradeoff, stated
+
+A content digest is **brittle in the safe direction**: a comment-only edit that
+changes bytecode invalidates checkpoints, even though nothing semantic changed.
+MAF appears to accept that with no escape hatch (OQ-037), and for v0.1 so should
+we — a false incompatibility costs a restart, while a false compatibility costs
+silent corruption of the kind LangGraph exhibits (verified: renamed node → resume
+returns `[]`, no error, work lost).
+
+If an escape hatch becomes necessary, it must be an explicit operator assertion
+recorded on the run ("I certify digest A is compatible with digest B"), not a
+loosening of the default.
+
+### What remains genuinely unprecedented
+
+MAF pins **workflows**. It does not pin **agents** — no agent version, no agent
+digest, no revocation. ADK versions its storage and telemetry schemas but not its
+agents; Cloudflare versions its schema but leaves user snapshots unversioned;
+AgentCore has no version at all.
+
+So the remaining gap is narrower and clearer than before: **applying content-derived
+pinning to the agent definition, not just the orchestration graph.** That is still
+ours to build, but it is now derivative work on a proven mechanism rather than
+invention.
+
 ## Evidence log
 
 | Project | Effect | Evidence | Note |
@@ -148,6 +255,7 @@ fact; only the pin answers "may this resume?" before work is lost.
 | Google Agent Platform | confirms | `src/google/adk/sessions/schemas/ @ 85b52f6`; `src/google/adk/telemetry/_schema_version.py` | Confirms negatively, and completes the count at **ten projects**. ADK versions its session *storage* schema with migrations (`schemas/v0.py`, `v1.py`) **and** makes its *telemetry* schema deployment-pinnable — so this team plainly understands schema pinning — yet nothing pins the *agent definition* to an in-flight invocation. **The consistency of this gap across projects that version other things carefully is now the strongest argument that ADR-0011 is a real differentiator rather than an oversight I am overweighting.** |
 | HumanLayer | neutral | `hld/store/sqlite.go @ 99abe67` | No version pinning of any kind. Eleven projects. |
 | AWS AgentCore | confirms | `src/bedrock_agentcore/services/identity.py:94-104 @ 826416a` | Confirms negatively at **twelve projects**. No agent version and no pin. Revocation *does* exist — `delete_oauth2_credential_provider` / `delete_api_key_credential_provider`, asynchronously via `wait_until_deleted` — but at the **credential** level: you can revoke what an agent *reaches*, not the agent itself. Best `D9` answer in the study, and still not agent-level. |
+| Microsoft Agent Framework | confirms | `python/packages/core/agent_framework/_workflows/_functional.py:987-992,1210-1230 @ e34bf48`; verified: graph_signature_hash reproduced locally — identical body → same hash, changed body → different hash | **The first and only precedent for this ADR in thirteen projects — and a better mechanism than the one I designed.** A `WorkflowCheckpoint` carries `graph_signature_hash`, and restore raises if it differs: *"Checkpoint '…' was created by a different version of workflow '…' and is not compatible… The workflow's step structure may have changed since this checkpoint was saved."* The hash is a SHA-256 over canonical JSON of `{workflow name, sorted step names, sha256(__code__.co_code), sorted co_names}` — **the version is derived from the bytecode**, with a comment explaining that the code digest "catches body changes that step-name discovery misses (e.g. attribute-access step references)". **Verified by reproducing it.** Because the version comes from the code there is nothing to forget to bump — precisely the failure that defeats Omnigent's monotonic `Agent.version`. Also: the checkpoint binds to a workflow *definition* rather than an instance, so it is portable across runs of the same definition. |
 
 ## Open questions
 
