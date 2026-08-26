@@ -14,935 +14,1081 @@ project:
   evidence_class: A
   read_on: 2026-08-26
   repo: "https://github.com/cloudflare/agents"
-  commit:                  # SHA the claims were read against
+  commit: 2f957bc2a3ffb7aee14792bb3cb658ad3176ed93
   docs: "https://developers.cloudflare.com/agents/"
-  version:
+  version: "monorepo @ 2026-08-26 (agents package; some surfaces @experimental)"
   license: MIT
   license_verdict: REFERENCE_ONLY
-  runtime_class: unknown
+  runtime_class: durable_actor
   one_line: Framework for building stateful agents on Cloudflare Workers, backed by Durable Objects.
-  thesis:                  # the core architectural bet
+  thesis: "One agent is one Durable Object: a single-threaded, addressable actor with its own private SQLite that hibernates when idle and wakes on demand. Durability, identity, single-writer ordering and isolation all come from one platform primitive rather than from four subsystems."
 
 probes:
 
   # --- A. Core abstraction and object model ---
   # A1: What does this system think an agent *is*? State it in one sentence, in their vocabulary.
   A1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "An Agent IS a Durable Object: single-threaded, addressable by name, with its own private embedded SQLite. Identity, durability and isolation come from one primitive."
+    evidence: "packages/agents/src/index.ts @ 2f957bc; design/durable-object-lifecycle.md"
   # A2: What is the root resource — the thing everything else hangs off?
   A2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The agent instance itself is the durable session: state survives eviction, WebSockets hibernate and are reconstructed on wake."
+    evidence: "design/durable-object-lifecycle.md @ 2f957bc"
   # A3: Is `Agent` persistent or ephemeral? Can it exist while not executing?
   A3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Hibernation is the core mechanic: an idle agent is evicted from memory while its SQLite and sockets persist, and it wakes on request, message or alarm."
+    evidence: "design/durable-object-lifecycle.md @ 2f957bc"
   # A4: Is `Task` a separate resource from `Run`? If not, which concept is missing and what fills the...
   A4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "No general Task/Run split, but cf_agents_fibers (durable intent, with idempotency key) vs cf_agents_runs (live attempt) is the same shape for durable execution - and the outer join between them is the orphan-detection signal."
+    evidence: "packages/agents/src/index.ts:2250-2291 @ 2f957bc"
   # A5: What is a `Session` attached to: user, agent, task, or execution?
   A5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The agent (DO) is the session; sub-agents are child DO facets with their own isolated SQLite."
+    evidence: "design/rfc-sub-agents.md @ 2f957bc"
   # A6: Are messages first-class durable resources, or transient function arguments?
   A6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Typed wire-protocol messages (cf_agent_tool_approval and other cf_agent_* types) persisted in the agent's SQLite; chat history is durable."
+    evidence: "packages/agents/src/chat/wire-types.ts:36 @ 2f957bc"
   # A7: Are artifacts (files, outputs, deliverables) first-class?
   A7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No artifact resource. Fibers carry a snapshot blob but that is checkpoint state, not an output artifact."
+    evidence: "packages/agents/src/index.ts:2285 @ 2f957bc"
   # A8: Can multiple agents participate in one task? How is that represented?
   A8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Sub-agents are first-class child DO facets, each an Agent subclass with isolated storage, addressed by logical name plus content digest."
+    evidence: "design/rfc-sub-agents.md @ 2f957bc; packages/agents/src/index.ts:1215-1224"
   # A9: Draw the object model as a tree. Only nodes that exist in their code or API.
   A9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Agent (=DO) > {state (versioned single-row JSON), this.sql (private SQLite), Connection (hibernatable WS), cf_agents_schedules, cf_agents_queues, cf_agents_fibers, cf_agents_runs, McpServer, Workflow, SubAgent}. See teardown section 3."
+    evidence: "packages/agents/src/index.ts @ 2f957bc"
 
   # --- B. Runtime model ---
   # B1: Does the platform launch agents, host them, or attach to external ones?
   B1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The Cloudflare runtime launches and wakes the DO; the SDK does not manage processes. Lifecycle composes ordered capability phases (onStart, onRequest, onAlarm) around the host's hooks."
+    evidence: "design/durable-object-lifecycle.md @ 2f957bc"
   # B2: Execution substrate: process, container, microVM, serverless, in-process library, remote HTTP?
   B2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A V8 isolate per Durable Object, provided by the platform. The agent runtime IS the isolation unit - unique in this study."
+    evidence: "design/durable-object-lifecycle.md @ 2f957bc"
   # B3: Who owns the event loop — platform or agent?
   B3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The agent owns its own loop inside the DO; there is no external orchestrator. One DO handles one request at a time."
+    evidence: "packages/agents/src/index.ts @ 2f957bc"
   # B4: Who decides when an agent wakes?
   B4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "getAgentByName(binding, name) resolves and wakes an agent; routeAgentRequest routes HTTP/WS to it."
+    evidence: "packages/agents/src/agent-routing.ts @ 2f957bc"
   # B5: Can an agent run indefinitely? What is the actual ceiling?
   B5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Unbounded: agents hibernate when idle and live indefinitely. keepAlive() refs prevent eviction while work is in flight."
+    evidence: "design/durable-object-lifecycle.md @ 2f957bc"
   # B6: Are there background or unattended agents?
   B6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Durable schedules (time and cron) and intervals backed by SQLite plus platform alarms, with hung detection and retries. Also a durable queue."
+    evidence: "packages/agents/src/index.ts:6520-6600 @ 2f957bc"
   # B7: Is execution synchronous or asynchronous from the caller's view?
   B7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Hibernatable WebSockets are the primary transport; the SDK explicitly has NO in-memory WebSocket mode."
+    evidence: "design/durable-object-lifecycle.md @ 2f957bc"
   # B8: Can in-flight work migrate between workers?
   B8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "Work does not float: an agent is pinned to its Durable Object identity. The DO may be relocated by the platform, but the SDK has no concept of moving work to another worker."
+    evidence: "design/durable-object-lifecycle.md @ 2f957bc"
   # B9: Can an agent survive a machine restart? Automatically, or with operator action?
   B9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Recovery is ambient: state is in SQLite, so waking after eviction restores it. Interrupted fibers are recovered via onFiberRecovered, and overdue schedules run after restart because 'the SQLite row survives but the in-memory alarm does not'."
+    evidence: "packages/agents/src/index.ts:6534-6536 @ 2f957bc"
   # B10: Classify: worker/queue, durable actor, attached harness, or in-process library.
   B10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "durable_actor in the purest form in this study: one agent = one addressable single-threaded object with private durable storage that hibernates and wakes."
+    evidence: "design/durable-object-lifecycle.md @ 2f957bc"
 
   # --- C. Durability and failure semantics ---
   # C1: What state is durable, and what is lost on crash?
   C1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Per-agent embedded SQLite via this.sql, plus a single-row JSON state optimisation. Durability is the substrate, not a subsystem - there is no separate checkpoint step."
+    evidence: "packages/agents/src/index.ts:2076-2079 @ 2f957bc"
   # C2: *When* is state persisted — every step, every tool call, on checkpoint, never?
   C2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A fiber row is written to cf_agents_fibers BEFORE execution begins, and ctx.stash() checkpoints during execution."
+    evidence: "packages/agents/src/index.ts:5578-5590 @ 2f957bc"
   # C3: Checkpointing or event sourcing? Can state be rebuilt from a log?
   C3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Durable mutable rows plus fiber snapshots, not an append-only event log. Recovery replays a recovery HOOK with a snapshot, not the event history."
+    evidence: "packages/agents/src/index.ts:2280-2291 @ 2f957bc"
   # C4: Retry semantics, and at what granularity: run, step, tool call?
   C4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "FIRST STRUCTURED RETRY POLICY IN THE STUDY: RetryOptions{maxAttempts, baseDelayMs, maxDelayMs} with full-jitter backoff, configurable per call site and per agent class, VALIDATED EAGERLY at enqueue time so bad config throws immediately 'instead of failing minutes later at execution time'. Stored in a retry_options column because in-memory config would be lost on hibernation."
+    evidence: "design/retries.md @ 2f957bc; packages/agents/src/retries.ts"
   # C5: At-least-once or exactly-once? What do the docs claim versus what the code does?
   C5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "At-least-once by default, with exactly-once available via idempotency keys on fibers. isErrorRetryable deliberately excludes overloaded-DO errors because 'retrying would make congestion worse'."
+    evidence: "design/retries.md @ 2f957bc"
   # C6: Is there an idempotency model for tool side effects?
   C6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "GAP CLOSED - THE ONLY IDEMPOTENCY MECHANISM IN SEVEN PROJECTS. cf_agents_fibers declares idempotency_key TEXT UNIQUE, and startFiber checks it before doing any work, returning the existing fiber with accepted:false instead of re-executing. Refuses ambiguity: if fiberId and idempotencyKey point at different fibers it throws rather than guessing. VERIFIED by running the test: second call accepted=false and the side-effect log contains only ['managed:first']."
+    evidence: "packages/agents/src/index.ts:2282,5522-5590 @ 2f957bc; test 'should dedupe managed fibers by idempotency key'; verified locally 2026-08-26: pnpm build + vitest run src/tests/run-fiber.test.ts -> 48/48 pass"
   # C7: Process crash recovery: what resumes, and from where?
   C7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "State is read from SQLite on wake; a fiber's snapshot plus onFiberRecovered give a defined resumption entry point after eviction mid-execution."
+    evidence: "packages/agents/src/index.ts:5485-5497 @ 2f957bc"
   # C8: Node loss: is work re-dispatched, and how is it detected?
   C8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "BEST LOST-WORKER DETECTION IN THE STUDY. Hung interval schedules are detected via execution_started_at <= now - hungScheduleTimeoutSeconds (default 30s) and become eligible again; running-but-not-yet-hung intervals still get a future re-check alarm; orphaned fibers are found by outer-joining cf_agents_fibers against cf_agents_runs where the run row is gone."
+    evidence: "packages/agents/src/index.ts:6500-6560 @ 2f957bc"
   # C9: Context-window overflow: truncation, summarisation, or failure?
   C9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No context-window management or compaction in the SDK."
+    evidence: "packages/agents/src/index.ts @ 2f957bc"
   # C10: Timers, scheduled execution, long sleeps — durable across restart?
   C10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Durable timers via platform alarms: schedule() for time/cron, scheduleEvery() for intervals, all backed by SQLite rows so they survive hibernation and restart."
+    evidence: "packages/agents/src/index.ts:6514-6600 @ 2f957bc"
   # C11: Human-in-the-loop pause and resume: durable, or in-memory only?
   C11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Tool approval is a typed wire message (cf_agent_tool_approval) with state transitions, and a pending approval survives eviction by construction because the agent's storage and sockets are durable."
+    evidence: "packages/agents/src/chat/wire-types.ts:36,207 @ 2f957bc; packages/agents/src/chat/tool-state.ts:195"
   # C12: Can a definition be upgraded while runs are in flight? What happens to them?
   C12:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Storage schema IS versioned (CURRENT_SCHEMA_VERSION = 11, stored as a row and checked on wake to skip DDL) with forward-only idempotent migrations. But agent CODE version is not pinned to in-flight fibers, and fiber snapshots carry no version, so recovery hands a pre-upgrade blob to post-upgrade code."
+    evidence: "packages/agents/src/index.ts:1197,2081-2087,2253 @ 2f957bc"
 
   # --- D. Agent identity and lifecycle ---
   # D1: Is an agent globally addressable? By what identifier?
   D1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Identity is the Durable Object name and ctx.id.name is authoritative. Lifecycle 'never writes a duplicate name', reading a legacy __ps_name key only as a migration fallback."
+    evidence: "design/durable-object-lifecycle.md @ 2f957bc"
   # D2: Does identity survive process restart?
   D2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Identity is durable by platform: the named DO exists whether or not it is running, with its storage intact."
+    evidence: "design/durable-object-lifecycle.md @ 2f957bc"
   # D3: Is identity distinct from runtime instance?
   D3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "The class is the definition and the named instance is the execution, but there is no Agent-definition RESOURCE distinct from the deployed class."
+    evidence: "design/rfc-sub-agents.md @ 2f957bc"
   # D4: Are agents versioned? Immutable or mutable definitions?
   D4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent versioning. Sub-agent identity does embed a SHA-256 content digest alongside the logical name, which is the closest thing."
+    evidence: "packages/agents/src/index.ts:1215-1224 @ 2f957bc"
   # D5: Is there a registry or catalog?
   D5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "NO SEPARATE REGISTRY IS NEEDED because platform naming IS the registry: getAgentByName(binding, name) resolves any agent. Bindings are declared in wrangler config."
+    evidence: "packages/agents/src/agent-routing.ts @ 2f957bc"
   # D6: Can agents discover each other at runtime?
   D6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No runtime discovery or capability query."
+    evidence: "packages/agents/src/agent-routing.ts @ 2f957bc"
   # D7: Can agents advertise capabilities? In what format?
   D7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No declared capability model for agents or runtimes - nothing comparable to Omnigent's 16 axes. Capability here means which tools an agent has."
+    evidence: "packages/agents/src/agent-tools.ts @ 2f957bc"
   # D8: Is there an owner, team, or tenant on the agent record?
   D8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No owner, team or tenant field on any resource."
+    evidence: "packages/agents/src/index.ts @ 2f957bc"
   # D9: Can an agent be suspended, revoked, or deprecated?
   D9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No suspend, revoke or deprecate lifecycle. SEVEN FOR SEVEN absent."
+    evidence: "packages/agents/src/index.ts @ 2f957bc"
   # D10: Is there anything resembling a declarative agent manifest?
   D10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent manifest: an agent is a TypeScript class plus a wrangler binding."
+    evidence: "design/rfc-sub-agents.md @ 2f957bc"
 
   # --- E. Harness and runtime interoperability ---
   # E1: What is the minimum interface an agent implementation must satisfy?
   E1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "NO ADAPTER CONTRACT - the premise is that YOU write the agent as an Agent subclass. Extension is Lifecycle capability composition, not adaptation of a third-party agent. This is the one ADR-0004 challenge in the study."
+    evidence: "design/durable-object-lifecycle.md @ 2f957bc"
   # E2: Transport: stdin/stdout, HTTP, gRPC, WebSocket, in-process, ACP, A2A?
   E2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No harness transport, because there is no external harness. Sub-agents are reached by native DO RPC."
+    evidence: "design/rfc-sub-agents.md @ 2f957bc"
   # E3: Can it host a foreign agent (Claude Code, Codex, OpenHands, LangGraph, ADK)?
   E3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No third-party agent adapters. Integrations are for models and tools, not for other people's agents."
+    evidence: "packages/agents/src/index.ts @ 2f957bc"
   # E4: Is there an event stream out of a running agent? What granularity?
   E4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A typed observability event stream via observability.emit(), with events including queue:retry and schedule:retry carrying attempt and maxAttempts, plus OTel spans."
+    evidence: "design/retries.md @ 2f957bc; packages/agents/src/observability/"
   # E5: Are tool calls externally observable, or internal to the agent?
   E5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Tool calls are observable through the chat protocol and GenAI spans, with cloudflare.agents.tool.approval.state and tool.count attributes."
+    evidence: "packages/agents/src/observability/genai/attributes.ts:10-25 @ 2f957bc"
   # E6: How is context injected at start?
   E6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Class-level static options (retry, hibernate, sendIdentityOnConnect, hungScheduleTimeoutSeconds) plus wrangler bindings. Configuration is code, not opaque data."
+    evidence: "design/retries.md @ 2f957bc; packages/agents/src/index.ts:1379-1460"
   # E7: Is cancellation supported? Cooperative or forced? Does it propagate to subagents?
   E7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "cancelFiber flips durable status to 'aborted' AND aborts the in-memory AbortController, guarded by WHERE status IN ('pending','running') so a terminal fiber cannot be re-cancelled."
+    evidence: "packages/agents/src/index.ts:5379-5396 @ 2f957bc"
   # E8: Can a run be checkpointed and restored by the platform, or only by the agent?
   E8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Fibers expose ctx.stash() to checkpoint during execution and onFiberRecovered to resume after eviction - a genuine durable-execution primitive inside an actor."
+    evidence: "packages/agents/src/index.ts:5485-5497 @ 2f957bc"
   # E9: Which of these would be hard to adapt, and why?
   E9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Extensive design/ RFC directory (43 documents) documenting the Lifecycle contract, capability phases, host hooks, and the sub-agent model. LifecycleObject 'names the host contract without introducing another base class'."
+    evidence: "design/durable-object-lifecycle.md @ 2f957bc"
 
   # --- F. Agent-to-agent communication ---
   # F1: Direct messages between agents?
   F1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent-to-agent messaging. SEVEN FOR SEVEN. I expected counter-evidence here (a channels package exists) but @cloudflare/channels is HUMAN-to-agent transport: Slack, Telegram, email and voice adapters, with ChannelIdentity{channelKey, scope, subject} naming a human correspondent."
+    evidence: "packages/channels/src/identity.ts:1-8 @ 2f957bc; design/channels.md"
   # F2: Channels, topics, or pub/sub?
   F2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent-to-agent channels or pub/sub. The channels package routes provider events to application routes, not between agents."
+    evidence: "design/channels.md @ 2f957bc"
   # F3: Task delegation as a distinct mechanism from messaging?
   F3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Sub-agents are spawned via this.subAgent(Class, name) as child DO facets with isolated SQLite, called by TYPED RPC - not by message passing."
+    evidence: "design/rfc-sub-agents.md @ 2f957bc"
   # F4: Synchronous RPC between agents?
   F4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Native Durable Object RPC between parent and child agents, with structured-cloneable arguments and typed stubs. parentAgent() returns a typed stub to the direct parent."
+    evidence: "packages/agents/src/index.ts:8139-8153 @ 2f957bc"
   # F5: Asynchronous inbox or mailbox?
   F5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No mailbox. The 'inbox' in the docs is a user-defined parent agent holding shared state, not a message queue."
+    evidence: "packages/agents/src/index.ts:8132 @ 2f957bc"
   # F6: Is delivery durable? Survives restart of sender and receiver?
   F6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No inter-agent delivery guarantees, because there is no inter-agent messaging layer. Coordination is shared durable state plus direct RPC."
+    evidence: "design/rfc-sub-agents.md @ 2f957bc"
   # F7: Is message ordering guaranteed? Per what scope?
   F7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Total ordering within an agent is structural: a Durable Object is single-threaded and processes one request at a time, so interleaving cannot occur."
+    evidence: "design/rfc-sub-agents.md @ 2f957bc"
   # F8: Acknowledgement or delivery receipts?
   F8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "RPC returns a value, which is an implicit acknowledgement, but there is no message-level ack."
+    evidence: "packages/agents/src/index.ts:8139 @ 2f957bc"
   # F9: Correlation ids for request/response pairing?
   F9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Trace correlation via OTel with a cloudflare.agents.turn.request_id attribute, plus fiber_id and idempotency_key on durable work."
+    evidence: "packages/agents/src/observability/genai/attributes.ts:24 @ 2f957bc"
   # F10: Conversation threading?
   F10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No conversation forking or branching in the SDK core."
+    evidence: "packages/agents/src/chat/ @ 2f957bc"
   # F11: Capability-based routing — address by what an agent *can do* rather than who it is?
   F11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "design/rfc-sub-agent-routing.md and sub-routing.ts route requests to sub-agents by name and path, but not by declared capability."
+    evidence: "packages/agents/src/sub-routing.ts @ 2f957bc"
 
   # --- G. Human-agent collaboration ---
   # G1: Is a human modelled as a special kind of agent, a distinct principal type, or not modelled?
   G1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No principals of any kind. Auth is a developer-supplied hook (onBeforeConnect / onBeforeRequest) that may return a Response to reject."
+    evidence: "packages/agents/src/agent-routing.ts:73-84 @ 2f957bc"
   # G2: Shared rooms, channels, or workspaces?
   G2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No workspace or room model, though one agent per room is the documented pattern."
+    evidence: "design/rfc-sub-agents.md @ 2f957bc"
   # G3: Task threads humans can read and post into?
   G3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Humans connect over hibernatable WebSockets and drive the agent live; readonly-connections.md adds observers who cannot drive."
+    evidence: "design/readonly-connections.md @ 2f957bc"
   # G4: Mentions or directed addressing?
   G4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No mentions or participant addressing."
+    evidence: "packages/agents/src/chat/ @ 2f957bc"
   # G5: Approval gates. Blocking or advisory? Durable while pending?
   G5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Tool approval as a typed wire message (cf_agent_tool_approval) with toolApprovalUpdate state transitions, durable because the agent's storage is durable."
+    evidence: "packages/agents/src/chat/tool-state.ts:195 @ 2f957bc"
   # G6: Mid-run intervention: can a human redirect without restarting?
   G6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Approve or reject tool calls, cancel fibers (durable status plus AbortController), and drive or observe over WebSocket."
+    evidence: "packages/agents/src/index.ts:5379-5396 @ 2f957bc"
   # G7: Agent status and presence visible to humans?
   G7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Fiber status (pending/running/completed/error/aborted/interrupted) is inspectable via inspectFiber, inspectFiberByKey and listFibers, plus a typed observability event stream."
+    evidence: "packages/agents/src/index.ts:5361-5377 @ 2f957bc"
   # G8: Notifications or escalation when an agent is blocked?
   G8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "The channels package can deliver to Slack, Telegram, email or voice, which is a notification path, but there is no escalation policy."
+    evidence: "packages/channels/src/adapters/ @ 2f957bc"
   # G9: Shared scratchpad or working surface?
   G9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Agent state and SQLite are shared context for humans connected to that agent, but there is no distinct scratchpad resource."
+    evidence: "packages/agents/src/index.ts:2076 @ 2f957bc"
   # G10: Can a human see the context an agent is operating on?
   G10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Full durable chat history plus fiber inspection plus OTel spans following GenAI semantic conventions."
+    evidence: "packages/agents/src/observability/genai/attributes.ts @ 2f957bc"
 
   # --- H. Context and memory ---
   # H1: Which of these exist as *separate* concepts: prompt context, working state, session history, ...
   H1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No memory subsystem. A skills/ directory and design/skills.md continue the filesystem-skills pattern. FIFTH CONSECUTIVE PROJECT with no memory store."
+    evidence: "packages/agents/src/skills/ @ 2f957bc; design/skills.md"
   # H2: Who owns memory: agent, human, workspace, task, or tenant?
   H2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Each agent's SQLite is private to it, so knowledge is owned by whichever agent holds the database - the storage boundary IS the ownership boundary."
+    evidence: "design/rfc-sub-agents.md @ 2f957bc"
   # H3: Can memory be shared between agents? At what granularity?
   H3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A child reads shared facts from its parent by RPC (the getSharedMemory docstring pattern), which is shared STATE rather than a shared memory service."
+    evidence: "packages/agents/src/index.ts:8132-8134 @ 2f957bc"
   # H4: Are there permissions on memory?
   H4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "STRUCTURAL rather than declarative: a sub-agent's private SQLite means the parent's LLM has no SQL path to the child's data. rfc-sub-agents.md argues this explicitly - enforcement must be structural because 'the LLM can bypass the queue by writing SQL'."
+    evidence: "design/rfc-sub-agents.md @ 2f957bc"
   # H5: Is provenance tracked — where a memory came from?
   H5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No provenance tracking on knowledge."
+    evidence: "design/skills.md @ 2f957bc"
   # H6: Expiry, TTL, or forgetting?
   H6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "fiberRecoveryMaxAgeMs ages out unrecoverable fiber rows, but there is no TTL on knowledge."
+    evidence: "packages/agents/src/index.ts:6595 @ 2f957bc"
   # H7: Summarisation or compaction. Automatic or explicit?
   H7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No summarisation or compaction."
+    evidence: "packages/agents/src/chat/ @ 2f957bc"
   # H8: Retrieval mechanism: vector, keyword, structured, agent-driven?
   H8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No retrieval subsystem or vector store; skills are files and state is SQL."
+    evidence: "design/skills.md @ 2f957bc"
   # H9: Can an agent mutate its own memory mid-run?
   H9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The agent writes freely to its own SQLite via this.sql and to state via setState - agent-writable durable storage is the default."
+    evidence: "packages/agents/src/index.ts:2076 @ 2f957bc"
   # H10: Conflict resolution on concurrent writes?
   H10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "A parent's storage can be read by children over RPC, serialised for free because the parent DO is single-threaded."
+    evidence: "packages/agents/src/index.ts:8139-8147 @ 2f957bc"
   # H11: Is memory in the same store as execution state, or separate?
   H11:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Both execution state and knowledge live in the same per-agent SQLite; separation is achieved by putting them in DIFFERENT AGENTS rather than different stores."
+    evidence: "design/rfc-sub-agents.md @ 2f957bc"
 
   # --- I. Tools and capabilities ---
   # I1: Are tools bound to agents statically, or resolved dynamically?
   I1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Tools defined in code (agent-tools.ts, agent-tool-types.ts), plus MCP servers, plus codemode as a separate package. x402-tests suggests payment-gated tools."
+    evidence: "packages/agents/src/agent-tools.ts @ 2f957bc"
   # I2: Is there a capability abstraction distinct from tool implementation?
   I2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No capability abstraction for runtimes or agents."
+    evidence: "packages/agents/src/agent-tool-types.ts @ 2f957bc"
   # I3: Is there a registry of available tools?
   I3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "MCP servers are PERSISTED: server options live in a server_options JSON column 'so it persists across hibernation', with per-server retry config and OAuth reconnection. No other project persists MCP connection state."
+    evidence: "design/retries.md @ 2f957bc; packages/agents/src/mcp/"
   # I4: Tool scoping — can an agent be restricted to a subset?
   I4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Tool scoping is per agent class, and the sub-agent pattern scopes data access structurally, but there is no declarative tool-permission model."
+    evidence: "design/rfc-sub-agents.md @ 2f957bc"
   # I5: Are tools versioned?
   I5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No tool versioning."
+    evidence: "packages/agents/src/agent-tools.ts @ 2f957bc"
   # I6: How are credentials supplied to a tool?
   I6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Credentials come from Worker environment bindings and secrets; MCP OAuth tokens are persisted with the server record."
+    evidence: "packages/agents/src/mcp/ @ 2f957bc"
   # I7: OAuth or delegated user credentials?
   I7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "MCP OAuth is supported with connection re-establishment after authorisation, retried on failure."
+    evidence: "design/retries.md @ 2f957bc"
   # I8: Can policy intercept a tool call before execution?
   I8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No policy engine. Tool approval exists as a protocol message, but nothing intercepts and evaluates rules."
+    evidence: "packages/agents/src/chat/tool-state.ts @ 2f957bc"
   # I9: Approval gates on specific tools?
   I9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Per-tool approval via the cf_agent_tool_approval message type and toolApprovalUpdate transitions, with a documented HITL design."
+    evidence: "design/think-execute-hitl.md @ 2f957bc; packages/agents/src/chat/wire-types.ts:36"
   # I10: Do tools execute inside or outside the agent's sandbox?
   I10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Everything runs inside the Durable Object's V8 isolate; the agent runtime is itself the isolation unit."
+    evidence: "design/durable-object-lifecycle.md @ 2f957bc"
 
   # --- J. Security and identity ---
   # J1: What identity does an agent authenticate as?
   J1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent identity for authentication purposes; the DO name is an address, not a credential."
+    evidence: "packages/agents/src/agent-routing.ts:73-84 @ 2f957bc"
   # J2: Authentication mechanism for agent-to-platform?
   J2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "The SDK ships NO authentication. onBeforeConnect / onBeforeRequest are hooks the developer implements to reject a request."
+    evidence: "packages/agents/src/agent-routing.ts:73-84 @ 2f957bc"
   # J3: Authorisation model: RBAC, ABAC, capability tokens, none?
   J3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No authorisation model. Notably it DOCUMENTS its own bypasses: getSubAgentByName 'does not run onBeforeSubAgent on the parent... The caller is assumed to have performed whatever access checks are needed.'"
+    evidence: "packages/agents/src/sub-routing.ts:489-491 @ 2f957bc"
   # J4: Secret storage and injection?
   J4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Worker secrets and environment bindings; MCP OAuth tokens persisted per server. No secret-handling design of its own."
+    evidence: "packages/agents/src/mcp/ @ 2f957bc"
   # J5: Per-agent credentials, or shared platform credentials?
   J5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No per-agent credentials."
+    evidence: "packages/agents/src/index.ts @ 2f957bc"
   # J6: Can an agent act as a user? Is that impersonation or delegation?
   J6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No impersonation or delegation."
+    evidence: "packages/agents/src/agent-routing.ts @ 2f957bc"
   # J7: Tenant isolation: logical, or enforced at runtime?
   J7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "Not modelled - but obtainable, since one DO per tenant gives each a PRIVATE database, arguably stronger isolation than a shared-table tenant column."
+    evidence: "design/rfc-sub-agents.md @ 2f957bc"
   # J8: Network and filesystem isolation?
   J8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Platform-enforced: each agent is a separate V8 isolate with its own private SQLite. The rfc argues this makes enforcement structural rather than conventional."
+    evidence: "design/rfc-sub-agents.md @ 2f957bc"
   # J9: Is there an audit log? Is it tamper-evident?
   J9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Typed observability events and OTel spans give an action trail, but there is no audit resource or retention model."
+    evidence: "packages/agents/src/observability/ @ 2f957bc"
   # J10: Where are policy decisions enforced — control plane, runtime, or tool gateway?
   J10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No policy decisions to enforce."
+    evidence: "packages/agents/src/index.ts @ 2f957bc"
 
   # --- K. Sandbox and isolation ---
   # K1: Is there a workspace or sandbox concept? What is its lifecycle?
   K1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The Durable Object IS the sandbox - a V8 isolate with private storage, created and hibernated by the platform."
+    evidence: "design/durable-object-lifecycle.md @ 2f957bc"
   # K2: Persistent filesystem across runs?
   K2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Storage is durable across hibernation by definition; that is the whole design."
+    evidence: "packages/agents/src/index.ts:2076 @ 2f957bc"
   # K3: Snapshot and restore?
   K3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Hibernation and wake are the core lifecycle, including WebSocket hibernation with connection reconstruction. There is explicitly no in-memory socket mode."
+    evidence: "design/durable-object-lifecycle.md @ 2f957bc"
   # K4: Network egress rules?
   K4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No egress controls in the SDK; outbound fetch is governed by the Workers platform."
+    evidence: "packages/agents/src/index.ts @ 2f957bc"
   # K5: Container, microVM, or none?
   K5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "One isolation technology (the DO isolate), not pluggable. A separate sandbox example and rfc-coding-agent.md cover running untrusted code elsewhere."
+    evidence: "design/rfc-coding-agent.md @ 2f957bc"
   # K6: Resource quotas: CPU, memory, disk, wall clock?
   K6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No resource quotas expressed by the SDK; platform limits apply."
+    evidence: "packages/agents/src/index.ts @ 2f957bc"
   # K7: How are secrets injected without landing in the image or logs?
   K7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No secret injection mechanism of its own beyond Worker bindings."
+    evidence: "packages/agents/src/index.ts @ 2f957bc"
   # K8: Arbitrary code execution? Browser execution?
   K8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "The agent's own code runs in the isolate; running untrusted user code needs a separate sandbox (see the sandbox example and coding-agent rfc)."
+    evidence: "design/rfc-coding-agent.md @ 2f957bc"
   # K9: Is the sandbox pluggable, or a fixed implementation?
   K9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "NOT pluggable - and deliberately so, because the DO is the isolate. This is the one ADR-0009 challenge in the study."
+    evidence: "design/durable-object-lifecycle.md @ 2f957bc"
 
   # --- L. Orchestration and scheduling ---
   # L1: Does it distinguish agent coordination from workflow orchestration?
   L1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Clean: the agent owns its own durable orchestration (schedules, queues, fibers, sub-agents) and delegates long multi-step workflows to Cloudflare Workflows via typed handles."
+    evidence: "packages/agents/src/workflows.ts @ 2f957bc"
   # L2: Topology: DAG, cyclic graph, supervisor, planner, event-driven, queue?
   L2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Sequential within an agent (single-threaded), with sub-agents for parallel work. No DAG in the SDK; Workflows covers that externally."
+    evidence: "design/rfc-sub-agents.md @ 2f957bc"
   # L3: Cron or scheduled triggers?
   L3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Durable time, cron and interval schedules backed by SQLite plus alarms, with hung detection, retries and post-restart catch-up."
+    evidence: "packages/agents/src/index.ts:6520-6600 @ 2f957bc"
   # L4: Dynamic task spawning at runtime?
   L4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "startFiber spawns durable work dynamically (optionally fire-and-forget), and subAgent() spawns child agents on demand."
+    evidence: "packages/agents/src/index.ts:5522 @ 2f957bc"
   # L5: Fan-out / fan-in?
   L5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "rfc-sub-agents.md gives fan-out as a motivating case (three specialist personas in parallel, each with isolated state), reached via parallel RPC to child facets."
+    evidence: "design/rfc-sub-agents.md @ 2f957bc"
   # L6: Subagents. Are they first-class, or just nested calls?
   L6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Sub-agents are child DO facets - any Agent can be mounted as a top-level DO or as a facet, with behaviour adapting to how it was instantiated."
+    evidence: "design/rfc-sub-agents.md @ 2f957bc"
   # L7: Retry and backoff policy — declarative or hand-rolled?
   L7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Per-call-site and per-class retry policy with full jitter, applied to queue callbacks, schedule callbacks, workflow operations and MCP reconnection, each with an appropriate shouldRetry predicate."
+    evidence: "design/retries.md @ 2f957bc"
   # L8: Compensation or rollback on failure?
   L8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No compensation or rollback. SEVEN FOR SEVEN absent."
+    evidence: "packages/agents/src/index.ts @ 2f957bc"
   # L9: Does cancellation propagate through the whole tree?
   L9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "cancelFiber aborts durably and in memory; cancelFiberByKey cancels by idempotency key. No documented propagation into sub-agent fibers."
+    evidence: "packages/agents/src/index.ts:5379-5404 @ 2f957bc"
   # L10: Could this be replaced by Temporal or Restate, or is orchestration inseparable from the agent...
   L10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Explicitly delegates to Cloudflare Workflows for durable multi-step orchestration, keeping pause/resume/restart/terminate/sendEvent as retried RPC calls rather than reimplementing a workflow engine."
+    evidence: "packages/agents/src/workflows.ts @ 2f957bc; design/retries.md"
 
   # --- M. Observability ---
   # M1: Which of these are modelled as telemetry objects: trace, run, step, LLM call, tool call, mess...
   M1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "A typed observability event stream (observability.emit) covering schedule:execute, queue:retry, schedule:retry with attempt and maxAttempts, plus OTel spans over agent invocations, GenAI calls and MCP."
+    evidence: "design/retries.md @ 2f957bc; packages/agents/src/observability/"
   # M2: Is telemetry keyed to agent, run, model, task, user, or tenant?
   M2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Keyed to agent name, fiber_id, idempotency_key, and cloudflare.agents.turn.request_id. Not to user or tenant (neither exists)."
+    evidence: "packages/agents/src/observability/genai/attributes.ts:24 @ 2f957bc"
   # M3: OpenTelemetry, proprietary, or none?
   M3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "THIRD PROJECT WITH REAL OTEL AND THE BEST ON CONVENTION ADHERENCE: gen_ai.* keys follow OpenTelemetry GenAI semantic conventions where they exist, keys with no semconv home live under the cloudflare.agents.* vendor namespace, 'never bare top-level keys, never ai.*'. Span lifetimes can be bound to the invocation so a span cannot outlive the tracing context that owns it. Declines to invent an otel.status_code attribute because 'status is span state in OTel'."
+    evidence: "packages/agents/src/observability/genai/attributes.ts:1-9 @ 2f957bc; packages/agents/src/observability/tracing/tracer.ts:24-31,298"
   # M4: Is there a documented, stable event schema?
   M4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Typed span attribute constants and typed wire-protocol message types; retry events documented with their payload shape."
+    evidence: "packages/agents/src/observability/genai/attributes.ts:10-25 @ 2f957bc"
   # M5: Cost and token accounting. Per what unit?
   M5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No cost or token accounting in the SDK (GenAI spans may carry usage, but there is no budget or spend record)."
+    evidence: "packages/agents/src/observability/genai/ @ 2f957bc"
   # M6: Latency breakdown by phase?
   M6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Fibers record created_at, started_at and completed_at; schedules record execution_started_at (which is what makes hung detection possible); spans give phase timing."
+    evidence: "packages/agents/src/index.ts:2288-2290 @ 2f957bc"
   # M7: Error taxonomy?
   M7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "error_message on fiber rows, distinct terminal statuses (error vs aborted vs interrupted), and isErrorRetryable classifying retryable vs permanent vs overload."
+    evidence: "packages/agents/src/index.ts:2287 @ 2f957bc; design/retries.md"
   # M8: Can the event stream reconstruct a run after the fact — replay or audit?
   M8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Fiber ledger plus durable chat history plus snapshots allow reconstruction of what happened, but there is no append-only event log to replay."
+    evidence: "packages/agents/src/index.ts:2280-2291 @ 2f957bc"
 
   # --- N. Multi-tenancy and enterprise ---
   # N1: Resource hierarchy: org, workspace, project, environment?
   N1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No org, project or environment hierarchy."
+    evidence: "packages/agents/src/index.ts @ 2f957bc"
   # N2: RBAC model and its granularity?
   N2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No RBAC."
+    evidence: "packages/agents/src/agent-routing.ts @ 2f957bc"
   # N3: Quotas and cost limits. Enforced or advisory?
   N3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No quotas or cost limits. Omnigent remains the only project with these."
+    evidence: "packages/agents/src/index.ts @ 2f957bc"
   # N4: dev / staging / prod separation?
   N4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Worker environments and bindings separate deployments, but the SDK models nothing."
+    evidence: "packages/agents/src/index.ts @ 2f957bc"
   # N5: Deployment promotion path?
   N5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No promotion path."
+    evidence: "packages/agents/src/index.ts @ 2f957bc"
   # N6: Agent catalog scoped to a tenant?
   N6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No agent catalog."
+    evidence: "packages/agents/src/agent-routing.ts @ 2f957bc"
   # N7: Audit retention controls?
   N7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "deleteFibers prunes terminal fiber rows and fiberRecoveryMaxAgeMs ages out unrecoverable ones, but there is no audit retention policy."
+    evidence: "packages/agents/src/index.ts:5419-5427 @ 2f957bc"
   # N8: Is multi-tenancy in the OSS core, or reserved for a commercial tier?
   N8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "Multi-tenancy is not modelled in OSS or elsewhere - it is left to the deployment (one DO per tenant)."
+    evidence: "design/rfc-sub-agents.md @ 2f957bc"
 
   # --- O. API and protocol surface ---
   # O1: List the actual primary endpoints or SDK entry points. Verbatim.
   O1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "HTTP and WebSocket via routeAgentRequest, native Durable Object RPC, email in and out, MCP, plus React hooks and a client for the northbound side."
+    evidence: "packages/agents/src/agent-routing.ts @ 2f957bc; packages/agents/src/client.ts"
   # O2: Is the API resource-oriented or RPC-flavoured?
   O2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Address-oriented rather than resource-oriented: getAgentByName plus RPC methods on the agent, not CRUD over resources."
+    evidence: "packages/agents/src/agent-routing.ts @ 2f957bc"
   # O3: Streaming: SSE, WebSocket, long-poll, gRPC stream?
   O3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Hibernatable WebSockets as the primary streaming transport, with typed cf_agent_* protocol messages."
+    evidence: "packages/agents/src/chat/wire-types.ts @ 2f957bc"
   # O4: Webhooks or outbound callbacks?
   O4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Inbound email and channel webhooks are handled, but there is no outbound webhook subscription model."
+    evidence: "packages/agents/src/email.ts @ 2f957bc"
   # O5: Which standards are implemented: MCP, A2A, ACP, OTel, OpenAI-compatible?
   O5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "MCP (persisted, with OAuth), OpenTelemetry with GenAI semantic conventions, W3C-style tracing context, and standard email. No A2A or ACP."
+    evidence: "packages/agents/src/observability/genai/attributes.ts @ 2f957bc; packages/agents/src/mcp/"
   # O6: Is the API versioned? Stability commitment?
   O6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Storage schema is versioned (v11) and the wire protocol messages are named constants, but there is no external API version namespace. Some surfaces are marked @experimental."
+    evidence: "packages/agents/src/index.ts:1197 @ 2f957bc; packages/agents/src/sub-routing.ts:500"
   # O7: Is there a separate northbound (client) and southbound (runtime) API?
   O7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No northbound/southbound split, because there is no southbound: you write the agent rather than adapting one."
+    evidence: "design/durable-object-lifecycle.md @ 2f957bc"
 
   # --- P. Storage ---
   # P1: What datastores are required to run it?
   P1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Per-agent embedded SQLite via this.sql, plus a single-row JSON state row, with tables created idempotently (CREATE TABLE IF NOT EXISTS, ADD COLUMN IF NOT EXISTS)."
+    evidence: "packages/agents/src/index.ts:2076-2097 @ 2f957bc"
   # P2: What is treated as authoritative, strongly consistent state?
   P2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "The agent's own SQLite is authoritative for that agent. Notably, a facet's cf_agents_runs table holds the AUTHORITATIVE fiber row while the root keeps only an index of which facets need recovery checks."
+    evidence: "packages/agents/src/index.ts:2258-2261 @ 2f957bc"
   # P3: What is event-stream or append-only?
   P3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Mutable rows with idempotent forward-only migrations; the fiber ledger is append-then-update, not append-only."
+    evidence: "packages/agents/src/index.ts:2280-2291 @ 2f957bc"
   # P4: Where do large artifacts go?
   P4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Snapshots and payloads are TEXT columns in SQLite; R2 or KV would be the platform answer for blobs but the SDK does not model it."
+    evidence: "packages/agents/src/index.ts:2253 @ 2f957bc"
   # P5: Is there a vector store? Required or optional?
   P5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No vector store."
+    evidence: "packages/agents/src/index.ts @ 2f957bc"
   # P6: Is storage pluggable, or hardcoded?
   P6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "NOT pluggable - Durable Object storage is the only backend, and the design is inseparable from it."
+    evidence: "packages/agents/src/index.ts:2076 @ 2f957bc"
 
   # --- Q. Licensing and commercial ---
   # Q1: Exact license, including any per-directory variation.
   Q1:
     verdict: first_class
-    note: "MIT."
-    evidence: "https://github.com/cloudflare/agents (GitHub API, read 2026-08-26; 5488★, pushed 2026-08-26)"
+    note: "MIT - the most permissive licence in the study."
+    evidence: "LICENSE @ 2f957bc"
   # Q2: Are there enterprise-only components missing from the OSS repo?
   Q2:
-    verdict: first_class
-    note: "Depends on Cloudflare's commercial platform (Workers, Durable Objects)."
-    evidence: "https://github.com/cloudflare/agents (GitHub API, read 2026-08-26; 5488★, pushed 2026-08-26)"
+    verdict: absent
+    note: "No enterprise-only components; the whole SDK is MIT. The dependency is the Cloudflare PLATFORM (Workers, Durable Objects), which is a paid service but not a licence restriction."
+    evidence: "LICENSE @ 2f957bc"
   # Q3: SaaS or hosted-service restrictions?
   Q3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: absent
+    note: "No SaaS restriction under MIT."
+    evidence: "LICENSE @ 2f957bc"
   # Q4: Trademark constraints on derived works?
   Q4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Cloudflare naming and marks; MIT grants no trademark rights."
+    evidence: "LICENSE, NOTICE @ 2f957bc"
   # Q5: Network copyleft (AGPL, SSPL) implications for a hosted product?
   Q5:
     verdict: absent
-    note: "No network copyleft. Apache-2.0/MIT only across the whole study."
-    evidence: "https://github.com/cloudflare/agents (GitHub API, read 2026-08-26; 5488★, pushed 2026-08-26)"
+    note: "No network copyleft."
+    evidence: "LICENSE @ 2f957bc"
   # Q6: Verdict: `USE` / `INTEGRATE` / `REFERENCE_ONLY` / `AVOID`, with reasoning.
   Q6:
     verdict: first_class
-    note: "REFERENCE_ONLY — MIT, but the durable actor model is inseparable from Durable Objects."
-    evidence: "https://github.com/cloudflare/agents (GitHub API, read 2026-08-26; 5488★, pushed 2026-08-26)"
+    note: "REFERENCE_ONLY, unavoidably. MIT permits anything and the patterns are the most directly stealable in the study, but every mechanism assumes Durable Objects, hibernation, alarms and embedded SQLite. The IDEAS port; the code cannot."
+    evidence: "LICENSE @ 2f957bc; design/durable-object-lifecycle.md"
 
   # --- R. Developer experience ---
   # R1: Time from clone to a running agent. Actual elapsed minutes.
   R1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "Building the monorepo needed real work: better-sqlite3 failed to compile on Node 26 (needed --ignore-scripts), then vitest required building the agents package AND the optional codemode peer before tests would resolve. Once past that, tests ran cleanly. A single-agent quickstart via wrangler is much simpler than the monorepo."
+    evidence: "verified locally 2026-08-26: pnpm build + vitest run src/tests/run-fiber.test.ts -> 48/48 pass"
   # R2: How many concepts before "hello world"?
   R2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Very few to start: extend Agent, add a wrangler binding, call getAgentByName. Durability, hibernation and storage are ambient rather than concepts to learn."
+    evidence: "design/durable-object-lifecycle.md @ 2f957bc"
   # R3: Is there a local dev loop? Hot reload?
   R3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "wrangler dev runs Workers and Durable Objects locally with real SQLite storage, and the vitest workers pool runs agents in the actual runtime rather than a mock."
+    evidence: "verified locally 2026-08-26: pnpm build + vitest run src/tests/run-fiber.test.ts -> 48/48 pass"
   # R4: How do you debug a stuck run?
   R4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Fiber inspection (inspectFiber, inspectFiberByKey, listFibers), a typed observability event stream, and OTel spans following GenAI semconv."
+    evidence: "packages/agents/src/index.ts:5361-5377 @ 2f957bc"
   # R5: Can an agent be unit tested? Is there a test harness?
   R5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "Excellent: 48 fiber tests covering idempotency dedupe, recovery, cancellation and orphan handling, running in the real workers runtime. The idempotency test asserts the SIDE EFFECT ran once, not merely that the call returned early."
+    evidence: "packages/agents/src/tests/run-fiber.test.ts:578-595 @ 2f957bc; verified locally 2026-08-26: pnpm build + vitest run src/tests/run-fiber.test.ts -> 48/48 pass"
   # R6: Deployment story?
   R6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class
+    note: "wrangler deploy to Workers plus Durable Objects; an nx monorepo with a worker-bundler package. No self-hosted path."
+    evidence: "packages/worker-bundler/ @ 2f957bc"
   # R7: CLI ergonomics — try the equivalent of `init`, `agent add`, `run`.
   R7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: implicit
+    note: "wrangler is the CLI, plus a shell package. No agent-management CLI, because agents are code."
+    evidence: "packages/shell/ @ 2f957bc"
 
   # --- S. Hard scenarios ---
   # S1: Delegated authority
   S1:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No principals and no authentication; auth is a developer-supplied hook. The scenario cannot be posed."
+    evidence: "packages/agents/src/agent-routing.ts:73-84 @ 2f957bc"
   # S2: Torn side effect
   S2:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class_answer
+    note: "BEST ANSWER IN THE STUDY, VERIFIED BY RUNNING THE TEST. idempotency_key TEXT UNIQUE on the fiber ledger; startFiber checks it before any work and returns accepted:false for a duplicate. Test asserts first.accepted=true, second.accepted=false, same fiberId, and executionLog=['managed:first'] - the side effect ran ONCE. Reinforced by a single-threaded DO (no concurrent writers), the fiber row being written before execution, ctx.stash() checkpoints, and onFiberRecovered for eviction mid-flight."
+    evidence: "packages/agents/src/index.ts:2282,5522-5590 @ 2f957bc; packages/agents/src/tests/run-fiber.test.ts:578-595; verified locally 2026-08-26: pnpm build + vitest run src/tests/run-fiber.test.ts -> 48/48 pass"
   # S3: Upgrade mid-flight
   S3:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "Storage schema is versioned (v11) and migrated forward on wake, and a fiber's snapshot plus onFiberRecovered give recovery a defined entry point. BUT snapshots carry no version and agent code version is not pinned to in-flight fibers, so recovery hands a pre-upgrade blob to post-upgrade code."
+    evidence: "packages/agents/src/index.ts:1197,2253 @ 2f957bc"
   # S4: Concurrent memory write
   S4:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "DISSOLVED rather than solved: a Durable Object is single-threaded, so read-modify-write cannot interleave within an agent. The cleanest resolution of this scenario in the study - the race Omnigent had to fix with BEGIN IMMEDIATE cannot arise here."
+    evidence: "design/rfc-sub-agents.md @ 2f957bc"
   # S5: Cancellation tree
   S5:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "cancelFiber flips durable status to aborted AND aborts the in-memory AbortController, guarded so a terminal fiber cannot be re-cancelled, with cancelFiberByKey for idempotency-key cancellation. No documented propagation into sub-agent fibers."
+    evidence: "packages/agents/src/index.ts:5379-5404 @ 2f957bc"
   # S6: Silent context loss
   S6:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No compaction in the SDK."
+    evidence: "packages/agents/src/chat/ @ 2f957bc"
   # S7: Poison message
   S7:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "Approached from the LIVENESS side rather than the queue side: a recovery scan that makes no forward progress backs off EXPONENTIALLY so a repeatedly-throwing recovery hook cannot wake the DO indefinitely, and a scan that recovers anything resets the streak. fiberRecoveryMaxAgeMs ages rows out. No DLQ, but the cost of poison work is bounded."
+    evidence: "packages/agents/src/index.ts:6588-6600 @ 2f957bc"
   # S8: Tenant leak
   S8:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: inferable
+    note: "Not modelled, but one Durable Object per tenant gives each tenant a PRIVATE SQLite database - isolation by storage boundary rather than by query predicate, which cannot be forgotten in a WHERE clause."
+    evidence: "design/rfc-sub-agents.md @ 2f957bc"
   # S9: Runaway spend
   S9:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: undefined
+    note: "No budget, quota or cost accounting."
+    evidence: "packages/agents/src/index.ts @ 2f957bc"
   # S10: Zombie sandbox
   S10:
-    verdict: unknown
-    note:
-    evidence:
+    verdict: first_class_answer
+    note: "BEST ANSWER IN THE STUDY. Hung interval schedules detected via execution_started_at <= now - hungScheduleTimeoutSeconds (default 30s) and made eligible again; running-but-not-yet-hung intervals still get a future re-check alarm so the runtime revisits them; overdue schedules run after restart because 'the SQLite row survives but the in-memory alarm does not'; orphaned fibers found by outer-joining the ledger against cf_agents_runs where the run row is gone; and a root-side index tells the alarm owner which idle facets need recovery checks."
+    evidence: "packages/agents/src/index.ts:6500-6600,2258-2261 @ 2f957bc"
 
 object_model: |
-  # ASCII tree of resources that actually exist
+  Agent                       = one Durable Object (addressable by name)
+   |-- state                  single-row JSON, versioned schema (v11)
+   |-- this.sql               private embedded SQLite
+   |-- Connection             hibernatable WebSocket
+   |-- cf_agents_schedules    time / cron / interval, with retry_options
+   |-- cf_agents_queues       durable queue with retry_options
+   |-- cf_agents_fibers       durable execution ledger - fiber_id PK,
+   |                          IDEMPOTENCY_KEY UNIQUE, status, snapshot
+   |-- cf_agents_runs         in-flight run rows (orphan detection)
+   |-- McpServer              persisted MCP connections, per-server retry
+   |-- Workflow               handles to Cloudflare Workflows
+   `-- SubAgent               child DO facet, own SQLite, typed RPC
 
-strongest_ideas: []
+strongest_ideas:
+  - "idempotency_key UNIQUE on a durable execution ledger, checked BEFORE execution, returning accepted:false for a duplicate. The only working idempotency precedent in seven projects, and verified by a test that asserts the side effect ran once."
+  - "Refusing ambiguity: if fiberId and idempotencyKey refer to different fibers, throw rather than guess."
+  - "Hung-work detection via an execution_started_at cutoff, PLUS a re-check alarm for work that is running but not yet hung - the liveness case most implementations forget."
+  - "Orphan detection by outer join: a ledger row with no corresponding run row means a dead process."
+  - "Exponential backoff on recovery scans that make no forward progress, reset by any successful recovery. A poison-message answer from the liveness side rather than the queue side."
+  - "Eager validation of retry options at enqueue time, so bad config throws immediately 'instead of failing minutes later at execution time'."
+  - "Knowing when NOT to retry: overloaded-DO errors are excluded because 'retrying would make congestion worse'."
+  - "Retry config stored in the row rather than memory, because hibernation would lose it."
+  - "A storage boundary as an ENFORCEMENT boundary: if the LLM can write SQL, an approval queue in the same database is a convention, not a control. Put the data in a child DO and enforcement becomes structural."
+  - "No in-memory WebSocket mode - refusing to offer the non-durable path at all."
+  - "OTel GenAI semantic conventions where they exist, an explicit cloudflare.agents.* vendor namespace where they do not, and never squatting on ai.* (the Vercel AI SDK's de-facto namespace)."
+  - "Span lifetimes bound to the invocation, so a span cannot outlive the native invocation that owns its tracing context."
+  - "Declining to invent an otel.status_code attribute because status is span state in OTel, not an attribute."
+  - "Single-writer by PLATFORM: the DO owns its own alarm, so scheduling cannot double-fire across replicas (contrast Omnigent's in-process scheduler)."
+  - "Versioned storage schema stored as a row and checked on wake, with forward-only idempotent migrations (CREATE TABLE IF NOT EXISTS, ADD COLUMN IF NOT EXISTS)."
+  - "Capability hooks run OUTSIDE the host's async context so behaviour does not depend on which entrypoint triggered the phase."
+  - "Documenting your own auth bypasses in the docstring of the method that bypasses them."
+  - "A root-side index of descendant facet fibers that holds no authority, only a wakeup list - answering 'who checks on a sleeping child?'"
+  - "Sub-agent identity as logical name plus SHA-256 content digest."
+  - "Persisted MCP connections with per-server retry and OAuth re-establishment surviving hibernation - no other project persists MCP connection state."
+  - "A design doc that deliberately describes NO API so it cannot go stale, and says so."
+  - "Rejecting a durable wrapper until a real consumer proves the interface: 'not rejected, deferred... Speculatively adding it would re-import every problem above.'"
+  - "Rejecting its own previous durable implementation because it 'never delivered exactly-once ingress... so the guarantee it appeared to offer was not one it could keep.' A guarantee you cannot keep is worse than an honest limitation."
 
-weakest_choices: []
+weakest_choices:
+  - "Total platform lock-in: every mechanism assumes Durable Objects, hibernation, alarms and embedded SQLite. Unportable by design."
+  - "No authentication, authorization or principals. Auth is a hook the developer must write, so every consumer reimplements it."
+  - "No tenancy, quotas or cost accounting."
+  - "No agent versioning or revocation."
+  - "No adapter contract for third-party agents - you write the agent, so a meta-harness cannot be built on this without inverting it."
+  - "No declared capability model."
+  - "A 13,000-line index.ts: fibers, schedules, queues, MCP, workflows, sub-agents, state and RPC all in one file."
+  - "Fiber snapshots carry NO version and agent code version is not pinned to in-flight fibers, so recovery hands a pre-upgrade blob to post-upgrade code."
+  - "No compensation or rollback."
+  - "Monorepo build friction: better-sqlite3 fails to compile on Node 26, and vitest needs the agents package plus an optional peer built before tests resolve."
 
-reusable_components: []
-  # - component: 
-  #   decision: INTEGRATE   # BUILD|INTEGRATE|ADOPT_AS_STANDARD|REUSE|DEFER
-  #   note: 
+reusable_components:
+  - component: "idempotency_key UNIQUE on the run ledger, checked pre-execution"
+    decision: ADOPT_AS_STANDARD
+    note: "Closes C6; the only working precedent in seven projects."
+  - component: "accepted:false return for a deduped start"
+    decision: ADOPT_AS_STANDARD
+    note: "Honest signal - 'already exists, here it is'."
+  - component: "Throw when two identity keys disagree"
+    decision: ADOPT_AS_STANDARD
+    note: "Refuse ambiguity rather than guess which one wins."
+  - component: "Hung detection via execution_started_at cutoff + re-check alarm"
+    decision: ADOPT_AS_STANDARD
+    note: "Best lost-worker answer in the study."
+  - component: "Orphan detection by ledger-vs-run outer join"
+    decision: REUSE
+    note: "Cheap dead-process detection with no heartbeat."
+  - component: "Backoff on recovery scans making no forward progress"
+    decision: ADOPT_AS_STANDARD
+    note: "Bounds poison-work cost without needing a DLQ."
+  - component: "Eager validation of retry config at enqueue time"
+    decision: ADOPT_AS_STANDARD
+    note: "Fail at configuration time, not execution time."
+  - component: "isErrorRetryable excluding overload errors"
+    decision: ADOPT_AS_STANDARD
+    note: "Retrying a self-protecting service worsens congestion."
+  - component: "Retry options persisted in the row"
+    decision: REUSE
+    note: "Survives eviction; in-memory config would be lost."
+  - component: "Storage boundary as LLM enforcement boundary"
+    decision: ADOPT_AS_STANDARD
+    note: "Sharpest security insight in the study."
+  - component: "Root-side index of descendant work needing recovery"
+    decision: REUSE
+    note: "Answers who checks on a sleeping child, without moving authority."
+  - component: "OTel GenAI semconv + declared vendor namespace"
+    decision: ADOPT_AS_STANDARD
+    note: "Raises ADR-0010's bar from 'uses OTel' to 'follows conventions'."
+  - component: "Span lifetime bound to invocation"
+    decision: REUSE
+    note: "Prevents spans outliving their tracing context."
+  - component: "Versioned storage schema checked on wake"
+    decision: REUSE
+    note: "Forward-only idempotent migrations."
+  - component: "Design docs that describe no API"
+    decision: REUSE
+    note: "Cannot go stale as the code changes."
+  - component: "Defer the durable wrapper until a consumer exists"
+    decision: ADOPT_AS_STANDARD
+    note: "Anti-speculative-generality discipline, stated as policy."
+  - component: "Durable Object as the substrate"
+    decision: BUILD
+    note: "Cannot adopt; we are not on Workers."
+  - component: "Auth as a developer-supplied hook"
+    decision: BUILD
+    note: "Reject; the platform must own authentication."
+  - component: "13k-line god class"
+    decision: BUILD
+    note: "Reject as structure."
 
-lessons: []
+lessons:
+  - "The cleanest affirmative case for durable identity in the study: identity is the DO name (ctx.id.name authoritative, never duplicated), it exists whether or not the agent runs, and NO separate registry is needed because platform naming IS the registry. (confirms ADR-0001)"
+  - "GAP CLOSED. idempotency_key UNIQUE on the fiber ledger, checked before execution, verified by a test asserting the side effect ran exactly once. After six projects with nothing, this is the precedent our effect-ledger design needed. (closes C6)"
+  - "I expected the first agent-to-agent messaging counter-evidence here (a channels package exists). It is HUMAN-to-agent transport - Slack, Telegram, email, voice - with ChannelIdentity naming a human correspondent. Sub-agents use typed RPC and shared parent state. SEVEN FOR SEVEN. ADR-0003 should be rewritten around the shared-substrate pattern. (confirms ADR-0003 decisively)"
+  - "THE ONE GENUINE ADR-0004 CHALLENGE: there is no adapter contract at all, because the premise is that you write the agent as a subclass and extend via Lifecycle capabilities. This buys enormous integration depth - durability, hibernation and tracing all ambient - at the cost of never running someone else's agent. Our answer must be that adapting existing agents is a REQUIREMENT, not a preference, or this design is simply better. (challenges ADR-0004)"
+  - "MCP as protocol, extended: connection state is PERSISTED in a server_options column with per-server retry and OAuth re-establishment, because MCP servers are long-lived resources and hibernation would otherwise lose them. (confirms and extends ADR-0005)"
+  - "Ships no principals at all; auth is onBeforeConnect. Defensible for an SDK where the developer owns the edge, and honest about which paths bypass the hook - but it means every consumer reimplements authorization, which is what a platform should not delegate. (challenges ADR-0007 weakly, confirms by demonstrating the cost)"
+  - "Fifth consecutive project with filesystem-style skills and no memory store, and getSharedMemory is explicitly shared STATE, not semantic memory. Settled. (confirms ADR-0008)"
+  - "No pluggable sandbox provider, because the DO IS the isolate. The insight to keep: a child DO's private SQLite makes a policy STRUCTURAL rather than conventional, because 'the LLM can bypass the queue by writing SQL'. Our sandbox interface should therefore also be a STORAGE boundary, not only a process boundary. (challenges ADR-0009)"
+  - "Third real OTel and the best on convention: GenAI semconv where it exists, cloudflare.agents.* where it does not, never bare keys, never ai.*. Plus invocation-bound span lifetimes and a refusal to invent otel.status_code. AMEND ADR-0010 to require semconv adherence and a declared vendor namespace, not merely OTel adoption. (confirms ADR-0010 strongly)"
+  - "Storage schema is versioned (v11) and migrated on wake, but fiber snapshots carry NO version and code version is not pinned to in-flight work. Adds a THIRD dimension to the pin: checkpoint payloads need their own version, separate from agent version and adapter identity, because the recovery hook must know which shape it is being handed. (amends ADR-0011)"
+  - "NEW: a guarantee you cannot keep is worse than an honest limitation. channels.md rejects its own previous durable implementation because it 'never delivered exactly-once ingress - a crash between the callback and its receipt write replays the callback anyway'. This sentence should govern our v0.1 boundary."
+  - "NEW: single-writer can come from the platform rather than from discipline. One alarm owner per agent means scheduling cannot double-fire - directly fixing the flaw found in Omnigent's in-process scheduler."
 
-adr_impact: []
-  # - adr: ADR-0001
-  #   effect: confirms      # confirms|amends|challenges|neutral
-  #   note: 
+adr_impact:
+  - adr: ADR-0001
+    effect: confirms
+    note: "Cleanest affirmative case: identity is the DO name, durable by platform, and naming IS the registry."
+  - adr: ADR-0002
+    effect: neutral
+    note: "No general Task/Run split, though the fiber ledger vs run table is the same shape for durable execution."
+  - adr: ADR-0003
+    effect: confirms
+    note: "channels is human-to-agent, not agent-to-agent. Sub-agents use typed RPC. Seven for seven."
+  - adr: ADR-0004
+    effect: challenges
+    note: "No adapter contract at all - you write the agent. A coherent alternative that trades integration depth for never running someone else's agent."
+  - adr: ADR-0005
+    effect: confirms
+    note: "MCP as protocol, with persisted connection state and per-server retry surviving hibernation."
+  - adr: ADR-0006
+    effect: neutral
+    note: "No A2A."
+  - adr: ADR-0007
+    effect: challenges
+    note: "No principals; auth is a developer hook. Honest about its bypasses, but delegates what a platform should own."
+  - adr: ADR-0008
+    effect: confirms
+    note: "Fifth consecutive project with filesystem skills and no memory store."
+  - adr: ADR-0009
+    effect: challenges
+    note: "No pluggable sandbox - the DO is the isolate. Keep the insight that a storage boundary is an enforcement boundary."
+  - adr: ADR-0010
+    effect: confirms
+    note: "Best OTel convention adherence: GenAI semconv, declared vendor namespace, invocation-bound spans."
+  - adr: ADR-0011
+    effect: amends
+    note: "Versions its own schema but leaves user checkpoint payloads unversioned. Checkpoint payloads need their own version."
+  - adr: ADR-0012
+    effect: neutral
+    note: "No declared capability model for runtimes."
+  - adr: ADR-0013
+    effect: neutral
+    note: "No policy engine."

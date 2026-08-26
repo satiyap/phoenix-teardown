@@ -38,6 +38,46 @@ If OTel cannot express long-lived, resumable runs without abuse, keep OTel for t
 
 `M1`, `M2`, `M3`, `M4`, `M5`, `M8`
 
+## Amendment — 2026-08-26 (Phase 3, Cloudflare Agents): conventions, not just adoption
+
+"Uses OpenTelemetry" is too weak a bar, and two projects proved it in opposite
+directions.
+
+Omnigent depends on **six** OTel packages and instruments FastAPI, httpx and
+SQLAlchemy — yet its own design audit found trace context "never propagated over
+the wire", `HTTPXClientInstrumentor` "a declared dependency but **never wired**",
+`FastAPIInstrumentor` "gated off by default", and `get_traceparent_env()` as
+"**dead code** — zero call sites". A dependency list is not telemetry.
+
+Cloudflare shows the real bar (`observability/genai/attributes.ts:1-9 @ 2f957bc`):
+
+> `gen_ai.*` keys follow OpenTelemetry GenAI semantic conventions where they
+> exist... Keys with no semconv home live under the `cloudflare.agents.*` vendor
+> namespace — **never bare top-level keys, never `ai.*`** (the Vercel AI SDK's
+> de-facto namespace).
+
+Plus two details worth copying: spans may be `boundToInvocation` so a span "cannot
+outlive the native invocation that owns its tracing context" (a real hazard in any
+hibernating or resuming runtime), and a refusal to invent an `otel.status_code`
+attribute because "status is span state in OTel" — declining to model as an
+attribute what the protocol already models as state.
+
+**Amended decision.** Adopting OTel means all four of:
+
+1. **Follow GenAI semantic conventions** wherever a `gen_ai.*` key exists. Do not
+   invent a local name for something already named.
+2. **Declare one vendor namespace** for everything else. Never bare top-level
+   keys, and never squat on another tool's prefix.
+3. **Propagate context across every boundary**, and *assert it with a test*: one
+   trace id must span client → control plane → adapter. This is the criterion
+   Omnigent's audit shows a project can otherwise believe it meets while it does
+   not.
+4. **Bind span lifetimes to the invocation that owns them**, so a resumed or
+   hibernated run cannot leak a span into the next invocation.
+
+Exit criteria change accordingly: the OTel question is answered by a passing
+propagation test, not by an inventory of dependencies.
+
 ## Evidence log
 
 Append one row per project as evidence lands. Keep the reasoning, not just the verdict.
@@ -49,6 +89,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | Letta | confirms | `src/telemetry/ @ 852ca24` | Third deep teardown, third with no OpenTelemetry. `src/telemetry/` is error reporting and product analytics with batched flushing. The gap is industry-wide rather than a per-project oversight, which strengthens adopting OTel as a differentiator rather than a checkbox. |
 | Google AX | confirms | `internal/telemetry/telemetry.go:23-28 @ b777313`; `internal/controller/eventlog/sql.go:105-108` | **First project in the study with real OpenTelemetry**, breaking a 3-for-3 gap. OTLP gRPC exporter, propagation, trace SDK, with spans instrumenting both the event log (tracer `eventlog.sql`) and every harness adapter. Proves the standard is viable for agent runtimes. |
 | Omnigent | confirms | `pyproject.toml:93,145-150 @ ba9e371`; `designs/OBSERVABILITY.md` | Second real OTel and the most thorough: both OTLP exporters plus FastAPI, httpx and **SQLAlchemy** instrumentation — the only project tracing its own database. **But a caution that changes our exit criteria**: its own design doc audits the gaps — trace context "never propagated over the wire", `HTTPXClientInstrumentor` "never wired", `FastAPIInstrumentor` "gated off by default", `get_traceparent_env()` "dead code — zero call sites". Adopting OTel is not the same as wiring it. **Our criterion must be a propagation test asserting one trace id spans client → control plane → adapter, not a dependency check.** Also worth stealing: `trace_id_from_response_id`, where the response id *is* the trace id. |
+| Cloudflare Agents | confirms | `packages/agents/src/observability/genai/attributes.ts:1-9 @ 2f957bc`; `packages/agents/src/observability/tracing/tracer.ts:24-31,298` | **Third real OTel, and the best on convention adherence.** `gen_ai.*` keys follow OpenTelemetry GenAI semantic conventions where they exist; keys with no semconv home live under `cloudflare.agents.*`, "**never bare top-level keys, never `ai.*`**" (the Vercel AI SDK's de-facto namespace). Span lifetimes can be `boundToInvocation` so a span "cannot outlive the native invocation that owns its tracing context". And it declines to invent an `otel.status_code` attribute because "status is span state in OTel". **Raises this ADR's bar from *uses OTel* to *follows the conventions and declares a vendor namespace*.** |
 
 ## Open questions
 

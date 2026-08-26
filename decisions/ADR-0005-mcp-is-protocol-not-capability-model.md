@@ -49,6 +49,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | Letta | neutral | `src/tools/schemas/ @ 852ca24` | No MCP in the read tree. Tools are native, with schema and description as separate artifacts. |
 | Google AX | neutral | `proto/ax.proto:165-211 @ b777313` | No MCP. Tools appear only as opaque step types the harness owns; AX observes but does not mediate them. |
 | Omnigent | confirms | `omnigent/runner/proxy_mcp_manager.py @ ba9e371`; `omnigent/harness_capabilities.py:124-141` | MCP appears as declarations in the agent image plus a manager and a proxying manager, while capabilities are modelled in a completely separate 16-axis type. The clearest separation of protocol from capability model in the study. |
+| Cloudflare Agents | confirms | `design/retries.md @ 2f957bc`; `packages/agents/src/mcp/` | MCP as protocol, and extended in a way no other project manages: connection state is **persisted** in a `server_options` JSON column "so it persists across hibernation", with per-server retry config and OAuth re-establishment on reconnect. If MCP servers are long-lived resources, their connection state belongs in durable storage. |
 
 ## Open questions
 
