@@ -44,7 +44,7 @@ component names the evidence that shaped it. Where a component exists because
    │ Adapter │            │ Adapter │             │ Adapter │
    │ ACP     │            │ in-proc │             │ native  │
    │ (Claude,│            │ (our    │             │ TUI     │
-   │  Codex) │            │  SDK)   │             │ (scrape)│
+   │ SDK)    │            │  SDK)   │             │(reserved)│
    └────┬────┘            └────┬────┘             └────┬────┘
         └──────────────────────┼───────────────────────┘
                                ▼
@@ -179,10 +179,15 @@ terminated by exactly one end frame" — which is what makes a third-party adapt
 implementable without reading our source.
 
 Transport is gRPC bidirectional streaming, so a remote adapter needs no
-co-location; ACP sits *behind* an adapter rather than being the transport. The
-integration-mode taxonomy comes from Omnigent: `SDK_IN_PROCESS`, `CLI_SUBPROCESS`,
-`ACP_SUBPROCESS`, `NATIVE_TUI`, `NATIVE_SERVER` — including scraping a terminal UI,
-which is how you bring an agent with no integration surface under one policy layer.
+co-location. The integration-mode taxonomy comes from Omnigent: `SDK_IN_PROCESS`,
+`CLI_SUBPROCESS`, `ACP_SUBPROCESS`, `NATIVE_TUI`, `NATIVE_SERVER`.
+
+> **Amended 2026-08-27.** Only **`SDK_IN_PROCESS` is shipped** — the enum is retained so the
+> column never needs a migration, with a `CHECK` enforcing the restriction
+> (`spec/01-schema.md`). The sentence removed here argued that scraping a terminal UI is "how
+> you bring an agent with no integration surface under one policy layer"; that was a
+> justification for adapting *foreign* agents, and we build every agent ourselves. ACP is no
+> longer a shipped path at all. See `synthesis/scope-reconciliation.md` §7.
 
 ### Conformance Bench
 Two layers (Omnigent's actual CI split):
@@ -218,7 +223,7 @@ OTel packages and its own audit found dead propagation code.
 | Durable workflow, sagas, **compensation** | Zero positive answers in 13 projects; saga compensation is the workflow engine's job | `L8` 12/13 negative + 1 unknown; Pydantic AI's Temporal/DBOS/Prefect integration |
 | Graph/DAG orchestration | Separable and better solved elsewhere | MAF's Pregel engine; Pydantic AI's delegation |
 | Model gateway / provider abstraction | Explicit anti-goal; commodity | PLAN.md |
-| Agent authoring framework | We adapt agents rather than compete with the frameworks that write them | ADR-0004; Cloudflare's coherent alternative, rejected only because adapting existing agents is a hard requirement |
+| **Public** authoring framework / bring-your-own agent | Thin internal harness over the vendor SDKs; customers bring knowledge, connectors and data. **Amended 2026-08-27** — the Cloudflare objection (ambient durability costs you the ability to run others' agents) no longer binds, because running others' agents is no longer a requirement | ADR-0004 (amended); `scope-reconciliation.md` §7 |
 
 ## The four things nobody does
 

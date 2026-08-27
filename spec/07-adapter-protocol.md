@@ -1,8 +1,9 @@
 # 07 — Southbound adapter protocol
 <!-- status: final -->
 
-gRPC bidirectional streaming. Four methods, and the durability lives in the control
-plane — **not** in the adapter.
+gRPC bidirectional streaming. **Two RPCs** (`Run`, `Describe`), and the durability lives in
+the control plane — **not** in the adapter. (Amended 2026-08-27: this said "Four methods";
+AX's four-method contract is the upstream precedent, not our shape.)
 
 The reason is ADR-0012: not every harness can checkpoint. Putting `checkpoint`/`restore`
 in the adapter interface guarantees a lowest-common-denominator problem, where either
@@ -229,13 +230,51 @@ incompatible with three things we have already committed to:
 | policy decides before the act (ADR-0013) | policy becomes an audit log of things that already happened |
 | approval gates the action (ADR-0015) | the adapter chooses whether to wait |
 
-So the cost is accepted deliberately: **an adapter cannot bring its own tools.** A harness
-with built-in tools must either expose them as declared tools the platform executes, or
-declare `tools.platform_executed = false` and be understood as running unmediated — a
-capability the platform records rather than silently tolerates.
+> **Amended 2026-08-27.** This paragraph read: *"So the cost is accepted deliberately: an
+> adapter cannot bring its own tools… That is a real limitation and the sharpest edge of the
+> design."* It is deleted, because two things changed. We now build every adapter, so no third
+> party is asking to bring tools — and separately, vendor-hosted tools (web search, code
+> execution, file search, computer use) **execute on the vendor's side and cannot be
+> intercepted at all**. Pretending otherwise would have made the rule unimplementable rather
+> than strict. The narrow, explicit permission is below.
 
-That is a real limitation and the sharpest edge of the design. It is also the only version
-in which "the platform owns effects" is true rather than aspirational.
+### Unmediated tools — permitted narrowly, denied by default
+
+Some tools cannot be routed through the ledger because they never reach us: a vendor-hosted
+web search or code interpreter runs inside the model provider's infrastructure. The honest
+options are to forbid such tools entirely, or to permit them under conditions that keep them
+**visible**. We permit them, under three conditions, and no others.
+
+**1. A declared adapter capability, never a per-call choice.**
+`tools.platform_executed = false` lives in `adapter_contracts.declared_capabilities` and is
+therefore part of the adapter's **digest**. An adapter cannot decide mid-run that this call
+is unmediated; changing the answer changes the contract digest and fails the pin.
+
+**2. Denied by default; enabled per tenant by an explicit Cedar `permit` that names the
+tool.** No blanket permission. Every use still produces:
+
+- a `policy.evaluated` event, so the authorisation is on the record; and
+- an `effect_ledger` row with `kind = 'unmediated'` and status **`observed`** — *no claim, no
+  settlement.* The platform **saw** the effect; it did not **own** it.
+
+`observed` is a distinct status precisely so nobody can read an unmediated effect as an
+at-most-once guarantee. It carries no claim fields, enforced by `CHECK`
+(`spec/01-schema.md`).
+
+**3. Never in a pack that contains a mutation.** If a bundle's actions include any
+`idempotent_mutation`, `non_idempotent_mutation` or `long_running_operation`, it **cannot**
+bind an adapter with unmediated tools enabled. The API rejects the binding with
+`422 unmediated_tools_with_mutations`.
+
+The reasoning for the third condition is the one that matters: an observation we cannot
+intercept costs us *visibility* into a read. A mutation we cannot intercept costs us the
+entire effect ledger guarantee — and a pack mixing the two gives an agent a mutation path and
+an uninterceptable execution surface in the same run. Read-only unmediated tools are a
+tolerable, recorded gap. Unmediated mutation is not a gap, it is the absence of the product.
+
+Tested as §08 rows **30e** and **30f**. Open question **OQ-043** (can each SDK's native
+executor actually be disabled?) and **spike 06** determine which vendor tools land in this
+category rather than being intercepted normally.
 
 ### In-process SDK adapters route tool calls the same way
 

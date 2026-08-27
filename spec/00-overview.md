@@ -13,8 +13,9 @@ states *exactly what to build*.
 
 **Scope: the v0.1 shipment**, not the target architecture. See
 [`../synthesis/scope-reconciliation.md`](../synthesis/scope-reconciliation.md) §1 for
-the difference — `Task`, agent revocation, the live conformance-bench layer and
-`Recall` are all deferred.
+the difference — agent revocation, the live conformance-bench layer and `Recall` are
+deferred. **Amended 2026-08-27:** `Task` was listed here as deferred and is now **Tier 2**
+(`scope-reconciliation.md` §2, §7); routines are the unit customers buy.
 
 ## Documents
 
@@ -28,7 +29,7 @@ the difference — `Task`, agent revocation, the live conformance-bench layer an
 | 06 | [`06-api.md`](06-api.md) | The northbound HTTP contract |
 | 07 | [`07-adapter-protocol.md`](07-adapter-protocol.md) | The southbound stream contract |
 | 08 | [`08-conformance.md`](08-conformance.md) | The offline bench, what CI enforces, and the required invariant tests |
-| 09 | [`09-decisions.md`](09-decisions.md) | Six open design questions, decided with reasoning |
+| 09 | [`09-decisions.md`](09-decisions.md) | **Seven** design questions, decided with reasoning |
 
 ## Not yet specified — the rest of the v0.1 shipment
 
@@ -103,7 +104,7 @@ apply to the implementation as much as to the spikes.
 | Workflow/DAG orchestration | External engine (Temporal/DBOS/Prefect) |
 | Compensation/saga | Zero precedent in 13 projects; the engine's job |
 | UI | Not a platform concern for v0.1 |
-| `Task` resource | Deferred; `Run` carries its own intent fields |
+| ~~`Task` resource~~ | **No longer excluded (2026-08-27).** Moved to Tier 2 as `tasks`/`routines`; see "Not yet specified" above for the owed schema. `Run` still carries its own intent fields, and `Run.task_id` is a nullable FK |
 
 ## Open questions this spec must not paper over
 

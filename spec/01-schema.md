@@ -133,7 +133,9 @@ CREATE TABLE adapter_contracts (
 );
 ```
 
-`integration_mode` is Omnigent's taxonomy, including `native_tui` — adapting an agent
+`integration_mode` is Omnigent's taxonomy. Only `sdk_in_process` is shipped (amended
+2026-08-27); the rest are retained so the column never needs a migration. The original
+argument for `native_tui` — adapting an agent
 that offers no API by driving its terminal.
 
 ---
@@ -326,7 +328,8 @@ CREATE TYPE effect_status AS ENUM
      'succeeded', 'failed',
      'denied',            -- an approver refused; never dispatched
      'abandoned',         -- intent superseded or run ended; never dispatched
-     'indeterminate');    -- claimed, lease expired unsettled: may have happened
+     'indeterminate',     -- claimed, lease expired unsettled: may have happened
+     'observed');         -- UNMEDIATED: we saw it, we did not own it. See below.
 
 CREATE TABLE effect_ledger (
     tenant_id      BIGINT NOT NULL,
@@ -360,14 +363,25 @@ CREATE TABLE effect_ledger (
 
     CHECK ((status IN ('succeeded','failed')) = (completed_at IS NOT NULL)),
 
-    -- an unclaimed row carries no lease; a dispatched row has an owner
+    -- an unclaimed row carries no lease; a dispatched row has an owner.
+    -- `observed` is deliberately grouped with the NEVER-CLAIMED statuses: an
+    -- unmediated effect executed on the vendor's side, so there is nothing to
+    -- claim, fence or settle, and a claim field on such a row would assert an
+    -- at-most-once guarantee the platform did not provide.
     CONSTRAINT effect_claim_fields_together CHECK (
-        (status IN ('intended','awaiting_approval','denied','abandoned')
+        (status IN ('intended','awaiting_approval','denied','abandoned','observed')
            AND claim_owner IS NULL AND claim_token IS NULL
            AND lease_expires_at IS NULL)
      OR (status IN ('claimed','succeeded','failed','indeterminate')
            AND claim_owner IS NOT NULL AND claim_token IS NOT NULL
            AND lease_expires_at IS NOT NULL)
+    ),
+
+    -- `observed` exists ONLY for unmediated effects, and `unmediated` effects can
+    -- reach no other status: they are never claimed, so they can never succeed,
+    -- fail or become indeterminate in the senses those words carry here.
+    CONSTRAINT observed_iff_unmediated CHECK (
+        (status = 'observed') = (kind = 'unmediated')
     )
 );
 
@@ -510,6 +524,28 @@ must be picked up), so fence tokens there must be monotonic and do need history.
 
 `effect_claim_fields_together` (in the DDL above) makes this structural: a row that has
 never been claimed cannot carry a lease, and a dispatched row cannot lack an owner.
+
+### Unmediated effects — `kind = 'unmediated'`, status `observed`
+
+A vendor-hosted tool (web search, code execution, file search, computer use) runs inside the
+model provider and cannot be intercepted. Such a tool is permitted **only** as a declared
+adapter capability, **denied by default**, and **never alongside a mutation** — the three
+conditions are stated once, normatively, in [`spec/07`](07-adapter-protocol.md)
+§"Unmediated tools".
+
+What the schema enforces:
+
+| Rule | Mechanism |
+|---|---|
+| `observed` carries no claim, token or lease | `effect_claim_fields_together` |
+| `observed` ⇔ `kind = 'unmediated'` | `observed_iff_unmediated` |
+| an unmediated effect never becomes `succeeded` | the same biconditional — it cannot leave `observed` |
+| the capability is part of the adapter digest | `declared_capabilities` participates in `adapter_contracts.digest` |
+
+The row exists so an unmediated effect is **visible and auditable**, not so it is trusted. A
+reader joining `effect_ledger` for at-most-once evidence must filter
+`status <> 'observed'`, and the biconditional is what makes that filter reliable rather than
+conventional.
 
 ## Idempotency records — the table §06 promises
 

@@ -50,10 +50,13 @@ That is the same `absent` vs `unknown` distinction this teardown's methodology
 insists on, arrived at independently in a different domain. Its assessment also
 returns *which* requirements were unmet, so a refusal can explain itself.
 
-This matters for us more than for either of them. ADR-0004 commits us to adapting
-harnesses with genuinely different capabilities — Claude Code can checkpoint, a
-raw HTTP A2A endpoint cannot — and ADR-0009 commits us to sandbox providers where
-snapshot support varies. If capability mismatches surface as exceptions at the
+This matters for us more than for either of them. ADR-0004 commits us to adapting SDKs with
+genuinely different capabilities — one SDK can checkpoint, another cannot — and ADR-0009
+commits us to sandbox providers where
+snapshot support varies. *(Amended 2026-08-27: the example read "Claude Code can checkpoint,
+a raw HTTP A2A endpoint cannot". The asymmetry is unchanged and now lives between vendor
+SDKs, which is why this ADR was recorded as `amends` rather than `challenges`.)* If
+capability mismatches surface as exceptions at the
 moment of use, or worse as silent no-ops, the platform cannot schedule
 intelligently or explain a refusal.
 

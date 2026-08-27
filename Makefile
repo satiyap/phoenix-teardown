@@ -1,6 +1,6 @@
 PY := ./.venv/bin/python
 
-.PHONY: help status validate matrix check probes llm setup spec
+.PHONY: help status validate matrix check probes llm setup spec gate-tests
 
 help:
 	@echo "make setup     create venv and install deps"
@@ -9,6 +9,7 @@ help:
 	@echo "make matrix    regenerate synthesis/capability-matrix.md"
 	@echo "make check     validate --strict + spec + matrix + status (must exit 0)"
 	@echo "make spec      validate spec/ (vectors, rewind algorithm, references)"
+	@echo "make gate-tests negative controls for the superseded-claims gate"
 	@echo "make probes    print probe set summary"
 	@echo "make llm       gateway health check"
 
@@ -39,3 +40,6 @@ llm:
 
 spec:
 	@cd tools && ../$(PY) validate_spec.py
+
+gate-tests:
+	@$(PY) tools/test_validate_spec.py

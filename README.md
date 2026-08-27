@@ -110,8 +110,15 @@ answered, all six synthesis deliverables final.
 | 4 Targeted | + HumanLayer, AWS AgentCore, Microsoft Agent Framework, Agent Control |
 | 5 Synthesis | domain model, reference architecture, build/reuse map, v0.1 boundary |
 | 6 Handoff | `DESIGN.md` + developer journey |
-| 7 Spikes | AG2 storage swap, definition pin, **Postgres concurrency**, **work-bundle generality** — 4 spikes, 124 gate assertions, verification rules |
+| 7 Spikes | AG2 storage swap, definition pin, **Postgres concurrency**, **work-bundle generality** — 4 spikes, **115 gate assertions**, verification rules |
 | 8 Spec | **10 documents** + compiling `.proto` and OpenAPI contracts; 48 required invariant tests with negative controls |
+
+**How the 115 is counted.** 12 (spike 01) + 35 (02) + **41** (03) + 27 (04), taken from each
+spike's own `RESULT.md`. **Vendored upstream suites do not count**: spike 01 also ran AG2's
+own 480 tests through our storage, which is useful evidence that the swap works but is *their*
+verdict, not ours — `spikes/VERIFICATION-RULES.md` rule 6 requires the reproduce command to
+cover every gate test, and a vendored suite tests the vendor's invariants. An earlier version
+of this line said 124 by counting spike 02's pytest total instead of its `RESULT.md` figure.
 
 **173 recorded ADR impacts**: 96 confirms, 19 amends, 10 challenges, 48 neutral.
 Four ADRs did not exist before the evidence (0011 pinning, 0012 capabilities,

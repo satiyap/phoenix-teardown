@@ -260,6 +260,8 @@ invention.
 
 ## Open questions
 
-- What is the right compatibility predicate for a harness whose execution units
-  are not statically enumerable (a free-form Claude Code session, say)?
+- What is the right compatibility predicate for an SDK whose execution units are not
+  statically enumerable — a free-form conversational session, say? *(Amended 2026-08-27:
+  originally "a free-form Claude Code session"; the question survives the repositioning
+  because a Claude-Agent-SDK-backed agent has the same property.)*
 - Does LangGraph Platform mitigate this, or inherit it? (OQ-007)

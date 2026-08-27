@@ -18,7 +18,7 @@ commitment.
 
 ## Decision
 
-Execution is delegated to pluggable harness adapters behind one interface. Claude Code, Codex, OpenHands, LangGraph, A2A endpoints and raw containers are all adapters.
+Execution is delegated to pluggable adapters behind one interface. *(Amended 2026-08-27: the adapter boundary is retained so the vendor SDK underneath stays swappable, not to admit foreign agents. The original list read "Claude Code, Codex, OpenHands, LangGraph, A2A endpoints and raw containers"; only `sdk_in_process` ships.)* Vendor SDKs, A2A endpoints and raw containers are all adapters.
 
 ## Rationale
 

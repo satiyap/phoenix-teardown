@@ -212,11 +212,17 @@ projects confirm this is what makes a platform testable (ADK's `InMemory*` for s
 subsystems, LangGraph's `InMemorySaver`, AX's `eventlogtest`, Pydantic AI's
 `TestModel`).
 
-### Minute 2 — run someone else's agent
+### Minute 2 — run an agent we built, on the customer's knowledge
 
 ```bash
-ourplatform run --adapter acp --agent claude-code "fix the failing test"
+phoenix run --agent revenue-analyst --bundle sonyliv-analytics \
+            "why did VOD ad coverage drop on Android last Tuesday?"
 ```
+
+> **Amended 2026-08-27.** This step previously read "run someone else's agent" and invoked
+> `--adapter acp --agent claude-code`. Both are gone: we build and operate the agents, and
+> the customer supplies the **bundle**, not the agent. See
+> [`synthesis/scope-reconciliation.md`](synthesis/scope-reconciliation.md) §7.
 
 Four concepts to get here: agent, run, adapter, sandbox. HumanLayer and Agent Control
 both reach a working state in under five concepts; that is the bar.
@@ -275,11 +281,16 @@ interrupt    = ASSERTED(true)     # declared, unproven -- and marked so
 compaction   = UNKNOWN            # no claim; never read as false
 ```
 
-Four methods (AX), because durability lives in the control plane — putting
-`checkpoint`/`restore` in the adapter guarantees a lowest-common-denominator problem
-when not every harness can checkpoint. Config is opaque bytes the control plane
-refuses to parse. The stream contract states its terminator exactly, which is what
-makes a third-party adapter implementable without reading our source.
+**Two RPCs** (`Run`, `Describe`), and durability lives in the control plane — putting
+`checkpoint`/`restore` in the adapter guarantees a lowest-common-denominator problem when
+not every SDK can checkpoint. Config is opaque bytes the control plane refuses to parse, and
+the stream contract states its terminator exactly.
+
+> **Amended 2026-08-27.** This read "Four methods (AX)". **AX's four-method contract is the
+> upstream precedent, not our shape** — `spec/07` specifies two RPCs carrying typed frames.
+> The reason for the terminator precision also changed: it is no longer "so a third party can
+> implement an adapter without reading our source", because we write every adapter. It is so
+> *we* cannot quietly depend on undocumented stream behaviour when the next SDK lands.
 
 ```bash
 ourplatform bench my-adapter     # offline: is the declaration complete?
@@ -324,7 +335,7 @@ retry parameter is worth more than one that names the exception class.
 | Compensation / saga engine | Zero positive answers in 13 projects — including the one whose whole job is control and the one whose whole job is orchestration. Saga compensation belongs to the workflow engine. |
 | Workflow / DAG engine | MAF and Pydantic AI both show orchestration is separable and better solved elsewhere |
 | Model gateway / provider abstraction | Explicit anti-goal; MAF ships 35 provider packages, which is the surface we should not own |
-| Agent-authoring framework | We adapt agents. Cloudflare's alternative — write the agent against our runtime — buys ambient durability at the cost of never running someone else's |
+| **Public** authoring framework, or bring-your-own agent | We own a thin internal harness over the vendor SDKs; customers bring knowledge, connectors and data — never agent code. **Amended 2026-08-27:** this row previously read "We adapt agents. Cloudflare's alternative — write the agent against our runtime — buys ambient durability at the cost of never running someone else's." **That lesson no longer binds:** its cost was losing the ability to run other people's agents, and we no longer need to. What we still refuse is *publishing* an authoring framework for customers to write against. (`v01-boundary.md:87`) |
 | Bespoke policy DSL, trace format, or message protocol | Cedar, OTel, AG2's envelope. Every project that invented one got a worse version and no ecosystem |
 
 ## 7. What v0.1 does not guarantee

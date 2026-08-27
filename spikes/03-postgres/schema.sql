@@ -91,7 +91,7 @@ CREATE TABLE run_lease_history (
 
 CREATE TYPE effect_status AS ENUM
     ('intended', 'awaiting_approval', 'claimed', 'succeeded', 'failed',
-     'denied', 'abandoned', 'indeterminate');
+     'denied', 'abandoned', 'indeterminate', 'observed');
 
 CREATE TABLE effect_ledger (
     tenant_id       BIGINT NOT NULL,
@@ -112,12 +112,15 @@ CREATE TABLE effect_ledger (
     FOREIGN KEY (tenant_id, run_id) REFERENCES runs (tenant_id, run_id),
     CHECK ((status IN ('succeeded','failed')) = (completed_at IS NOT NULL)),
     CONSTRAINT effect_claim_fields_together CHECK (
-        (status IN ('intended','awaiting_approval','denied','abandoned')
+        (status IN ('intended','awaiting_approval','denied','abandoned','observed')
            AND claim_owner IS NULL AND claim_token IS NULL
            AND lease_expires_at IS NULL)
      OR (status IN ('claimed','succeeded','failed','indeterminate')
            AND claim_owner IS NOT NULL AND claim_token IS NOT NULL
            AND lease_expires_at IS NOT NULL)
+    ),
+    CONSTRAINT observed_iff_unmediated CHECK (
+        (status = 'observed') = (kind = 'unmediated')
     )
 );
 CREATE INDEX effect_ledger_stuck ON effect_ledger (tenant_id, lease_expires_at)

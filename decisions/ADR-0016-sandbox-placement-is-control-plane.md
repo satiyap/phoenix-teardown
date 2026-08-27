@@ -8,8 +8,9 @@
 ## Context
 
 The SaaS shape is a multi-tenant control plane plus a per-customer VPC data plane, and we
-run the agents. That makes *where an agent executes* our problem in a way it was not when
-the plan was to adapt someone else's harness.
+run the agents. That makes *where an agent executes* our problem in a way it was not under
+the previous thesis, when execution was expected to live inside a third party's harness
+(superseded 2026-08-27).
 
 Google AX is the only project in the study that separates an orchestrator from disposable
 execution: actors are "suspendable/resumable images" keyed by conversation, **suspended

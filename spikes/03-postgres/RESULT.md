@@ -1,7 +1,8 @@
 # Spike 03 — the Postgres gate
 
-**Verdict: PASS.** 35 assertions, 0 failures, 6 negative controls, against
-**PostgreSQL 16.14** in a throwaway container.
+**Verdict: PASS.** **41 assertions**, 0 failures, 6 negative controls, against
+**PostgreSQL 16.14** in a throwaway container. (35 at first writing; scenario 9 added
+2026-08-27 with the unmediated-tools decision.)
 
 Everything here was classified "reasoned but untested" in the previous review round.
 The two earlier spikes ran SQLite in a single process, so isolation levels, real
@@ -19,6 +20,7 @@ cross-process contention and Postgres error codes were assumptions.
 | 6 | Sweeper vs late settlement | the `indeterminate` verdict survives a late fenced settle |
 | 7 | Run lease acquire / renew / reclaim | monotonic-but-not-dense tokens; non-holder cannot renew; fenced write rejected |
 | 8 | `ON CONFLICT ... RETURNING` and isolation | `no row` is the reliable ownership signal; `REPEATABLE READ` protects the fold and `READ COMMITTED` does not |
+| 9 | **Unmediated effects** (added 2026-08-27) | `observed` is recorded but structurally cannot carry claim fields, cannot be claimed, and cannot reach `succeeded`; `status <> 'observed'` is a reliable at-most-once filter because `observed` ⇔ `kind='unmediated'` |
 
 The DDL in `spec/01-schema.md` applied to a real server **unchanged** — table names,
 composite keys, both `CHECK` constraints, the partial indexes and the trigger.

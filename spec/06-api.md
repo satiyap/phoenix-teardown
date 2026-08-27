@@ -157,8 +157,8 @@ that it would have fired 4,102 times.
 
 ```http
 POST /v1/adapters
-{ "identity": "acp:claude-code", "protocol_version": "1.0",
-  "integration_mode": "acp_subprocess", "declared_capabilities": {...} }
+{ "identity": "sdk:claude-agent-sdk", "protocol_version": "1.0",
+  "integration_mode": "sdk_in_process", "declared_capabilities": {...} }
 
 201 { "identity": "...", "digest": "<derived>" }
 ```

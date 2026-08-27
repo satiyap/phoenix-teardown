@@ -10,8 +10,12 @@ there.
 > all target-architecture items deferred out of v0.1. The difference is tabulated in
 > [`scope-reconciliation.md`](scope-reconciliation.md) §1.
 >
-> **`Task` is not in v0.1.** Runs are created directly with their own intent fields;
-> `Task` becomes a nullable FK later, which is an additive migration (§2).
+> **`Task`/routines ARE in v0.1 (Tier 2).** **Amended 2026-08-27**: this read "`Task` is not
+> in v0.1". The deferral trigger — scheduled or recurring agent work becoming a product
+> requirement — is met, because routines (schedule *or* trigger → Run) are the unit customers
+> buy. A routine **creates** Runs and never becomes one, so `Run.task_id` is a nullable FK and
+> the migration stays additive exactly as planned. See
+> [`scope-reconciliation.md`](scope-reconciliation.md) §2 (dated reversal) and §7.
 
 The governing rule comes from Cloudflare's `channels.md`, which deleted its own
 durable messaging host because it "never delivered exactly-once ingress… so the
@@ -163,8 +167,9 @@ v0.1 shipment are different scopes** (§1 of `scope-reconciliation.md`).
 > **We build** content-derived pinning and the effect ledger, plus the **offline**
 > conformance-bench layer and **attributable approvals**.
 >
-> **We defer** agent revocation, the live probe layer, `Recall`, and `Task` — each
-> with a named trigger, not forgotten.
+> **We defer** agent revocation, the live probe layer, and `Recall` — each with a named
+> trigger, not forgotten. **Amended 2026-08-27:** `Task` was in this list and is now **Tier
+> 2**, its trigger having been met (§7).
 >
 > **We integrate** Cedar, `genai-prices`, and `ag2.network` **behind a compatibility
 > layer we own** — the spike proved the hub runs on our storage (480 upstream tests, 201

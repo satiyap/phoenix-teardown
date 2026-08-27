@@ -245,7 +245,7 @@ changed**, and a reason that no longer holds is how a design rots.
 | 8 | **Go for the control plane** | Unstated; spikes are Python | Recorded as a decision. `spec/03` was already written for a non-Python implementer (UTF-8 byte order, integers-only domain), and the **Node oracle in spike 02** is the existing cross-language check — a Go implementation becomes the third independent one and reuses the 21 accept / 9 reject vectors. **Spikes are not rewritten**: they are executable evidence, not production code | `DESIGN.md` §7a |
 | 9 | **Pitch wording** | README: "framework-neutral control plane for persistent AI agents… MCP, A2A and ACP are interoperability protocols". Differentiator #2 phrased as a mechanism | SaaS framing in both. Four differentiators kept; **#2 reworded to the buyer's question** — after a crash, no framework can say whether the effect happened; Phoenix records intent before every effect, keys it by position in the run, and surfaces uncertain cases to a human. The "six of six" style evidence stays in the technical sections | `README.md` §Success condition, `DESIGN.md` §1 |
 
-### Also fixed: ten defects found in the same review
+### Also fixed: eleven defects found in the same review
 
 | Defect | Fix |
 |---|---|
@@ -259,6 +259,7 @@ changed**, and a reason that no longer holds is how a design rots.
 | `DESIGN.md:20` | "messaging is contingent on a spike that has not been run" → spike 01 has run; `Task` note updated |
 | README counts | 16 ADRs (15 Accepted + 1 Proposed), 10 spec docs, **124** gate assertions across 4 spikes, 48 invariant rows. Counted, not estimated |
 | `DESIGN.md:254` adapter shape | Five-method Python class replaced with the `spec/07` **two-RPC** gRPC service, scoped to `sdk_in_process` |
+| `spec/00-overview.md:31` said `09-decisions.md` holds "Six open design questions" | It holds **seven** — the multi-party approval refusal was added as §7 in the same pass that wrote the row, and the index was not updated with it |
 
 ### What did NOT change, and why that matters
 
@@ -281,7 +282,81 @@ Two things in §1–§6 are now stale and are marked at their source rather than
 §2's "**No `Task` in v0.1**" is reversed above, and §4's "`ag2.network` CONTINGENT" was
 resolved by spike 01. Both carry dated notes in place.
 
-### `make check` — verbatim, 2026-08-27
+### 7a. Redo after verification (2026-08-27)
+
+The verifier returned **FAIL** on `59da08b` with seven ordered items. The headline finding is
+the one that matters most: **`tools/validate_spec.py` reported "superseded claims ok" while
+five documents still stated the reversed decisions**, because it scanned `spec/*.md` only.
+A gate that passes on the thing it exists to catch is worse than no gate, since it converts
+"unchecked" into "checked".
+
+#### A decision missing from the original pass: unmediated tools
+
+`spec/07` contradicted itself — it required every tool call to cross the ledger *and* offered
+`tools.platform_executed = false` as an escape. Neither half could simply be deleted, because
+**vendor-hosted tools (web search, code execution, file search, computer use) execute on the
+vendor's side and cannot be intercepted at all.** Forbidding them would have made the rule
+unimplementable; ignoring the gap would have made the guarantee false. Permitted narrowly:
+
+| Condition | Mechanism |
+|---|---|
+| a **declared adapter capability**, never a per-call choice | lives in `declared_capabilities`, so it is inside `adapter_contracts.digest`; changing the answer fails the pin |
+| **denied by default**, enabled per tenant by a Cedar `permit` naming the tool | every use still emits `policy.evaluated` |
+| **visible**: an `effect_ledger` row, `kind='unmediated'`, status **`observed`** | no claim, no settle — the platform *saw* it, did not *own* it |
+| `observed` carries no claim fields | `CHECK effect_claim_fields_together` |
+| `observed` ⇔ `kind='unmediated'` | `CHECK observed_iff_unmediated`, so `status <> 'observed'` is a reliable at-most-once filter |
+| **never in a pack containing a mutation** | API returns `422 unmediated_tools_with_mutations` |
+
+The third condition carries the reasoning: an unintercepted *observation* costs visibility
+into a read; an unintercepted *mutation* costs the entire ledger guarantee. Verified against
+real Postgres — **spike 03 scenario 9, 6 assertions**, including that an unmediated effect
+cannot be claimed and cannot reach `succeeded`.
+
+#### The seven items
+
+| # | Verifier item | Before | After |
+|---|---|---|---|
+| 1 | ACP / foreign-agent path still live | `DESIGN.md:215` journey ran `--adapter acp --agent claude-code`; `DESIGN.md:278` "Four methods (AX)"; `spec/06-api.md:161` registered `acp:claude-code` / `acp_subprocess`; `reference-architecture.md:184` argued terminal-scraping is "how you bring an agent with no integration surface under one policy layer"; `:47` diagram had a Codex box | Journey is `phoenix run --agent revenue-analyst --bundle sonyliv-analytics`; "**Two RPCs**; AX's four-method contract is the upstream precedent, not our shape"; example registers `sdk:claude-agent-sdk` / `sdk_in_process`; both `reference-architecture.md` sites carry dated amendments; `spec/07:4` header also said "Four methods" and now says two RPCs |
+| 2 | `spec/07` contradicts itself | "the cost is accepted deliberately: an adapter cannot bring its own tools" *and* an escape hatch | Paragraph deleted with a dated note; replaced by the three-condition rule above, stated **once**. `spec/08` rows **30e/30f/30g** added |
+| 3 | "`Task` is deferred" still active | `v01-boundary.md:13` "**`Task` is not in v0.1**", `:166` "We defer … and `Task`"; `spec/00-overview.md:17` and `:106` "Deferred" | All four amended with dated notes pointing at §2's reversal. Repo-wide grep for `Task.*defer` / `defer.*Task` now returns only dated amendments and this change log |
+| 4 | DESIGN §6 vs Never #4 | `DESIGN.md:327` "We adapt agents. Cloudflare's alternative … at the cost of never running someone else's" | Softened boundary text from `v01-boundary.md:87`, dated, with the one-sentence reason: the Cloudflare cost was losing the ability to run others' agents, and we no longer need to |
+| 5 | 124 assertions unexplained | README said 124 | **109** = 12 + 35 + 35 + 27 at the time of the verifier run; now **115**, because scenario 9 added 6 assertions to spike 03 in this same pass. Taken from each spike's own `RESULT.md`, with the counting rule stated next to the number: **vendored upstream suites do not carry the verdict** (`VERIFICATION-RULES.md` rule 6). The 124 came from spike 02's pytest total rather than its `RESULT.md` figure |
+| 6 | (same as 1) | — | Confirmed: no "Four methods" and no ACP journey remains in `DESIGN.md` |
+| 7 | Counts | `spec/00-overview.md:31` "Six open design questions"; `scope-reconciliation.md:248` "ten defects" | "**Seven**"; "**eleven**", the eleventh being the `09-decisions.md` index itself — §7 was added in the same pass that wrote the row and the count was not updated with it |
+
+#### The tooling gap, closed
+
+| Before | After |
+|---|---|
+| pattern list hard-coded in `validate_spec.py` | `tools/superseded-patterns.txt`, one regex per line with its date and reason |
+| scanned `spec/*.md` only | `spec/`, `synthesis/`, `decisions/`, `DESIGN.md`, `README.md` |
+| a hit was a hit | forgiven only near an amendment marker (`superseded\|amended\|(YYYY-MM-DD)`), in a `scope-reconciliation.md` table row, in an ADR **evidence-log** row, or inside a SQL string literal |
+| no test of its own | `tools/test_validate_spec.py`, **7 controls**, wired as `make gate-tests` |
+
+Three exclusions are scope decisions rather than loopholes, and are documented in the pattern
+file: **evidence about another project** (`projects/`, ADR evidence rows — "OpenHands launches
+Claude Code" is true about OpenHands forever), **probe and matrix text** (`capability-matrix.md`
+names foreign agents because the probe asks about them), and **retained enum values**
+(the reserved modes stay in the `CHECK` so the column never needs a migration; superseded
+2026-08-27 as shippable paths). What the gate
+polices is a claim in **our** voice about what **we** ship.
+
+#### Two defects found in this pass, by its own controls
+
+- **The negative-control test measured nothing.** Its first version asserted on the
+  validator's exit code, but a copied tree legitimately fails unrelated checks (no node, no
+  Postgres, no spike venv), so every control "passed" for the wrong reason. Control 0 — *the
+  baseline copy must pass* — caught it. The controls now read the superseded result
+  specifically.
+- **The validator crashed instead of reporting.** `check_postgres_gate()` hard-coded
+  `.venv/bin/python`, so running against a copied tree raised `FileNotFoundError` and produced
+  **no output at all** rather than one `UNVERIFIED` line. Now falls back to
+  `sys.executable`.
+
+Both are the same class as the two defects spike 04 found in itself, and the reason each pass
+now writes the control before trusting the green.
+
+### `make check` — verbatim, 2026-08-27 (redo)
 
 ```
 $ make spec
@@ -299,6 +374,21 @@ spec validation
   foreign-key targets        ok
 
 spec/ valid (all checks executed).
+```
+
+```
+$ make gate-tests
+negative controls for the superseded-claims gate
+  ok   baseline copy passes the superseded gate  [0 unexpected: []]
+  ok   injecting 'ACP adapter' into DESIGN.md FAILS the gate
+  ok   ...and the failure names DESIGN.md  [['DESIGN.md:434 states a claim superseded on 2026-08-27 (replaced by the Claude SDK adapter, then the OpenAI SDK adapter)']]
+  ok   a claim in synthesis/ is caught (the old gate scanned spec/ only)  [['v01-boundary.md:191 states a claim superseded on 2026-08-27 (we do not adapt third-party agents)']]
+  ok   a dated amendment quoting the old wording is NOT flagged  [[]]
+  ok   an empty pattern file does NOT silently pass
+  ok   a revived 'Task is deferred' claim is caught  [['00-overview.md:120 states a claim superseded on 2026-08-27 (Task/routines moved to Tier 2; the deferral trigger is met)']]
+
+7 passed, 0 failed
+PASS — the gate fails on every injected defect and forgives amendments.
 ```
 
 ```
