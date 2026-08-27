@@ -30,6 +30,7 @@ matrix:
 	@cd tools && ../$(PY) build_matrix.py
 
 check:
+	@$(PY) tools/test_validate_spec.py
 	@cd tools && ../$(PY) validate_facts.py --strict && ../$(PY) validate_spec.py && ../$(PY) build_matrix.py && ../$(PY) check_exit_criteria.py
 
 probes:

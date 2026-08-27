@@ -596,8 +596,11 @@ paths:
                 identity:              { type: string }
                 protocol_version:      { type: string }
                 integration_mode:
+                  # Amended 2026-08-27: only sdk_in_process is shipped; the rest are
+                  # retained so the column never needs a migration (spec/01-schema.md
+                  # enforces the restriction with a separate CHECK).
                   type: string
-                  enum: [sdk_in_process, cli_subprocess, acp_subprocess, native_tui, native_server]
+                  enum: [sdk_in_process]
                 payload_schema_digest: { type: string }
                 declared_capabilities: { type: object, additionalProperties: true }
       responses:

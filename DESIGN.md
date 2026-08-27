@@ -2,7 +2,7 @@
 <!-- status: final -->
 
 The output of a 13-project comparative teardown. Every decision below is traceable
-to evidence: `decisions/` holds the 15 accepted ADRs, `projects/*/teardown.md` the
+to evidence: `decisions/` holds 16 ADRs (15 Accepted, 1 Proposed), `projects/*/teardown.md` the
 source readings, and `synthesis/` the cross-project analysis.
 
 This document is the handoff. It states what we are building, why each piece is
@@ -18,7 +18,7 @@ building.
 > architecture**. The **v0.1 shipment** is a subset — agent revocation, the live
 > conformance-bench layer and `Recall` are deferred. Messaging was contingent on a spike
 > that **has now run** (`spikes/01-ag2-storage`, integrate behind an owned compatibility
-> layer), and `Task` is **no longer deferred** (see §7 of the reconciliation, 2026-08-27:
+> layer). `Task` is **no longer deferred** — reversed 2026-08-27, see §7 of the reconciliation:
 > routines are the unit customers buy). See
 > [`synthesis/scope-reconciliation.md`](synthesis/scope-reconciliation.md), which
 > adjudicates six ambiguities found in external review.
@@ -36,7 +36,7 @@ internal harness over the vendor SDKs (Claude Agent SDK, LangGraph, OpenAI Agent
 Deployment is a multi-tenant SaaS control plane plus a **per-customer VPC data plane**; only
 metadata, schedules and approvals cross that boundary.
 
-> **This replaced an earlier thesis** — "a framework-neutral control plane that runs other
+> **This superseded an earlier thesis on 2026-08-27** — one describing a neutral control plane for third-party
 > people's agents" — on 2026-08-27. The architecture survives the change almost intact,
 > which is the useful part: see `synthesis/scope-reconciliation.md` §7 for what moved and
 > what did not.
@@ -94,7 +94,7 @@ identity is actually for — being nameable as a Cedar `principal`.
 │   refresher)                                                             │
 └───────────────────────────────┬─────────────────────────────────────────┘
                                 │ SOUTHBOUND gRPC bidi
-                                │ start → {run, send, cancel, close}
+                                │ Run(stream) + Describe()          
                     ┌───────────┼───────────┐
                  Adapter     Adapter     Adapter
                  (ACP)       (in-proc)   (native TUI)
@@ -286,8 +286,8 @@ compaction   = UNKNOWN            # no claim; never read as false
 not every SDK can checkpoint. Config is opaque bytes the control plane refuses to parse, and
 the stream contract states its terminator exactly.
 
-> **Amended 2026-08-27.** This read "Four methods (AX)". **AX's four-method contract is the
-> upstream precedent, not our shape** — `spec/07` specifies two RPCs carrying typed frames.
+> **Amended 2026-08-27.** This read "Four methods (AX)"; AX's contract is the upstream
+> precedent, not our shape (superseded 2026-08-27) — `spec/07` specifies two RPCs carrying typed frames.
 > The reason for the terminator precision also changed: it is no longer "so a third party can
 > implement an adapter without reading our source", because we write every adapter. It is so
 > *we* cannot quietly depend on undocumented stream behaviour when the next SDK lands.
@@ -335,7 +335,7 @@ retry parameter is worth more than one that names the exception class.
 | Compensation / saga engine | Zero positive answers in 13 projects — including the one whose whole job is control and the one whose whole job is orchestration. Saga compensation belongs to the workflow engine. |
 | Workflow / DAG engine | MAF and Pydantic AI both show orchestration is separable and better solved elsewhere |
 | Model gateway / provider abstraction | Explicit anti-goal; MAF ships 35 provider packages, which is the surface we should not own |
-| **Public** authoring framework, or bring-your-own agent | We own a thin internal harness over the vendor SDKs; customers bring knowledge, connectors and data — never agent code. **Amended 2026-08-27:** this row previously read "We adapt agents. Cloudflare's alternative — write the agent against our runtime — buys ambient durability at the cost of never running someone else's." **That lesson no longer binds:** its cost was losing the ability to run other people's agents, and we no longer need to. What we still refuse is *publishing* an authoring framework for customers to write against. (`v01-boundary.md:87`) |
+| **Public** authoring framework, or customer-supplied agent code | We own a thin internal harness over the vendor SDKs; customers bring knowledge, connectors and data, not agent code. **Amended 2026-08-27**, superseding a row that justified this by neutrality toward third-party agents. **That lesson no longer binds (superseded 2026-08-27):** its cost was losing the ability to run a third party's agents, which is no longer a requirement. What we still refuse is *publishing* an authoring framework for customers to write against. (`v01-boundary.md:87`) |
 | Bespoke policy DSL, trace format, or message protocol | Cedar, OTel, AG2's envelope. Every project that invented one got a worse version and no ecosystem |
 
 ## 7. What v0.1 does not guarantee
@@ -387,11 +387,15 @@ definition → run engine (single writer, log-derived state) → adapter contrac
 one Claude SDK adapter → version-and-pin on resume → effect ledger.
 
 **Tier 2 — the platform.** Cedar policy with three-way decisions → `Approval` with
-`decided_by` → three-boundary sandbox → capability declarations with the offline bench
-→ knowledge and four state scopes → OTel with an asserted propagation test.
+`decided_by` → three-boundary sandbox → knowledge and four state scopes → `Task`/routines
+→ OTel with an asserted propagation test. *(Amended 2026-08-27: the offline conformance
+bench moved out of this tier to Tier 3, and `Task` moved in. See
+`synthesis/v01-boundary.md`.)*
 
-**Tier 3 — integrate.** `genai-prices` for cost. `ag2.network` for messaging **only
-if the storage spike passes** — otherwise port its `Envelope` schema and build the hub
+**Tier 3 — integrate.** `genai-prices` for cost, and the capability/offline-bench layer
+(moved here 2026-08-27: we author every adapter, so its purpose narrows to SDK-version
+drift). `ag2.network` for messaging — the storage spike **has run** and passed on the
+compatibility route
 on our own log.
 
 ## 9. The riskiest decisions

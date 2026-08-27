@@ -1,49 +1,68 @@
-# Superseded claims. One regex per line: REGEX <TAB> DATE <TAB> REASON
+# Superseded claims. One entry per line, TAB-separated:
+#     REGEX <TAB> DATE <TAB> REASON
 #
-# A hit FAILS the build unless the matching line also contains an amendment
-# marker (superseded | amended | a (YYYY-MM-DD) date) or sits in a table row of
-# scope-reconciliation.md, which is the change log and must quote what changed.
+# Matching is CASE-INSENSITIVE and applied PER SENTENCE (split on ". ", newline,
+# and "|"), not per line. Both were faults in the previous version: it missed
+# "Our adapter exposes four methods." because the pattern was `Four methods`, and
+# it missed "We adapt agents supplied by customers." because the pattern was
+# `adapt.*someone else`.
 #
-# This file exists because the previous hard-coded list scanned only spec/*.md
-# and passed while five other files contradicted the 2026-08-27 repositioning.
+# A sentence is exempt ONLY if it carries a dated marker (20\d\d-\d\d-\d\d) AND one
+# of superseded|amended|reversed|retracted, or it lives in
+# synthesis/scope-reconciliation.md (the change log) or a projects/ teardown
+# (evidence about another system is not a claim about ours).
 #
-# THREE THINGS ARE NOT DRIFT, and the tool must not flag them:
-#
-#   1. Evidence about ANOTHER project. `projects/*/teardown.md` and the ADR evidence
-#      logs record what LangGraph or OpenHands does; "OpenHands launches Claude Code"
-#      is a true statement about OpenHands and always will be. Excluded by directory
-#      (projects/) and by the evidence-table shape (a `| ... |` row).
-#   2. Probe and matrix text. `capability-matrix.md` and `recon.md` name foreign agents
-#      because the PROBE asks about them. Excluded by file.
-#   3. Retained enum values. `acp_subprocess` and `native_tui` stay in the CHECK
-#      constraint so the column never needs a migration; the restriction is a separate
-#      constraint. Excluded when the line is inside a SQL string literal.
-#
-# What IS drift: a statement in OUR voice about what WE build or ship.
+# QUOTING IS NOT AN EXEMPTION. "This once said X" must also carry the dated marker.
 
 # --- SaaS repositioning: we build and operate the agents (2026-08-27) ---
-Claude Code	2026-08-27	we build the agents; the first adapter is the Claude Agent SDK, not Claude Code
-Codex	2026-08-27	no foreign-agent path; there is no Codex adapter
+claude code	2026-08-27	the first adapter is the Claude Agent SDK, not Claude Code
+\bcodex\b	2026-08-27	no foreign-agent path; there is no Codex adapter
 acp_subprocess	2026-08-27	reserved in the enum, not shipped; sdk_in_process only
-ACP adapter	2026-08-27	replaced by the Claude SDK adapter, then the OpenAI SDK adapter
+acp adapter	2026-08-27	replaced by the Claude SDK adapter, then the OpenAI SDK adapter
+adapter \(acp\)	2026-08-27	no ACP adapter ships
+# Bare ACP as a SHIPPED path. Anchored so it does not flag ADR-0006 discussing ACP
+# as a protocol, or a teardown noting that another project speaks it.
+# "ACP ... ships/first/day one" only. NOT `acp sitting behind an adapter`, which is
+# ADR-0006's still-correct statement that ACP is a protocol we may speak, not a
+# transport we adopt.
+\bacp\b[^.]{0,30}\b(ships?|ship first|day one)\b	2026-08-27	ACP is not a shipped path; sdk_in_process only
+\b(the )?acp path\b	2026-08-27	there is no ACP path in v0.1
 native_tui	2026-08-27	reserved in the enum, not shipped
-bring.your.own	2026-08-27	customers bring knowledge, connectors and data, never agent code
-adapt.*someone else	2026-08-27	we do not adapt third-party agents
-framework-neutral	2026-08-27	the thesis is a SaaS platform where we build and operate the agents
-other people's agents	2026-08-27	running others' agents is no longer a requirement
-Task.{0,40}defer	2026-08-27	Task/routines moved to Tier 2; the deferral trigger is met
-defer.{0,40}Task	2026-08-27	Task/routines moved to Tier 2; the deferral trigger is met
-cost is accepted deliberately	2026-08-27	replaced by the narrow unmediated-tools permission in spec/07
-Four methods	2026-08-27	two RPCs; AX's four-method contract is upstream precedent, not our shape
+bring[- ]your[- ]own	2026-08-27	customers bring knowledge, connectors and data, never agent code
+adapt(s|ing|ed)?\b.{0,60}\bagents?\b	2026-08-27	we build and operate the agents; we do not adapt anyone's
+someone else'?s agents?	2026-08-27	running others' agents is no longer a requirement
+other people'?s agents?	2026-08-27	running others' agents is no longer a requirement
+framework[- ]neutral	2026-08-27	the thesis is a SaaS platform where we build and operate the agents
+four[- ]methods?	2026-08-27	two RPCs; AX's four-method contract is upstream precedent, not our shape
+start → \{run, send, cancel, close\}	2026-08-27	the adapter surface is Run and Describe
+\btask\b.{0,40}\bdefer	2026-08-27	Task/routines moved to Tier 2; the deferral trigger is met
+\bdefer.{0,40}\btask\b	2026-08-27	Task/routines moved to Tier 2; the deferral trigger is met
 
-# --- earlier reversals, previously hard-coded in validate_spec.py ---
-sorted by \*\*UTF-16 code unit\*\*	2026-08-26	UTF-16 ordering replaced by UTF-8 byte order
-nfc\+jcs	2026-08-26	profile renamed nfc+intjson; it is not JCS
-they get\s*\n?`INCOMPATIBLE`	2026-08-27	repointing an agent no longer blocks in-flight runs
-ApprovalRequest\s+approval_request\s*=	2026-08-27	the frame was removed; the platform decides on approval
-The worker delivers `ToolResult\{ok:false	2026-08-27	denial is delivered as ToolDenied
-claimed, by unique-index\s*\n?\s*insert	2026-08-27	the claim is a conditional UPDATE; only intent is an insert
-CREATE TABLE effect_claim_history	2026-08-27	effect rows are never reclaimed; monotonic claim tokens are meaningless
-answer its own approvals	2026-08-27	a principal may never decide an approval gating its own effect
+# --- unmediated tools RETRACTED (2026-08-27, redo 2) ---
+cost is accepted	2026-08-27	the paragraph was retracted, not refined
+platform_executed\s*=\s*false	2026-08-27	unmediated tools are UNSUPPORTED in v0.1; spike 06 decides
+unmediated	2026-08-27	retracted: the platform cannot keep an `observed` guarantee across a vendor boundary
+
+# --- effect lifecycle wording ---
+# `pending` is CORRECT for approvals (approvals.status has it) and WRONG for the
+# effect ledger (where the status is `claimed`). Anchored to the ledger senses only:
+# a pending row that is described as an effect, or as expiring against a lease.
+\bpending\b (ledger )?row.{0,40}(lease|effect|indeterminate)	2026-08-27	the ledger status is `claimed`; `pending` belongs to approvals
+effect leaves a `?pending`? row	2026-08-27	the ledger status is `claimed`
+two pending rows for one effect	2026-08-27	the ledger status is `claimed`
 one gets a unique violation and rolls back	2026-08-27	spike 03: the loser BLOCKS, then raises 23505 after the winner commits
+answer its own approvals	2026-08-27	a principal may never decide an approval gating its own effect
+
+# --- counts that drifted ---
+all 15 adrs are accepted	2026-08-27	16 ADRs: 15 Accepted, 1 Proposed
+# `15 accepted` alone over-matches the CORRECT phrasing "16 ADRs (15 Accepted, 1
+# Proposed)", so it is anchored to the claim that 15 is the TOTAL.
+(the |holds the |all )15 accepted adrs	2026-08-27	16 ADRs: 15 Accepted, 1 Proposed
+\b15 adrs\b	2026-08-27	there are 16 ADRs: 15 Accepted, 1 Proposed
+
+# --- earlier reversals ---
+sorted by \*\*utf-16 code unit\*\*	2026-08-26	UTF-16 ordering replaced by UTF-8 byte order
+nfc\+jcs	2026-08-26	profile renamed nfc+intjson; it is not JCS
+approvalrequest\s+approval_request\s*=	2026-08-27	the frame was removed; the platform decides on approval
+create table effect_claim_history	2026-08-27	effect rows are never reclaimed; monotonic claim tokens are meaningless
 "trace_id":	2026-08-27	the log stores a full W3C traceparent, not a bare trace id

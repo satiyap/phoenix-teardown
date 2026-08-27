@@ -1,7 +1,7 @@
 # Reference architecture — v0.1
 <!-- status: final -->
 
-Derived from 13 teardowns, 15 accepted ADRs and the canonical domain model. Each
+Derived from 13 teardowns, 16 ADRs (15 Accepted, 1 Proposed) and the canonical domain model. Each
 component names the evidence that shaped it. Where a component exists because
 *nobody* does it, that is stated.
 
@@ -37,7 +37,7 @@ component names the evidence that shaped it. Where a component exists because
 │                                    └────────────┘                        │
 └────────────────────────────────┬──────────────────────────────────────────┘
                                  │  SOUTHBOUND (gRPC bidi stream)
-                                 │  start → {run, send, cancel, close}
+                                 │  Run(stream) + Describe()      
         ┌────────────────────────┼────────────────────────┐
         ▼                        ▼                        ▼
    ┌─────────┐            ┌─────────┐             ┌─────────┐
@@ -105,7 +105,7 @@ externally-triggered effects (Cloudflare) and **causation keys for reply-shaped
 work** (AG2 — the reply *is* the dedupe record, so no key needs generating). The
 guard is checked **before** any ownership or turn test.
 
-A `pending` row older than a lease threshold is `INDETERMINATE`, not retryable, and
+A `claimed` row older than a lease threshold is `INDETERMINATE`, not retryable, and
 must surface. That is the uncomfortable honest part: if we crashed after dispatching
 an effect but before recording its outcome, we do not know whether it happened, and
 retrying is the double-charge bug this exists to prevent.
@@ -167,8 +167,8 @@ delivery scope.
 Channel *protocols* (conversation, discussion, consulting, workflow) declare turn
 expectations the hub enforces, so "who speaks next" is not emergent from prompts.
 
-### Adapters — four methods, southbound gRPC
-`start → {run, send, cancel, close}`. Durability lives in the control plane, **not**
+### Adapters — two RPCs, southbound gRPC
+`Run(stream ControlFrame) returns (stream AdapterFrame)` and `Describe()`. *(Amended 2026-08-27: this read `start → {run, send, cancel, close}`; AX's four-method contract is the upstream precedent, not our shape.)* Durability lives in the control plane, **not**
 in the adapter: putting `checkpoint`/`restore` in the adapter interface guarantees a
 lowest-common-denominator problem, since not every harness can checkpoint (AX +
 ADR-0012).
@@ -180,13 +180,13 @@ implementable without reading our source.
 
 Transport is gRPC bidirectional streaming, so a remote adapter needs no
 co-location. The integration-mode taxonomy comes from Omnigent: `SDK_IN_PROCESS`,
-`CLI_SUBPROCESS`, `ACP_SUBPROCESS`, `NATIVE_TUI`, `NATIVE_SERVER`.
+`CLI_SUBPROCESS`, `ACP_SUBPROCESS`, `NATIVE_TUI`, `NATIVE_SERVER` — of which only `SDK_IN_PROCESS` ships (amended 2026-08-27; the rest are retained so the column never needs a migration).
 
 > **Amended 2026-08-27.** Only **`SDK_IN_PROCESS` is shipped** — the enum is retained so the
 > column never needs a migration, with a `CHECK` enforcing the restriction
 > (`spec/01-schema.md`). The sentence removed here argued that scraping a terminal UI is "how
 > you bring an agent with no integration surface under one policy layer"; that was a
-> justification for adapting *foreign* agents, and we build every agent ourselves. ACP is no
+> justification for a foreign-agent path (superseded 2026-08-27), and we build every agent ourselves. ACP is no
 > longer a shipped path at all. See `synthesis/scope-reconciliation.md` §7.
 
 ### Conformance Bench
@@ -223,7 +223,7 @@ OTel packages and its own audit found dead propagation code.
 | Durable workflow, sagas, **compensation** | Zero positive answers in 13 projects; saga compensation is the workflow engine's job | `L8` 12/13 negative + 1 unknown; Pydantic AI's Temporal/DBOS/Prefect integration |
 | Graph/DAG orchestration | Separable and better solved elsewhere | MAF's Pregel engine; Pydantic AI's delegation |
 | Model gateway / provider abstraction | Explicit anti-goal; commodity | PLAN.md |
-| **Public** authoring framework / bring-your-own agent | Thin internal harness over the vendor SDKs; customers bring knowledge, connectors and data. **Amended 2026-08-27** — the Cloudflare objection (ambient durability costs you the ability to run others' agents) no longer binds, because running others' agents is no longer a requirement | ADR-0004 (amended); `scope-reconciliation.md` §7 |
+| **Public** authoring framework, or customer-supplied agent code (amended 2026-08-27) | Thin internal harness over the vendor SDKs; customers bring knowledge, connectors and data. **Amended 2026-08-27** — the Cloudflare objection (ambient durability costs you the ability to run others' agents) no longer binds, because running others' agents is no longer a requirement | ADR-0004 (amended); `scope-reconciliation.md` §7 |
 
 ## The four things nobody does
 

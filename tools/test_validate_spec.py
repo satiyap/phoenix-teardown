@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
-"""Negative controls for validate_spec.py itself.
+"""Self-test for the superseded-claims gate.
 
-The superseded-claims gate passed on commit 59da08b while five documents
-contradicted the change it was supposed to police. A gate with no test of its own
-is a gate nobody has checked, so each control below injects a defect into a TEMP
-COPY of the repo and asserts the tool fails and names the file.
+The gate passed on commit 793828b with "We adapt agents supplied by customers."
+and "Our adapter exposes four methods." sitting in scratch copies. Three faults:
+case-sensitive matching, per-LINE application with a 3-line forgiveness window,
+and quoting treated as an exemption.
 
-Run: ../.venv/bin/python tools/test_validate_spec.py
+Each mutation below is injected into a temp copy and must FAIL the gate, naming
+both the file and the offending sentence. Baseline must pass.
+
+Run: make gate-tests
 """
 from __future__ import annotations
 
+import glob
+import re
 import shutil
 import subprocess
 import sys
@@ -21,101 +26,139 @@ PASS, FAIL = [], []
 
 
 def check(label: str, cond: bool, detail: str = "") -> None:
-    (PASS if cond else FAIL).append(label)
-    print(f"  {'ok  ' if cond else 'FAIL'} {label}" + (f"  [{detail}]" if detail else ""))
+    """Print the detail ONLY on failure.
 
-
-def run_in(tmp: Path) -> tuple[bool, list[str]]:
-    """Run the validator against a copied tree and isolate the superseded check.
-
-    A partial copy legitimately fails unrelated checks (no node, no Postgres, no
-    spike venv), so the controls must read the SUPERSEDED result specifically
-    rather than the process exit code. The first version of this test asserted on
-    the whole run and therefore measured nothing -- caught by its own control 0.
+    An earlier version printed it always, so a passing line read
+    "ok  <label>  [caught but sentence not quoted]" -- the diagnostic for the
+    failure case, displayed next to a pass. Misleading output in a green run is
+    the same defect class as a green run that means nothing.
     """
-    res = subprocess.run([sys.executable, str(tmp / "tools" / "validate_spec.py")],
-                         capture_output=True, text=True, cwd=str(tmp),
-                         env={"PATH": "/usr/bin:/bin", "SPEC_ALLOW_UNVERIFIED": "1"})
-    out = res.stdout + res.stderr
-    hits = [ln.strip()[2:].strip() for ln in out.splitlines()
-            if ln.strip().startswith("x ") and "superseded on" in ln]
-    ok = any("superseded claims" in ln and " ok" in ln for ln in out.splitlines())
-    return ok, hits
+    (PASS if cond else FAIL).append(label)
+    suffix = f"  [{detail}]" if (detail and not cond) else ""
+    print(f"  {'ok  ' if cond else 'FAIL'} {label}{suffix}")
 
 
 def copy_repo(tmp: Path) -> Path:
     dst = tmp / "repo"
     dst.mkdir()
     for d in ("spec", "synthesis", "decisions", "tools", "spikes"):
-        shutil.copytree(ROOT / d, dst / d,
-                        ignore=shutil.ignore_patterns(".venv", "__pycache__", "*.pyc"))
-    for f in ("DESIGN.md", "README.md"):
-        shutil.copy2(ROOT / f, dst / f)
+        src = ROOT / d
+        if src.is_dir():
+            shutil.copytree(src, dst / d,
+                            ignore=shutil.ignore_patterns(".venv", "__pycache__", "*.pyc"))
+    for f in ("DESIGN.md", "README.md", "open-questions.md"):
+        if (ROOT / f).exists():
+            shutil.copy2(ROOT / f, dst / f)
     return dst
 
 
+def run_gate(tree: Path) -> tuple[bool, list[str]]:
+    """Isolate the superseded result: a partial copy legitimately fails other checks."""
+    res = subprocess.run([sys.executable, str(tree / "tools" / "validate_spec.py")],
+                         capture_output=True, text=True, cwd=str(tree),
+                         env={"PATH": "/usr/bin:/bin", "SPEC_ALLOW_UNVERIFIED": "1"})
+    out = res.stdout + res.stderr
+    hits, keep = [], False
+    for ln in out.splitlines():
+        s = ln.strip()
+        if s.startswith("x ") and "superseded" in s:
+            hits.append(s[2:].strip())
+            keep = True
+        elif keep and s.startswith("-> "):
+            hits[-1] += " " + s
+        else:
+            keep = False
+    ok = any("superseded claims" in ln and " ok" in ln for ln in out.splitlines())
+    return ok, hits
+
+
+# (label, relative path or glob, sentence to inject)
+MUTATIONS = [
+    ("'We adapt agents supplied by customers.' in DESIGN.md",
+     "DESIGN.md", "We adapt agents supplied by customers."),
+    ("'Our adapter exposes four methods.' in reference-architecture.md",
+     "synthesis/reference-architecture.md", "Our adapter exposes four methods."),
+    # Injected into the DECISION section, not the evidence log: everything after
+    # "## Evidence log" is a finding about another project and is exempt by design.
+    # Appending at end-of-file would land inside that exemption and test nothing.
+    ("'The ACP path ships first.' in ADR-0014 (decision section)",
+     "decisions/ADR-0014-*.md", "The ACP path ships first."),
+    ("'a pending row past its lease' in exit-criteria.md",
+     "synthesis/exit-criteria.md", "Consider a pending row past its lease."),
+]
+
+
 def main() -> int:
-    print("negative controls for the superseded-claims gate")
+    print("self-test: superseded-claims gate")
     with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
-        base = copy_repo(tmp)
+        base = copy_repo(Path(td))
 
-        # control 0: the unmodified copy must PASS, or every result below is noise
-        ok, hits = run_in(base)
-        check("baseline copy passes the superseded gate", ok and not hits,
-              f"{len(hits)} unexpected: {hits[:2]}")
+        ok, hits = run_gate(base)
+        check("baseline copy passes", ok and not hits,
+              f"{len(hits)} unexpected: {hits[:1]}")
+        if hits:
+            print("      (baseline must be clean before any mutation means anything)")
 
-        # control 1: the one the verifier asked for -- ACP adapter in DESIGN.md
+        for label, rel, sentence in MUTATIONS:
+            matches = glob.glob(str(base / rel))
+            if not matches:
+                check(label, False, f"target {rel} not found")
+                continue
+            target = Path(matches[0])
+            original = target.read_text()
+            if "## Evidence log" in original:
+                head, sep, tail = original.partition("## Evidence log")
+                target.write_text(head + "\n" + sentence + "\n\n" + sep + tail)
+            else:
+                target.write_text(original + "\n\n" + sentence + "\n")
+            ok, hits = run_gate(base)
+            named = [h for h in hits if h.startswith(target.name + ":")]
+            quoted = [h for h in named if sentence.rstrip(".") in h]
+            check(label, bool(named) and bool(quoted),
+                  "not caught" if not named else "caught but sentence not quoted")
+            target.write_text(original)
+
+        # a dated retraction IS exempt; a bare quote is NOT
         p = base / "DESIGN.md"
         original = p.read_text()
-        p.write_text(original + "\n\nWe ship an ACP adapter for third-party agents.\n")
-        ok, hits = run_in(base)
-        check("injecting 'ACP adapter' into DESIGN.md FAILS the gate",
-              not ok and bool(hits))
-        check("...and the failure names DESIGN.md",
-              any(h.startswith("DESIGN.md:") for h in hits), str(hits[:2]))
+        p.write_text(original + "\n\nRetracted 2026-08-27: we no longer adapt agents "
+                                "supplied by customers.\n")
+        ok, hits = run_gate(base)
+        check("a dated retraction in the same sentence is exempt", ok and not hits,
+              str(hits[:1]))
+        p.write_text(original + "\n\nThis document once said we adapt agents "
+                                "supplied by customers.\n")
+        ok, hits = run_gate(base)
+        check("quoting WITHOUT a date is NOT exempt", bool(hits))
         p.write_text(original)
 
-        # control 2: a file the OLD gate never scanned
-        p = base / "synthesis" / "v01-boundary.md"
+        # the inventory-count check needs a control too (step 4)
+        p = base / "README.md"
         original = p.read_text()
-        p.write_text(original + "\n\nWe adapt agents written by someone else.\n")
-        ok, hits = run_in(base)
-        check("a claim in synthesis/ is caught (the old gate scanned spec/ only)",
-              any(h.startswith("v01-boundary.md:") for h in hits), str(hits[:2]))
+        p.write_text(re.sub(r"\d+ required invariant tests",
+                            "999 required invariant tests", original))
+        res = subprocess.run([sys.executable, str(base / "tools" / "validate_spec.py")],
+                             capture_output=True, text=True, cwd=str(base),
+                             env={"PATH": "/usr/bin:/bin", "SPEC_ALLOW_UNVERIFIED": "1"})
+        out = res.stdout + res.stderr
+        check("a wrong invariant count in README fails the count check",
+              "invariant" in out and "999" in out, "count check did not fire")
         p.write_text(original)
 
-        # control 3: an amendment marker nearby must still be FORGIVEN
-        p.write_text(original + "\n\nAmended 2026-08-27: this once said we adapt\n"
-                                "someone else's agents; it no longer does.\n")
-        ok, hits = run_in(base)
-        check("a dated amendment quoting the old wording is NOT flagged",
-              ok and not hits, str(hits[:2]))
-        p.write_text(original)
-
-        # control 4: an empty pattern file must FAIL, not silently pass
+        # empty pattern file must not silently pass
         pf = base / "tools" / "superseded-patterns.txt"
         saved = pf.read_text()
-        pf.write_text("# all patterns removed\n")
-        ok, hits = run_in(base)
-        check("an empty pattern file does NOT silently pass", not ok)
+        pf.write_text("# emptied\n")
+        ok, _ = run_gate(base)
+        check("an empty pattern file does not silently pass", not ok)
         pf.write_text(saved)
-
-        # control 5: a Task-deferral claim, the item 3 regression
-        p2 = base / "spec" / "00-overview.md"
-        orig2 = p2.read_text()
-        p2.write_text(orig2 + "\n\nThe Task resource is deferred past v0.1.\n")
-        ok, hits = run_in(base)
-        check("a revived 'Task is deferred' claim is caught",
-              any(h.startswith("00-overview.md:") for h in hits), str(hits[:2]))
-        p2.write_text(orig2)
 
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:
         for f in FAIL:
             print(f"  FAILED: {f}")
         return 1
-    print("PASS — the gate fails on every injected defect and forgives amendments.")
+    print("PASS — every mutation is caught and named; amendments are forgiven only when dated.")
     return 0
 
 

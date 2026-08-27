@@ -122,10 +122,8 @@ Every invariant in this spec, with its negative control. Consolidated from §01�
 | 21 | Exactly one `End` frame | accept two ⇒ two terminal states |
 | 29a | A principal cannot decide an approval gating **its own** run's effect | let the requester decide ⇒ self-approval, and the approval records a human who never chose |
 | 30a | An in-process SDK adapter's tool call produces an `effect_ledger` row | let the SDK's native executor run the tool ⇒ **no ledger row**, so the effect is unclaimed, unpoliced and unattested |
-| 30e | An unmediated tool's use produces an `effect_ledger` row with `kind='unmediated'`, `status='observed'`, plus a `policy.evaluated` event | skip the row ⇒ an **invisible effect**: the agent used a vendor-hosted tool and nothing in the log says so |
-| 30f | Binding an adapter with unmediated tools enabled to a pack containing any mutation is rejected `422 unmediated_tools_with_mutations` | drop the check ⇒ an **unpoliced mutation path**: a run holds both a mutation capability and an uninterceptable execution surface |
-| 30g | An `observed` row can never carry claim fields, and `observed` ⇔ `kind='unmediated'` | relax the biconditional ⇒ an unmediated effect reads as an at-most-once guarantee the platform never gave |
 | 30b | The SDK's native tool executor is disabled at adapter construction | leave it enabled ⇒ two execution paths, one ungoverned |
+| 30c | An adapter that cannot disable native execution for a tool **cannot register that tool** | allow registration ⇒ an effect path the ledger never sees. *Vendor-hosted tools are unsupported in v0.1 (retracted 2026-08-27); whether a provider-reported-use class is admissible is spike 06's decision.* **NOT VERIFIED — spike 06** |
 | 22 | Close without `End` **and an unsettled effect** ⇒ `indeterminate` | map to `failed` ⇒ false certainty |
 | 22a | Close without `End` and **no** unsettled effect ⇒ `failed`, `adapter_disconnected` | map to `indeterminate` ⇒ manufactured uncertainty, human time spent on a known outcome |
 | 23 | Unset capability reads `UNKNOWN` | treat as `FALSE` ⇒ silent degradation |

@@ -1,5 +1,8 @@
 # Spike 01 — AG2 storage swap
 
+**Gate assertions: 12** — the number `README.md` sums. Counts only tests that assert THIS spike's claims through its public boundary; vendored upstream suites are evidence, not our verdict (`VERIFICATION-RULES.md` rule 6).
+
+
 ## Verdicts — two, recorded separately
 
 | Route | Verdict |

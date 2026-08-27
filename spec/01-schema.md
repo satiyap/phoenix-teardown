@@ -135,7 +135,7 @@ CREATE TABLE adapter_contracts (
 
 `integration_mode` is Omnigent's taxonomy. Only `sdk_in_process` is shipped (amended
 2026-08-27); the rest are retained so the column never needs a migration. The original
-argument for `native_tui` — adapting an agent
+argument for `native_tui` — adapting a third-party agent (superseded 2026-08-27)
 that offers no API by driving its terminal.
 
 ---
@@ -328,8 +328,10 @@ CREATE TYPE effect_status AS ENUM
      'succeeded', 'failed',
      'denied',            -- an approver refused; never dispatched
      'abandoned',         -- intent superseded or run ended; never dispatched
-     'indeterminate',     -- claimed, lease expired unsettled: may have happened
-     'observed');         -- UNMEDIATED: we saw it, we did not own it. See below.
+     'indeterminate');    -- claimed, lease expired unsettled: may have happened
+-- (`observed` was added and RETRACTED on 2026-08-27: an unintercepted vendor-side
+--  tool cannot be guaranteed to report, so the status promised what the platform
+--  could not keep. Vendor-hosted tools are unsupported in v0.1; see spec/07.)
 
 CREATE TABLE effect_ledger (
     tenant_id      BIGINT NOT NULL,
@@ -363,25 +365,14 @@ CREATE TABLE effect_ledger (
 
     CHECK ((status IN ('succeeded','failed')) = (completed_at IS NOT NULL)),
 
-    -- an unclaimed row carries no lease; a dispatched row has an owner.
-    -- `observed` is deliberately grouped with the NEVER-CLAIMED statuses: an
-    -- unmediated effect executed on the vendor's side, so there is nothing to
-    -- claim, fence or settle, and a claim field on such a row would assert an
-    -- at-most-once guarantee the platform did not provide.
+    -- an unclaimed row carries no lease; a dispatched row has an owner
     CONSTRAINT effect_claim_fields_together CHECK (
-        (status IN ('intended','awaiting_approval','denied','abandoned','observed')
+        (status IN ('intended','awaiting_approval','denied','abandoned')
            AND claim_owner IS NULL AND claim_token IS NULL
            AND lease_expires_at IS NULL)
      OR (status IN ('claimed','succeeded','failed','indeterminate')
            AND claim_owner IS NOT NULL AND claim_token IS NOT NULL
            AND lease_expires_at IS NOT NULL)
-    ),
-
-    -- `observed` exists ONLY for unmediated effects, and `unmediated` effects can
-    -- reach no other status: they are never claimed, so they can never succeed,
-    -- fail or become indeterminate in the senses those words carry here.
-    CONSTRAINT observed_iff_unmediated CHECK (
-        (status = 'observed') = (kind = 'unmediated')
     )
 );
 
@@ -525,27 +516,11 @@ must be picked up), so fence tokens there must be monotonic and do need history.
 `effect_claim_fields_together` (in the DDL above) makes this structural: a row that has
 never been claimed cannot carry a lease, and a dispatched row cannot lack an owner.
 
-### Unmediated effects — `kind = 'unmediated'`, status `observed`
-
-A vendor-hosted tool (web search, code execution, file search, computer use) runs inside the
-model provider and cannot be intercepted. Such a tool is permitted **only** as a declared
-adapter capability, **denied by default**, and **never alongside a mutation** — the three
-conditions are stated once, normatively, in [`spec/07`](07-adapter-protocol.md)
-§"Unmediated tools".
-
-What the schema enforces:
-
-| Rule | Mechanism |
-|---|---|
-| `observed` carries no claim, token or lease | `effect_claim_fields_together` |
-| `observed` ⇔ `kind = 'unmediated'` | `observed_iff_unmediated` |
-| an unmediated effect never becomes `succeeded` | the same biconditional — it cannot leave `observed` |
-| the capability is part of the adapter digest | `declared_capabilities` participates in `adapter_contracts.digest` |
-
-The row exists so an unmediated effect is **visible and auditable**, not so it is trusted. A
-reader joining `effect_ledger` for at-most-once evidence must filter
-`status <> 'observed'`, and the biconditional is what makes that filter reliable rather than
-conventional.
+> **Retracted 2026-08-27 (redo 2).** A subsection here specified `kind = 'unmediated'` with
+> status `observed`, plus a matching CHECK (both retracted 2026-08-27). All of it is removed: the status
+> asserted that every vendor-side tool use would be recorded, which the platform cannot
+> guarantee across a boundary it does not control. Vendor-hosted tools are **unsupported in
+> v0.1** — see [`spec/07`](07-adapter-protocol.md) and OQ-043.
 
 ## Idempotency records — the table §06 promises
 
@@ -623,7 +598,7 @@ CREATE TABLE approvals (
 );
 
 -- At most ONE pending approval per gated action. Without this, two concurrent
--- "request approval" paths create two pending rows for one effect and a human can
+-- "request approval" paths create two pending APPROVAL rows for one effect, and a
 -- approve one while another is still outstanding -- so the effect looks both
 -- approved and pending. Spike 03 asserts this index refuses the second insert.
 CREATE UNIQUE INDEX approvals_pending_one ON approvals (tenant_id, action_ref)

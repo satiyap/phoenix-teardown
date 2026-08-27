@@ -455,13 +455,7 @@ def check_references() -> list[str]:
 
 
 def _load_superseded_patterns() -> list[tuple[str, str, str]]:
-    """Patterns live in a FILE, not in this source.
-
-    The previous hard-coded list scanned only `spec/*.md` and passed while five
-    other files still stated the reversed decisions. Both faults are fixed here:
-    the scan covers the whole documentation set, and the list is data a reviewer
-    can extend without editing the tool.
-    """
+    """Patterns live in a FILE, not in this source."""
     path = ROOT / "tools" / "superseded-patterns.txt"
     if not path.exists():
         return []
@@ -477,91 +471,184 @@ def _load_superseded_patterns() -> list[tuple[str, str, str]]:
     return out
 
 
-# A hit is FORGIVEN only on a line that explicitly marks itself as history.
-_AMENDED = re.compile(r"superseded|amended|\(20\d\d-\d\d-\d\d\)|20\d\d-\d\d-\d\d",
-                      re.IGNORECASE)
+# A sentence is exempt ONLY with a dated marker AND a retraction verb. Quoting is
+# not an exemption: "this once said X" must also say when it stopped being true.
+_DATE = re.compile(r"20\d\d-\d\d-\d\d")
+_VERB = re.compile(r"superseded|amended|reversed|retracted", re.IGNORECASE)
 
-
-# Files whose job is to describe OTHER systems. A foreign agent named here is
-# evidence, not a claim about what we ship. Excluding them is a scope decision, not
-# a loophole: the drift this gate exists to catch is a statement in OUR voice.
-_EVIDENCE_FILES = {"capability-matrix.md", "capability-map.md", "recon.md",
-                   "phase2-findings.md", "phase3-findings.md",
-                   "phase3-findings-final.md", "licensing.md"}
+# Files whose job is to record history or describe OTHER systems. A foreign agent
+# named here is a FINDING, not a claim about what we ship, and rewriting a finding
+# to match our business model would falsify the study. `projects/` is excluded by
+# omission from _scanned_files().
+_EXEMPT_FILES = {
+    "scope-reconciliation.md",   # the change log: quotes old wording by design
+    "recon.md",                  # what each candidate project claimed to be
+    "capability-matrix.md",      # generated; probe text names foreign agents
+    "capability-map.md",
+    "phase2-findings.md",        # dated findings from a point in the study
+    "phase3-findings.md",
+    "phase3-findings-final.md",
+    "licensing.md",
+    "build-reuse-map.md",        # records what each project SUPPLIED to us
+}
 
 
 def _scanned_files() -> list[Path]:
+    """Everything that states what WE build. `projects/` is excluded by omission:
+    a teardown describes another system, and its findings must not be rewritten to
+    match our business model."""
     files: list[Path] = []
     files += sorted(SPEC.glob("*.md"))
-    files += [f for f in sorted((ROOT / "synthesis").glob("*.md"))
-              if f.name not in _EVIDENCE_FILES]
+    files += sorted((SPEC / "contracts").glob("*")) if (SPEC / "contracts").is_dir() else []
+    files += sorted((ROOT / "synthesis").glob("*.md"))
     files += sorted((ROOT / "decisions").glob("*.md"))
-    for name in ("DESIGN.md", "README.md"):
+    for name in ("DESIGN.md", "README.md", "open-questions.md"):
         p = ROOT / name
         if p.exists():
             files.append(p)
-    return files
+    return [f for f in files if f.is_file()]
+
+
+def _sentences(body: str) -> list[tuple[int, str]]:
+    """Split into sentences, carrying each one's 1-based line number.
+
+    Per-sentence rather than per-line, because a dated amendment three lines below
+    a stale claim previously exempted it -- and a table row can hold both a stale
+    cell and an amended one.
+    """
+    out: list[tuple[int, str]] = []
+    line_no = 1
+    for line in body.splitlines():
+        for piece in re.split(r"(?<=\.)\s+|\|", line):
+            piece = piece.strip()
+            if piece:
+                out.append((line_no, piece))
+        line_no += 1
+    return out
 
 
 def check_superseded_claims() -> list[str]:
     """Fail when any document still states a decision that was reversed.
 
-    Prose drift is not architectural failure, but it is what an implementer reads,
-    and a spec that contradicts itself has no single answer to any question. Three
-    review rounds found this pattern; the fourth found it in files this gate was
-    not even looking at.
+    Rewritten 2026-08-27 after the gate passed on two injected sentences -- "We
+    adapt agents supplied by customers." and "Our adapter exposes four methods."
+    Three faults: matching was case-sensitive, patterns were applied per LINE with
+    a 3-line forgiveness window, and quoting counted as an exemption.
     """
     patterns = _load_superseded_patterns()
     if not patterns:
         return ["tools/superseded-patterns.txt is missing or empty, so the "
                 "superseded-claims gate is UNVERIFIED"]
 
+    compiled = []
     errs: list[str] = []
-    for f in _scanned_files():
-        body = f.read_text()
-        lines = body.splitlines()
-        # scope-reconciliation.md is the change log: a table row there is expected
-        # to quote the old wording verbatim.
-        changelog = f.name == "scope-reconciliation.md"
-        for pat, date, why in patterns:
-            try:
-                rx = re.compile(pat)
-            except re.error as exc:                              # noqa: BLE001
-                errs.append(f"bad pattern {pat!r} in superseded-patterns.txt: {exc}")
-                continue
-            for m in rx.finditer(body):
-                ln_no = body[:m.start()].count("\n")
-                line = lines[ln_no] if ln_no < len(lines) else ""
-                if _AMENDED.search(line):
-                    continue
-                # An amendment marker may sit on a NEARBY line, because prose wraps
-                # and a quoted-history sentence often spans three lines. Look at a
-                # small window rather than the single line, and also accept a quote
-                # mark on the line itself -- quoting the old wording IS the amendment
-                # convention this repo uses ("this read: ...").
-                window = "\n".join(lines[max(0, ln_no - 3):ln_no + 3])
-                if _AMENDED.search(window):
-                    continue
-                if '"' in line or "\u201c" in line:
-                    continue
+    for pat, date, why in patterns:
+        try:
+            compiled.append((re.compile(pat, re.IGNORECASE), date, why))
+        except re.error as exc:                                  # noqa: BLE001
+            errs.append(f"bad pattern {pat!r} in superseded-patterns.txt: {exc}")
+    if errs:
+        return errs
 
-                stripped = line.lstrip()
-                # scope-reconciliation.md quotes old wording in its change table
-                if changelog and stripped.startswith("|"):
-                    continue
-                # An ADR evidence-log row records what a PROJECT does. "OpenHands
-                # launches Claude Code" is true about OpenHands regardless of what
-                # we ship, and rewriting it would falsify the teardown.
-                if f.parent.name == "decisions" and stripped.startswith("|"):
-                    continue
-                # A retained enum value inside a SQL literal is not a claim: the
-                # modes stay in the CHECK so the column never needs a migration,
-                # and a separate constraint restricts which one may be used.
-                if "'" + pat + "'" in line or re.search(r"'\w*" + re.escape(pat)
-                                                        + r"\w*'", line):
-                    continue
-                errs.append(f"{f.name}:{ln_no + 1} states a claim superseded on "
-                            f"{date} ({why})")
+    for f in _scanned_files():
+        if f.name in _EXEMPT_FILES:
+            continue
+        try:
+            body = f.read_text()
+        except UnicodeDecodeError:
+            continue
+        is_sql_ish = f.suffix in {".proto", ".yaml", ".yml"}
+        # An ADR evidence log records what ANOTHER project does. "Letta wraps Claude
+        # Code" is a finding about Letta and stays true whatever we ship; rewriting
+        # it to match our business model would falsify the teardown. Everything from
+        # the "## Evidence log" heading onward is evidence, not a claim about us.
+        ev_from = None
+        if f.parent.name == "decisions":
+            m_ev = re.search(r"^## Evidence log", body, re.MULTILINE)
+            if m_ev:
+                ev_from = body[:m_ev.start()].count("\n") + 1
+
+        for ln_no, sentence in _sentences(body):
+            if ev_from is not None and ln_no >= ev_from:
+                continue
+            if _DATE.search(sentence) and _VERB.search(sentence):
+                continue
+            # A retained value inside a SQL/enum literal is not a claim: the modes
+            # stay in the CHECK so the column never needs a migration, and a
+            # separate constraint restricts which one may be used. Recognised by
+            # the value being quoted as a literal, not by the file it sits in.
+            if re.search(r"'[a-z_]*(acp_subprocess|native_tui|cli_subprocess"
+                         r"|native_server)[a-z_]*'", sentence):
+                continue
+            if is_sql_ish and sentence.lstrip().startswith(("//", "#")):
+                continue
+            for rx, date, why in compiled:
+                if rx.search(sentence):
+                    snippet = sentence if len(sentence) <= 90 else sentence[:87] + "..."
+                    errs.append(f"{f.name}:{ln_no} superseded {date} ({why})\n"
+                                f"      -> {snippet}")
+                    break
+    return errs
+
+
+def check_counts() -> list[str]:
+    """Counts must be READ from the source of truth, never restated.
+
+    Three numbers drifted across three review rounds: the invariant-row count, the
+    spike assertion total, and the ADR status split. Each is now asserted against
+    the artifact that defines it.
+    """
+    errs: list[str] = []
+
+    # 1. spec/08 inventory rows vs README's claim
+    inv = SPEC / "08-conformance.md"
+    readme = ROOT / "README.md"
+    if inv.exists() and readme.exists():
+        rows = len(re.findall(r"^\| \d+[a-z]? \|", inv.read_text(), re.MULTILINE))
+        m = re.search(r"(\d+) required invariant tests", readme.read_text())
+        if not m:
+            errs.append("README does not state a 'required invariant tests' count")
+        elif int(m.group(1)) != rows:
+            errs.append(f"README says {m.group(1)} required invariant tests; "
+                        f"spec/08-conformance.md has {rows} inventory rows")
+
+    # 2. spike assertion total vs the four RESULT.md headline counts
+    totals = {}
+    for res in sorted((ROOT / "spikes").glob("*/RESULT.md")):
+        body = res.read_text()
+        # Each RESULT.md declares its own headline in ONE machine-readable form, so
+        # the total is derived rather than restated. Prose counts are not parsed:
+        # a spike that mentions "480 passed" from a vendored suite must not have
+        # that number swept into our verdict.
+        m = re.search(r"\*\*Gate assertions: (\d+)\*\*", body)
+        if m:
+            totals[res.parent.name] = int(m.group(1))
+    if totals and readme.exists():
+        want = sum(totals.values())
+        m = re.search(r"\*\*(\d+) gate assertions\*\*", readme.read_text())
+        if not m:
+            errs.append("README does not state a '<n> gate assertions' total")
+        elif int(m.group(1)) != want:
+            errs.append(f"README says {m.group(1)} gate assertions; the four "
+                        f"RESULT.md files sum to {want} ({totals})")
+
+    # 3. ADR status split
+    adrs = sorted((ROOT / "decisions").glob("ADR-*.md"))
+    if adrs and readme.exists():
+        acc = pro = 0
+        for a in adrs:
+            m = re.search(r"\*\*Status:\*\*\s*\**(\w+)", a.read_text())
+            s = (m.group(1).lower() if m else "")
+            acc += s == "accepted"
+            pro += s == "proposed"
+        body = readme.read_text()
+        m = re.search(r"(\d+) ADRs \((\d+) Accepted, (\d+) Proposed\)", body)
+        if not m:
+            errs.append("README does not state the ADR split as "
+                        "'<n> ADRs (<a> Accepted, <p> Proposed)'")
+        elif (int(m.group(1)), int(m.group(2)), int(m.group(3))) != (len(adrs), acc, pro):
+            errs.append(f"README claims {m.group(0)}; decisions/ holds "
+                        f"{len(adrs)} ADRs with {acc} Accepted and {pro} Proposed")
     return errs
 
 
@@ -606,6 +693,7 @@ def main() -> int:
         ("effect lifecycle", check_effect_lifecycle()),
         ("postgres gate", check_postgres_gate()),
         ("superseded claims", check_superseded_claims()),
+        ("counts vs source of truth", check_counts()),
         ("cross-references", check_references()),
         ("placeholders", check_placeholders()),
         ("foreign-key targets", check_fk_targets()),

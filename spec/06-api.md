@@ -159,6 +159,8 @@ that it would have fired 4,102 times.
 POST /v1/adapters
 { "identity": "sdk:claude-agent-sdk", "protocol_version": "1.0",
   "integration_mode": "sdk_in_process", "declared_capabilities": {...} }
+# amended 2026-08-27: was "acp:claude-code" with an acp_subprocess mode;
+# see synthesis/scope-reconciliation.md section 7
 
 201 { "identity": "...", "digest": "<derived>" }
 ```

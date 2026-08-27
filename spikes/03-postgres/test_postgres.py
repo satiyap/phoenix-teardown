@@ -600,87 +600,20 @@ def s8_on_conflict_and_isolation():
     a.close(); b.close()
 
 
-# ---------------------------------------------------------------- 9
-def s9_unmediated_effects():
-    """`observed` must be visible but never look like a guarantee.
-
-    Added 2026-08-27 with the unmediated-tools decision. Invariant: an unmediated
-    effect is RECORDED (so it is auditable) and structurally incapable of carrying
-    the at-most-once evidence a claimed effect carries.
-    """
-    print("\n9. unmediated effects: observed is visible, never a guarantee")
-    conn = psycopg.connect(DSN)
-    fresh(conn)
-
-    # an unmediated effect records fine with no claim fields
-    with conn.cursor() as c:
-        c.execute("INSERT INTO effect_ledger (tenant_id, idempotency_key, run_id, kind,"
-                  " request_digest, status) VALUES "
-                  "(1,'u1','r1','unmediated','d','observed')")
-    conn.commit()
-    with conn.cursor() as c:
-        c.execute("SELECT status, claim_owner FROM effect_ledger WHERE idempotency_key='u1'")
-        st, owner = c.fetchone()
-    check("an unmediated effect is RECORDED as observed with no claim owner",
-          st == "observed" and owner is None)
-
-    def refused(label, sql, params=()):
-        try:
-            with conn.cursor() as c:
-                c.execute(sql, params)
-            conn.commit()
-            check(label, False, "ACCEPTED")
-        except psycopg.errors.CheckViolation:
-            conn.rollback()
-            check(label, True)
-
-    refused("an observed row cannot carry a claim token",
-            "INSERT INTO effect_ledger (tenant_id, idempotency_key, run_id, kind,"
-            " request_digest, status, claim_owner, claim_token, lease_expires_at)"
-            " VALUES (1,'u2','r1','unmediated','d','observed','w1','tok',now())")
-    refused("a non-unmediated kind cannot be observed",
-            "INSERT INTO effect_ledger (tenant_id, idempotency_key, run_id, kind,"
-            " request_digest, status) VALUES (1,'u3','r1','tool_call','d','observed')")
-    refused("an unmediated effect cannot be claimed",
-            "INSERT INTO effect_ledger (tenant_id, idempotency_key, run_id, kind,"
-            " request_digest, status, claim_owner, claim_token, lease_expires_at)"
-            " VALUES (1,'u4','r1','unmediated','d','claimed','w1','tok',now())")
-    refused("an unmediated effect cannot reach succeeded",
-            "INSERT INTO effect_ledger (tenant_id, idempotency_key, run_id, kind,"
-            " request_digest, status, claim_owner, claim_token, lease_expires_at,"
-            " completed_at) VALUES (1,'u5','r1','unmediated','d','succeeded','w1',"
-            "'tok',now(),now())")
-
-    # the at-most-once filter is reliable BECAUSE of the biconditional
-    with conn.cursor() as c:
-        c.execute("INSERT INTO effect_ledger (tenant_id, idempotency_key, run_id, kind,"
-                  " request_digest, status, claim_owner, claim_token, lease_expires_at,"
-                  " completed_at) VALUES (1,'g1','r1','tool_call','d','succeeded','w1',"
-                  "'tok',now(),now())")
-        conn.commit()
-        c.execute("SELECT count(*) FROM effect_ledger WHERE tenant_id=1"
-                  " AND status <> 'observed'")
-        guaranteed = c.fetchone()[0]
-    check("filtering status <> 'observed' yields only owned effects", guaranteed == 1,
-          f"got {guaranteed}")
-    conn.close()
-
-
 def main() -> int:
     print("Postgres gate — spec/01-schema.md + spec/02-consistency.md")
     print(f"DSN: {DSN}")
     for fn in (s1_epoch_append_vs_rewind, s2_errcode_mapping,
                s3_claims_across_processes, s4_claim_vs_denial,
                s5_claim_vs_lease_expiry, s6_sweeper_vs_late_settlement,
-               s7_run_lease_fencing, s8_on_conflict_and_isolation,
-               s9_unmediated_effects):
+               s7_run_lease_fencing, s8_on_conflict_and_isolation):
         fn()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:
         for f in FAIL:
             print(f"  FAILED: {f}")
         return 1
-    print("PASS — all nine scenarios hold against real Postgres.")
+    print("PASS — all eight scenarios hold against real Postgres.")
     return 0
 
 

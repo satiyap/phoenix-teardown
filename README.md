@@ -98,7 +98,7 @@ exercise.
 
 ## Status
 
-**Phases 0–5 complete.** 13 projects read, 15 ADRs Accepted, 25/25 exit criteria
+**Phases 0–5 complete.** 13 projects read, 16 ADRs (15 Accepted, 1 Proposed), 25/25 exit criteria
 answered, all six synthesis deliverables final.
 
 | Phase | State |
@@ -110,15 +110,19 @@ answered, all six synthesis deliverables final.
 | 4 Targeted | + HumanLayer, AWS AgentCore, Microsoft Agent Framework, Agent Control |
 | 5 Synthesis | domain model, reference architecture, build/reuse map, v0.1 boundary |
 | 6 Handoff | `DESIGN.md` + developer journey |
-| 7 Spikes | AG2 storage swap, definition pin, **Postgres concurrency**, **work-bundle generality** — 4 spikes, **115 gate assertions**, verification rules |
-| 8 Spec | **10 documents** + compiling `.proto` and OpenAPI contracts; 48 required invariant tests with negative controls |
+| 7 Spikes | AG2 storage swap, definition pin, **Postgres concurrency**, **work-bundle generality** — 4 spikes, **109 gate assertions**, verification rules |
+| 8 Spec | **10 documents** + compiling `.proto` and OpenAPI contracts; 49 required invariant tests with negative controls |
 
-**How the 115 is counted.** 12 (spike 01) + 35 (02) + **41** (03) + 27 (04), taken from each
-spike's own `RESULT.md`. **Vendored upstream suites do not count**: spike 01 also ran AG2's
-own 480 tests through our storage, which is useful evidence that the swap works but is *their*
-verdict, not ours — `spikes/VERIFICATION-RULES.md` rule 6 requires the reproduce command to
-cover every gate test, and a vendored suite tests the vendor's invariants. An earlier version
-of this line said 124 by counting spike 02's pytest total instead of its `RESULT.md` figure.
+**How the 109 is counted.** 12 (spike 01) + 35 (02) + 35 (03) + 27 (04), read from the
+`**Gate assertions: n**` line each `RESULT.md` declares. **`make check` asserts this sum**, so
+the number cannot drift again; the same check asserts the invariant-row count against
+`spec/08-conformance.md` and the ADR split against `decisions/`.
+
+**Vendored upstream suites do not count.** Spike 01 also ran AG2's own 480 tests through our
+storage — useful evidence that the swap works, but *their* verdict, not ours
+(`VERIFICATION-RULES.md` rule 6). Two earlier versions of this line said 124 and then 115, by
+counting a pytest total and then a retracted scenario; both are why the number is now derived
+rather than written.
 
 **173 recorded ADR impacts**: 96 confirms, 19 amends, 10 challenges, 48 neutral.
 Four ADRs did not exist before the evidence (0011 pinning, 0012 capabilities,
@@ -226,8 +230,8 @@ teardown replaced its own hypothesis, which is what it was for.
 > the effect's position in the run, and the genuinely uncertain cases go to a human
 > instead of being retried.
 
-The original hypothesis said "a framework-neutral control plane for persistent AI
-agents… MCP, A2A and ACP are interoperability protocols". The evidence held; the
+The original hypothesis, superseded 2026-08-27, described a neutral control plane for
+persistent AI agents with MCP, A2A and ACP as interoperability protocols. The evidence held; the
 **business shape changed** (2026-08-27). See
 [`synthesis/scope-reconciliation.md`](synthesis/scope-reconciliation.md) §7 for every
 file that moved and, more usefully, for how little of the architecture did.

@@ -1,6 +1,12 @@
-# ADR-0004 — Agent runtime is adapter-based; the platform does not author agents
+# ADR-0004 — Agent runtime is adapter-based; the platform does not publish an authoring framework
 
-- **Status:** Accepted (2026-08-26, Phase 5) — 13 projects. Narrowed to four adapter methods with durability in the control plane; extended to every stateful concern shipping an in-memory sibling.
+> **Title amended 2026-08-27.** It read "…the platform does not author agents", which is now
+> false: we build and operate the agents. What the platform still does not do is *publish an
+> authoring framework* for customers to write against, and it still runs every agent behind an
+> adapter so the vendor SDK stays swappable. The filename is unchanged deliberately — the
+> decision did not change, only two of its reasons. See `synthesis/scope-reconciliation.md` §7.
+
+- **Status:** Accepted (2026-08-26, Phase 5) — 13 projects. Narrowed to two RPCs with durability in the control plane (amended 2026-08-27; four methods was AX's shape); extended to every stateful concern shipping an in-memory sibling.
 - **Amended:** 2026-08-27 — `sdk_in_process` only; boundary retained for SDK swappability, not third-party adoption. See `synthesis/scope-reconciliation.md` §7.
 - **Date:** 2025-08-26
 - **Supersedes:** —
@@ -18,11 +24,11 @@ commitment.
 
 ## Decision
 
-Execution is delegated to pluggable adapters behind one interface. *(Amended 2026-08-27: the adapter boundary is retained so the vendor SDK underneath stays swappable, not to admit foreign agents. The original list read "Claude Code, Codex, OpenHands, LangGraph, A2A endpoints and raw containers"; only `sdk_in_process` ships.)* Vendor SDKs, A2A endpoints and raw containers are all adapters.
+Execution is delegated to pluggable adapters behind one interface. *(Amended 2026-08-27: the adapter boundary is retained so the vendor SDK underneath stays swappable, not to admit foreign agents. The original list named four third-party harnesses and raw containers (superseded 2026-08-27); only `sdk_in_process` ships.)* Vendor SDKs, A2A endpoints and raw containers are all adapters.
 
 ## Rationale
 
-Framework neutrality is the product thesis. Owning an agent framework means competing with every framework instead of orchestrating them.
+*(Amended 2026-08-27: this read "Framework neutrality is the product thesis." It is not — the thesis is a SaaS platform where we build and operate the agents. The adapter boundary survives for a narrower reason: it keeps the vendor SDK underneath swappable. The decision stands; its justification changed.)* Owning an agent framework means competing with every framework instead of orchestrating them.
 
 ## Implications
 
@@ -51,7 +57,7 @@ class AgentRuntime:
     async def terminate(...)
 ```
 
-Google AX's equivalent is four methods
+Google AX's equivalent has four methods (upstream precedent; ours is two RPCs, amended 2026-08-27)
 (`internal/harness/harness.go:42-63 @ b777313`):
 
 ```go

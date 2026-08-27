@@ -356,7 +356,164 @@ polices is a claim in **our** voice about what **we** ship.
 Both are the same class as the two defects spike 04 found in itself, and the reason each pass
 now writes the control before trusting the green.
 
-### `make check` — verbatim, 2026-08-27 (redo)
+### 7b. Redo 2 (2026-08-27)
+
+The verifier reported that the gate built in 7a **passed** with
+`We adapt agents supplied by customers.` and `Our adapter exposes four methods.` in scratch
+copies. Reproduced immediately, and the causes were three:
+
+1. **case-sensitive matching** — the pattern was `Four methods`, the sentence said "four
+   methods";
+2. **per-line application with a 3-line forgiveness window** — a dated amendment three lines
+   away exempted a stale claim;
+3. **quoting treated as an exemption** — "this once said X" passed without a date.
+
+#### Step 1 — the gate, rebuilt before any prose
+
+| | Before | After |
+|---|---|---|
+| scope | `spec/*.md`, `synthesis/*.md`, `decisions/*.md`, `DESIGN.md`, `README.md` | adds `spec/contracts/*` and `open-questions.md` |
+| matching | case-**sensitive**, per line | **case-insensitive**, per **sentence** (split on `. `, newline, `\|`) |
+| forgiveness | any amendment marker within 3 lines, or any quote mark | the **same sentence** must carry a date `(20\d\d-\d\d-\d\d)` **and** one of `superseded\|amended\|reversed\|retracted` |
+| exemptions | ad hoc | named files only: the change log, the teardown-history documents, and everything after `## Evidence log` in an ADR |
+| self-test | 7 controls, exit-code based | **9 controls**, reading the superseded result specifically, wired into `make check` |
+
+Three exemption classes are scope decisions, documented in `tools/superseded-patterns.txt`:
+**evidence about another system** (`projects/`, ADR evidence logs — "Letta wraps Claude Code"
+is a finding about Letta and stays true), **teardown-history documents** (`recon.md`,
+`phase*-findings.md`, `capability-matrix.md`, `build-reuse-map.md` record what the study
+found at a point in time), and **retained enum values** in SQL literals. Rewriting a finding
+to match our business model would falsify the study.
+
+#### The gate's FIRST run on the real repo — 83 hits
+
+This is the worklist, pasted before anything was fixed:
+
+```
+x no Postgres reachable, so the eight concurrency scenarios are UNVERIFIED. See spikes/03-postgres/RESULT.md for the one-line docker command.
+  x 01-schema.md:138 superseded 2026-08-27 (reserved in the enum, not shipped)
+      -> argument for `native_tui` — adapting an agent
+  x 01-schema.md:332 superseded 2026-08-27 (retracted: the platform cannot keep an `observed` guarantee across a vendor boundary)
+      -> 'observed');         -- UNMEDIATED: we saw it, we did not own it.
+  x 01-schema.md:368 superseded 2026-08-27 (retracted: the platform cannot keep an `observed` guarantee across a vendor boundary)
+      -> -- unmediated effect executed on the vendor's side, so there is nothing to
+  x 01-schema.md:380 superseded 2026-08-27 (retracted: the platform cannot keep an `observed` guarantee across a vendor boundary)
+      -> -- `observed` exists ONLY for unmediated effects, and `unmediated` effects can
+  x 01-schema.md:383 superseded 2026-08-27 (retracted: the platform cannot keep an `observed` guarantee across a vendor boundary)
+      -> CONSTRAINT observed_iff_unmediated CHECK (
+  x 01-schema.md:384 superseded 2026-08-27 (retracted: the platform cannot keep an `observed` guarantee across a vendor boundary)
+      -> (status = 'observed') = (kind = 'unmediated')
+  x 01-schema.md:528 superseded 2026-08-27 (retracted: the platform cannot keep an `observed` guarantee across a vendor boundary)
+      -> ### Unmediated effects — `kind = 'unmediated'`, status `observed`
+  x 01-schema.md:534 superseded 2026-08-27 (retracted: the platform cannot keep an `observed` guarantee across a vendor boundary)
+      -> §"Unmediated tools".
+  x 01-schema.md:541 superseded 2026-08-27 (retracted: the platform cannot keep an `observed` guarantee across a vendor boundary)
+      -> `observed` ⇔ `kind = 'unmediated'`
+  x 01-schema.md:541 superseded 2026-08-27 (retracted: the platform cannot keep an `observed` guarantee across a vendor boundary)
+      -> `observed_iff_unmediated`
+  x 01-schema.md:542 superseded 2026-08-27 (retracted: the platform cannot keep an `observed` guarantee across a vendor boundary)
+      -> an unmediated effect never becomes `succeeded`
+  x 01-schema.md:545 superseded 2026-08-27 (retracted: the platform cannot keep an `observed` guarantee across a vendor boundary)
+      -> The row exists so an unmediated effect is **visible and auditable**, not so it is trusted.
+  x 01-schema.md:626 superseded 2026-08-27 (the ledger status is `claimed`; `pending` belongs to approvals)
+...
+```
+
+| File | Hits |
+|---|---|
+| `01-schema.md` | 13 |
+| `ADR-0004-runtime-is-adapter-based.md` | 13 |
+| `07-adapter-protocol.md` | 11 |
+| `reference-architecture.md` | 8 |
+| `DESIGN.md` | 7 |
+| `08-conformance.md` | 4 |
+| `v01-boundary.md` | 3 |
+| `build-reuse-map.md` | 2 |
+| `recon.md` | 2 |
+| `ADR-0001-agent-is-persistent.md` | 2 |
+| `ADR-0014-side-effects-are-idempotent-by-ledger.md` | 2 |
+| `README.md` | 2 |
+| `openapi.yaml` | 1 |
+| `capability-matrix.md` | 1 |
+| `domain-model.md` | 1 |
+| `exit-criteria.md` | 1 |
+| `phase3-findings-final.md` | 1 |
+| `phase3-findings.md` | 1 |
+| `ADR-0002-task-is-not-run.md` | 1 |
+| `ADR-0009-sandbox-is-pluggable.md` | 1 |
+| `ADR-0011-checkpoints-are-version-pinned.md` | 1 |
+| `ADR-0015-approval-is-a-resource-with-an-approver.md` | 1 |
+| `open-questions.md` | 1 |
+| `README says 48 required invariant tests; spec/08-conformance.md has 51 inventory rows` | 1 |
+| `README says 115 gate assertions; the four RESULT.md files sum to 68 ({'03-postgres'` | 1 |
+| `README does not state the ADR split as '<n> ADRs (<a> Accepted, <p> Proposed)'` | 1 |
+
+#### Step 2 — unmediated tools RETRACTED
+
+The rule added in `793828b` was wrong, and the reasoning against it is the reasoning this
+project already applies elsewhere: **`observed` promised something the platform cannot
+deliver.** A vendor-side tool that executes and then loses the connection is never reported,
+and a deterministic key can collapse two provider executions into one row. It also had **no
+test behind it** — the spike inserted the row by hand, which asserts the guard's *output*
+rather than the guard, the exact defect `VERIFICATION-RULES.md` exists to prevent.
+
+Retracted, not refined:
+
+| Artifact | Before | After |
+|---|---|---|
+| `spec/07` | a subsection specifying declared capability + Cedar permit + `observed` row + mutation-pack restriction | **one dated paragraph**: vendor-hosted tools are **unsupported in v0.1**; an adapter that cannot disable native execution for a tool **must not register that tool**; spike 06 (OQ-043) decides admission, and any future admission must be *"provider-reported use"*, require a durable provider receipt for anything stronger, and carry egress and confidentiality constraints |
+| `spec/01` | `observed` in `effect_status`, `observed_iff_unmediated` CHECK, `kind = 'unmediated'` | all removed, dated note in place |
+| `spec/08` | rows 30e/30f/30g | dropped; **30c** added instead — *an adapter that cannot disable native execution cannot register that tool*, marked **NOT VERIFIED — spike 06** |
+| `spec/06` + OpenAPI | promised `422 unmediated_tools_with_mutations` | removed |
+| `spikes/03-postgres` | scenario 9, 6 hand-inserted assertions, RESULT said 41 | scenario removed, schema reverted, **35 assertions** — re-run against Postgres 16 to confirm |
+| `open-questions.md` OQ-043 | "can each SDK's native executor be disabled?", LangGraph listed | rewritten to the v0.1 rule; LangGraph removed |
+
+`spec/00:64` "every side effect is claimed atomically before it is attempted" and the pitch's
+"records intent before every effect" are **true again**, and stay.
+
+#### Step 3 — propagation, driven by the gate
+
+| File:line | What | Fix |
+|---|---|---|
+| `reference-architecture.md:4,40,108,170,171,183,189,226` | `15 accepted ADRs`; `start → {run, send, cancel, close}`; "pending row"; "Adapters — four methods"; five-mode enum; foreign-agent justification; bring-your-own | 16 ADRs (15+1); `Run(stream) + Describe()`; `claimed` row; "two RPCs"; only `SDK_IN_PROCESS` ships; all dated |
+| `v01-boundary.md:91,184` | "no bring-your-own agent"; "all 15 ADRs are Accepted" | "no customer-supplied agent code" (amended); "16 ADRs — 15 Accepted, 1 Proposed" |
+| `exit-criteria.md:132` (Q25) | "we adapt agents, we do not compete" | "No **public** authoring framework… we build and operate the agents on vendor SDKs; the adapter boundary remains so the SDK stays swappable" |
+| `ADR-0004:1,25,54` | title "the platform does not author agents"; "Framework neutrality is the product thesis"; "AX's equivalent is four methods" | title → "does not **publish an authoring framework**", filename unchanged deliberately; rationale amended; status line "two RPCs". **The decision stands** |
+| `ADR-0014:116,127` | "pending row" ×2 | `claimed` row |
+| `DESIGN.md:5,21,39,97,289,338,389` | 15 ADRs; Task deferral; thesis quote; `start → {...}` diagram; "four-method contract"; bring-your-own row; Tier 2 bench | all dated; **sequencing now matches the boundary** — bench → Tier 3, `Task` → Tier 2 |
+| `README.md:101,229` | "15 ADRs Accepted"; hypothesis quote | "16 ADRs (15 Accepted, 1 Proposed)"; dated |
+| `spec/06-api.md:159` | replaced example with no history | dated note: *was `acp:claude-code` / `acp_subprocess` until 2026-08-27* |
+| `spec/01:138,520,601`, `spec/07:6,11`, `openapi.yaml:600`, `ADR-0015:78` | `native_tui` justification; retraction wording; "two pending rows"; "four-method" ×2; five-value enum; approval prose | each dated or narrowed; the OpenAPI enum now lists **only** `sdk_in_process` |
+
+**Exit condition met: the gate reports zero hits.**
+
+#### Step 4 — counts, derived not restated
+
+Each `RESULT.md` now declares `**Gate assertions: n**`, and `validate_spec.py` **asserts** the
+sum. Same for the two other numbers that drifted:
+
+| Number | Source of truth | Value |
+|---|---|---|
+| gate assertions | four `RESULT.md` headlines | **109** = 12 + 35 + 35 + 27 |
+| required invariant tests | `spec/08` inventory rows | **49** |
+| ADRs | `decisions/` `**Status:**` lines | **16 — 15 Accepted, 1 Proposed** |
+
+The parser reads **only** the declared headline, so spike 01's vendored 480-test AG2 run
+cannot be swept into our verdict (`VERIFICATION-RULES.md` rule 6). Negative control in the
+self-test: a wrong README count fails the check.
+
+#### Three defects found in this pass, two of them mine
+
+- **The `pending` and `15 accepted` patterns over-matched**, flagging correct sentences —
+  `pending` is right for *approvals*, and "16 ADRs (15 Accepted, 1 Proposed)" contains "15
+  Accepted". Both anchored rather than removed.
+- **The self-test injected into ADR-0014's evidence log**, which is exempt by design, so it
+  tested nothing. It now injects **before** the `## Evidence log` heading.
+- **The self-test printed failure diagnostics next to passes** — `ok  <label>  [caught but
+  sentence not quoted]`. Detail is now printed only on failure. Misleading output in a green
+  run is the same defect class as a green run that means nothing.
+
+### The gate's FINAL run, and `make check` — verbatim, 2026-08-27 (redo 2)
 
 ```
 $ make spec
@@ -369,6 +526,7 @@ spec validation
   effect lifecycle           ok
   postgres gate              ok
   superseded claims          ok
+  counts vs source of truth  ok
   cross-references           ok
   placeholders               ok
   foreign-key targets        ok
@@ -378,21 +536,36 @@ spec/ valid (all checks executed).
 
 ```
 $ make gate-tests
-negative controls for the superseded-claims gate
-  ok   baseline copy passes the superseded gate  [0 unexpected: []]
-  ok   injecting 'ACP adapter' into DESIGN.md FAILS the gate
-  ok   ...and the failure names DESIGN.md  [['DESIGN.md:434 states a claim superseded on 2026-08-27 (replaced by the Claude SDK adapter, then the OpenAI SDK adapter)']]
-  ok   a claim in synthesis/ is caught (the old gate scanned spec/ only)  [['v01-boundary.md:191 states a claim superseded on 2026-08-27 (we do not adapt third-party agents)']]
-  ok   a dated amendment quoting the old wording is NOT flagged  [[]]
-  ok   an empty pattern file does NOT silently pass
-  ok   a revived 'Task is deferred' claim is caught  [['00-overview.md:120 states a claim superseded on 2026-08-27 (Task/routines moved to Tier 2; the deferral trigger is met)']]
+self-test: superseded-claims gate
+  ok   baseline copy passes
+  ok   'We adapt agents supplied by customers.' in DESIGN.md
+  ok   'Our adapter exposes four methods.' in reference-architecture.md
+  ok   'The ACP path ships first.' in ADR-0014 (decision section)
+  ok   'a pending row past its lease' in exit-criteria.md
+  ok   a dated retraction in the same sentence is exempt
+  ok   quoting WITHOUT a date is NOT exempt
+  ok   a wrong invariant count in README fails the count check
+  ok   an empty pattern file does not silently pass
 
-7 passed, 0 failed
-PASS — the gate fails on every injected defect and forgives amendments.
+9 passed, 0 failed
+PASS — every mutation is caught and named; amendments are forgiven only when dated.
 ```
 
 ```
 $ make check
+self-test: superseded-claims gate
+  ok   baseline copy passes
+  ok   'We adapt agents supplied by customers.' in DESIGN.md
+  ok   'Our adapter exposes four methods.' in reference-architecture.md
+  ok   'The ACP path ships first.' in ADR-0014 (decision section)
+  ok   'a pending row past its lease' in exit-criteria.md
+  ok   a dated retraction in the same sentence is exempt
+  ok   quoting WITHOUT a date is NOT exempt
+  ok   a wrong invariant count in README fails the count check
+  ok   an empty pattern file does not silently pass
+
+9 passed, 0 failed
+PASS — every mutation is caught and named; amendments are forgiven only when dated.
 project                    depth        cov  status
 ------------------------------------------------------------
 ag2                        deep      100.0%  ok
@@ -425,6 +598,7 @@ spec validation
   effect lifecycle           ok
   postgres gate              ok
   superseded claims          ok
+  counts vs source of truth  ok
   cross-references           ok
   placeholders               ok
   foreign-key targets        ok

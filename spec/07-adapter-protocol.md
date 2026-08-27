@@ -3,12 +3,12 @@
 
 gRPC bidirectional streaming. **Two RPCs** (`Run`, `Describe`), and the durability lives in
 the control plane — **not** in the adapter. (Amended 2026-08-27: this said "Four methods";
-AX's four-method contract is the upstream precedent, not our shape.)
+AX's contract is the upstream precedent, not our shape; superseded 2026-08-27.)
 
 The reason is ADR-0012: not every harness can checkpoint. Putting `checkpoint`/`restore`
 in the adapter interface guarantees a lowest-common-denominator problem, where either
 most adapters declare the capability unsupported or the platform cannot rely on it.
-Google AX's four-method contract avoids that, and we copy it.
+Google AX's contract avoids that, and we copy the *principle* — durability in the control plane — not its method count (amended 2026-08-27).
 
 ---
 
@@ -230,51 +230,20 @@ incompatible with three things we have already committed to:
 | policy decides before the act (ADR-0013) | policy becomes an audit log of things that already happened |
 | approval gates the action (ADR-0015) | the adapter chooses whether to wait |
 
-> **Amended 2026-08-27.** This paragraph read: *"So the cost is accepted deliberately: an
-> adapter cannot bring its own tools… That is a real limitation and the sharpest edge of the
-> design."* It is deleted, because two things changed. We now build every adapter, so no third
-> party is asking to bring tools — and separately, vendor-hosted tools (web search, code
-> execution, file search, computer use) **execute on the vendor's side and cannot be
-> intercepted at all**. Pretending otherwise would have made the rule unimplementable rather
-> than strict. The narrow, explicit permission is below.
+> **Retracted 2026-08-27 (redo 2).** Two paragraphs stood here in turn and both are gone.
+> The first accepted "an adapter cannot bring its own tools" as a deliberate cost. The second
+> tried to admit vendor-hosted tools under an `observed` ledger status — **a guarantee the
+> platform cannot keep**, because a vendor-side tool that executes and then loses the
+> connection is never reported, and a deterministic key can collapse two provider executions
+> into one row. It also had no test behind it: the spike inserted the row by hand, which is
+> asserting the guard's output rather than the guard.
 
-### Unmediated tools — permitted narrowly, denied by default
-
-Some tools cannot be routed through the ledger because they never reach us: a vendor-hosted
-web search or code interpreter runs inside the model provider's infrastructure. The honest
-options are to forbid such tools entirely, or to permit them under conditions that keep them
-**visible**. We permit them, under three conditions, and no others.
-
-**1. A declared adapter capability, never a per-call choice.**
-`tools.platform_executed = false` lives in `adapter_contracts.declared_capabilities` and is
-therefore part of the adapter's **digest**. An adapter cannot decide mid-run that this call
-is unmediated; changing the answer changes the contract digest and fails the pin.
-
-**2. Denied by default; enabled per tenant by an explicit Cedar `permit` that names the
-tool.** No blanket permission. Every use still produces:
-
-- a `policy.evaluated` event, so the authorisation is on the record; and
-- an `effect_ledger` row with `kind = 'unmediated'` and status **`observed`** — *no claim, no
-  settlement.* The platform **saw** the effect; it did not **own** it.
-
-`observed` is a distinct status precisely so nobody can read an unmediated effect as an
-at-most-once guarantee. It carries no claim fields, enforced by `CHECK`
-(`spec/01-schema.md`).
-
-**3. Never in a pack that contains a mutation.** If a bundle's actions include any
-`idempotent_mutation`, `non_idempotent_mutation` or `long_running_operation`, it **cannot**
-bind an adapter with unmediated tools enabled. The API rejects the binding with
-`422 unmediated_tools_with_mutations`.
-
-The reasoning for the third condition is the one that matters: an observation we cannot
-intercept costs us *visibility* into a read. A mutation we cannot intercept costs us the
-entire effect ledger guarantee — and a pack mixing the two gives an agent a mutation path and
-an uninterceptable execution surface in the same run. Read-only unmediated tools are a
-tolerable, recorded gap. Unmediated mutation is not a gap, it is the absence of the product.
-
-Tested as §08 rows **30e** and **30f**. Open question **OQ-043** (can each SDK's native
-executor actually be disabled?) and **spike 06** determine which vendor tools land in this
-category rather than being intercepted normally.
+**Tools the platform cannot intercept (vendor-hosted execution) are unsupported in v0.1.**
+Whether and how they are admitted is decided by **spike 06** (OQ-043); until then an adapter
+that cannot disable native execution for a tool **must not register that tool**. Any future
+admission must be stated as *"provider-reported use"* rather than as an effect the platform
+owns, must require a durable provider receipt for anything stronger, and must carry egress
+and confidentiality constraints — not only a mutation-pack restriction.
 
 ### In-process SDK adapters route tool calls the same way
 

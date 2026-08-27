@@ -88,7 +88,7 @@ and each is backed by evidence rather than preference.
 | 1 | **No compensation / rollback / saga engine.** We integrate Temporal, DBOS or Prefect. | **Zero positive answers in 13 projects** — 12 negative, 1 `unknown` only because a client SDK cannot show it — including the project whose whole job is control and the one whose whole job is orchestration. Pydantic AI supplies the reason: saga compensation is the workflow engine's job. |
 | 2 | **No workflow / DAG engine of our own.** | MAF's Pregel engine and Pydantic AI's Temporal integration both demonstrate orchestration is separable and better solved elsewhere. Building one competes with a solved problem. |
 | 3 | **No model gateway or provider abstraction.** | Explicit anti-goal of this study, and a commodity: MAF ships 35 provider packages, which is exactly the surface we should not own. |
-| 4 | **No _public_ authoring framework, and no bring-your-own agent.** We own a thin internal harness over the vendor SDKs (Claude Agent SDK, LangGraph, OpenAI Agents SDK). Customers bring knowledge, connectors and data — never agent code. | ADR-0004 (amended 2026-08-27). **The Cloudflare lesson no longer binds.** Cloudflare's ambient durability costs you the ability to run someone else's agent; that was fatal when adapting third-party agents was a hard requirement, and it is not one any more, because we build and operate the agents. What we keep is the *adapter boundary* — not to admit foreign agents, but so the SDK underneath stays swappable. What we still refuse is publishing an authoring framework for customers to write against. |
+| 4 | **No _public_ authoring framework, and no customer-supplied agent code** (amended 2026-08-27). We own a thin internal harness over the vendor SDKs (Claude Agent SDK, LangGraph, OpenAI Agents SDK). Customers bring knowledge, connectors and data — never agent code. | ADR-0004 (amended 2026-08-27). **The Cloudflare lesson no longer binds (superseded 2026-08-27).** Its cost was the ability to run a third party's agent; that was fatal when adapting third-party agents was a hard requirement, and it is not one any more, because we build and operate the agents. What we keep is the *adapter boundary* — not to admit foreign agents, but so the SDK underneath stays swappable. What we still refuse is publishing an authoring framework for customers to write against. |
 | 5 | **No bespoke policy DSL, trace format, or messaging protocol.** Cedar, OTel, AG2's envelope. | ADR-0013, ADR-0010, ADR-0003. Every project that invented one of these ended up with a worse version and no ecosystem. |
 
 ---
@@ -181,7 +181,7 @@ v0.1 shipment are different scopes** (§1 of `scope-reconciliation.md`).
 > in-memory-sibling discipline, HumanLayer's `Approval` schema, AX's fold-the-log
 > derivation, MAF's bytecode-digest pin, and Cloudflare's hung-work detection.
 
-All 25 exit criteria are answered with citations; all 15 ADRs are Accepted with
+All 25 exit criteria are answered with citations; 16 ADRs exist — 15 Accepted, 1 Proposed (amended 2026-08-27) — with
 evidence from 13 projects. Three probes remain `unknown` and are tracked with reasons
 (`langgraph/C8` closed source; `letta/C5` and `openhands/C5` undocumented delivery
 semantics) — `make check` exits 0 with them present, and fails on any *untracked*

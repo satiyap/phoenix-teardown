@@ -1,5 +1,8 @@
 # Spike 04 — is the generic core actually domain-neutral?
 
+**Gate assertions: 27** — the number `README.md` sums. Counts only tests that assert THIS spike's claims through its public boundary; vendored upstream suites are evidence, not our verdict (`VERIFICATION-RULES.md` rule 6).
+
+
 **Verdict: NOT FALSIFIED.** 27 assertions against the real
 `phoenix-onboarding/okf/bundles/sonyliv-analytics` bundle (133 nodes), plus a
 mutation-shaped action sequence the bundle knows nothing about.

@@ -113,7 +113,7 @@ Five rules:
    and is correctly allowed through.
 
 2. **Write the ledger row before attempting the effect.** A crash between the
-   write and the effect leaves a `pending` row, which is the signal for recovery
+   write and the effect leaves a `claimed` row, which is the signal for recovery
    rather than an invisible loss. This is the AX lesson (log before act) applied
    to effects rather than steps.
 
@@ -124,7 +124,7 @@ Five rules:
 4. **Refuse ambiguity.** Conflicting identity inputs raise an error. Never guess
    which record is authoritative.
 
-5. **A `pending` row older than a lease threshold is `INDETERMINATE`, not
+5. **A `claimed` row older than a lease threshold is `INDETERMINATE`, not
    retryable.** This is the honest and uncomfortable part: if we crashed after
    dispatching an effect but before recording its outcome, we do not know whether
    it happened. Such a row must be surfaced — to a human, or to a
