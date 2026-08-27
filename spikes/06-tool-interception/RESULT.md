@@ -267,13 +267,39 @@ colliding mtime left the interpreter running **mutated bytecode**. Both problems
 which it uniquely owns and deletes, and asserts afterwards that the live `harness.py` is
 byte-identical to where it started.
 
-Proved, not asserted — mutations and six gate runs, concurrently:
+Proved, not asserted — mutations and three gate runs, concurrently:
 
 ```
-$ (python mutate.py --check &) ; for i in 1..6; do make spike06; done
-GATE1..6_EXIT=0   (57 passed each)
-MUT_EXIT=0        (every mutation caught; live tree unchanged)
+$ H0=$(shasum -a 256 spikes/06-tool-interception/harness.py | awk '{print $1}')
+$ for i in 1 2 3; do \
+    make spike06 >/tmp/g$i.log 2>&1 & G=$!; \
+    make spike06-mutations >/tmp/m$i.log 2>&1 & M=$!; \
+    wait $G; echo "round$i gate=$?"; wait $M; echo "round$i mut=$?"; \
+  done
+round1 gate=0
+round1 mut=0
+round2 gate=0
+round2 mut=0
+round3 gate=0
+round3 mut=0
+$ shasum -a 256 spikes/06-tool-interception/harness.py | awk '{print $1}'
+f91daaaef6b83fbce178e4f12f698fb35d49e25ce3d0514a1149ace91a116a02   # == $H0
+$ git status --porcelain
 ```
+
+> **Corrected 2026-08-28 (closing judge).** The block above previously read
+> `` $ (python mutate.py --check &) ; for i in 1..6; do make spike06; done `` over
+> `GATE1..6_EXIT=0   (57 passed each)` / `MUT_EXIT=0`, and claimed **six** gate runs.
+> That command cannot produce that output, so it was not evidence — the exact defect
+> `mutate.py`'s own docstring cites **rule 6** for, sitting in the rule-7 section.
+> Three separate faults: `for i in 1..6` iterates **once**, because only `{1..6}`
+> brace-expands (measured in `zsh` and `bash` — both print `iter=1..6`); `(… &)`
+> detaches into a subshell the invoking shell can never `wait` on, so `MUT_EXIT` was
+> unreadable; and nothing in the line emits an `_EXIT=` variable at all. The superseded
+> text is kept here rather than erased. The rule-7 claim itself **holds** and is now
+> backed by the transcript above, produced on 2026-08-28 at `36a2b22`: three rounds of
+> `make spike06` concurrent with a full `make spike06-mutations`, 6/6 exit zero,
+> `harness.py` SHA-256 identical before and after, `git status --porcelain` empty.
 
 ## Simplifications vs spec
 
@@ -435,8 +461,10 @@ tools.
 
 Per **rule 7**, every write this spike makes is inside a directory the writing process created:
 pytest's `tmp_path` for the gates, `tempfile.mkdtemp()` for `mutate.py`. No shared state, no
-database, no fixed-name resource. Six `make spike06` runs concurrent with a full mutation run
-are all green.
+database, no fixed-name resource. Three `make spike06` runs concurrent with a full mutation run
+are all green *(corrected 2026-08-28 by the closing judge, superseding "Six": that figure came
+from the fabricated transcript now corrected above — the command shown ran `make spike06` once.
+Three concurrent rounds are measured and green.)*.
 
 > **Corrected 2026-08-28 (round 4).** That paragraph was categorically false as written, and
 > the counter-example was in this spike: `test_gate6_negative_control_a_new_native_tool_subclass_turns_the_gate_red`

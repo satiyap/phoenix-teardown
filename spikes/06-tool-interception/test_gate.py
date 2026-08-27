@@ -603,10 +603,15 @@ def test_gate6_negative_control_a_new_native_tool_subclass_turns_the_gate_red(tm
     CORRECTED 2026-08-28 (round 4). The child used to run at `cwd=HERE`, the LIVE
     spike directory, so it wrote `__pycache__/` and `.pytest_cache/` into a tree
     this test does not uniquely own while the parent session was running there too.
-    Not destructive, and six concurrent runs were green -- but it is the asymmetry
+    Not destructive, and concurrent runs were green -- but it is the asymmetry
     rule 7 names, and the two neighbouring controls
     (`..._a_mismatched_pin_aborts_COLLECTION`, `test_rule7_...`) already ran in an
     owned copy for exactly this reason. It now does the same.
+
+    Amended 2026-08-28 (closing judge): the sentence above said "six concurrent runs
+    were green". That figure came from a fabricated transcript in `RESULT.md`, since
+    corrected -- the command it showed ran `make spike06` once. Three concurrent
+    rounds are measured and green; the count is dropped rather than restated.
     """
     plugin = tmp_path / "fake_native_tool.py"
     plugin.write_text(
