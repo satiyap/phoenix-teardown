@@ -154,3 +154,89 @@ The counter-pressure is real and worth naming: **every typed field is a field a 
 author must satisfy**, and AX's opaque-config discipline exists because a control plane
 that understands adapter internals needs a change for every new adapter. So the boundary
 is drawn at platform *decisions*, which is narrow, stable, and justifiable line by line.
+
+---
+
+## 7. Does v0.1 support multi-party approval or separation of duties?
+
+**No, and it must not approximate one.** Recorded as a **refusal**, not a gap.
+
+> **Multi-party approval and separation of duties are unsupported in v0.1.** The current
+> `Approval` represents **one attributable terminal decision**. Workloads requiring quorum
+> must delegate authorization to an external governed system, or must not run through
+> Phoenix.
+
+### Why restraint, when the requirement is real
+
+The requirement is real. The *design* is not available from evidence, and building it anyway
+would be the first subsystem in this project not grounded in a working system.
+
+The corpus contains **one** real approval implementation — HumanLayer — and it has one
+terminal decision maker. There is no evidence for m-of-n quorum, role-based requirements,
+requester/approver separation, veto semantics, escalation, partial approval, or what happens
+when policy changes while a decision is pending.
+
+**Multi-party is not merely cardinality.** The naive schema —
+`approval_decisions(approval_id, principal_id, decision)` plus `required_count = 2` —
+answers none of the questions that decide correctness:
+
+- Must approvers hold *different* roles, and are roles evaluated at request time or at
+  decision time?
+- May the requester participate?
+- Does one denial veto, or does approval merely need to reach a count?
+- Do two accounts belonging to one human satisfy quorum?
+- What happens when an approver's access is revoked mid-decision?
+- Does changing the action invalidate decisions already cast?
+- May the *requirement* change while approval is pending?
+- Which system wins when an external approval authority and Phoenix disagree?
+- Is approving a deployment also approving its later rollback?
+
+Until a real system and a real organisational policy answer those, `required_count = 2` is
+false confidence with a schema attached.
+
+**It may not belong here at all.** Enterprises usually already run a change-management,
+access-request or transaction-approval system. A second quorum engine inside Phoenix creates
+**two authorities and an audit reconciliation problem** — the identical reason Agent Control
+was reclassified INTEGRATE → PORT (`synthesis/scope-reconciliation.md` §3). Integrating with
+an existing authority and recording its signed result is a plausible direction, but it is a
+hypothesis to investigate, not a decision to encode.
+
+### What Phoenix can honestly claim today
+
+| Supported | Not supported |
+|---|---|
+| one attributable human decision | four-eyes financial controls |
+| approval bound to a specific effect | regulated separation of duties |
+| `approve` / `deny` / `expire` / `supersede` | production change needing multiple teams |
+| policy decides *whether* approval is required | dual-control security operations |
+| no execution before the decision | |
+| durable rationale and approver identity | |
+
+Enough for analytics query review, low-risk internal operations, supervised pilots, and
+organisations whose policy genuinely requires one approver. **Not** enough for the right-hand
+column, and Phoenix must not claim compliant finance posting or production change control on
+the strength of this model.
+
+### The trigger, and the gate
+
+The trigger is **the first concrete deployment whose governing policy requires more than one
+distinct authorizer, or prohibits requester self-approval.** At that point the next work is a
+**focused teardown, not an implementation**, producing:
+
+1. at least **two** working-system precedents;
+2. one real organisational policy expressed as executable scenarios;
+3. a BUILD-vs-INTEGRATE decision;
+4. failure cases for races, revocation and changed actions;
+5. a negative control proving an action **cannot** run on partial authorization;
+6. a decision about the authoritative system of record.
+
+### Why the scalar does not trap us
+
+`approvals.decided_by` being scalar is not a permanent constraint. If evidence later supports
+native multi-party approval: introduce an approval-requirement resource, add append-only
+individual decisions, backfill each existing terminal approval as one decision, keep
+`approvals.status` as a projection, and redefine the scalar field deliberately. The event log
+already preserves enough to migrate single-party decisions.
+
+We accept that migration cost instead of paying a semantic cost now for an unproven
+abstraction. **No empty quorum tables today.**

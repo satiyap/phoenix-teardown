@@ -1,6 +1,7 @@
 # ADR-0004 — Agent runtime is adapter-based; the platform does not author agents
 
 - **Status:** Accepted (2026-08-26, Phase 5) — 13 projects. Narrowed to four adapter methods with durability in the control plane; extended to every stateful concern shipping an in-memory sibling.
+- **Amended:** 2026-08-27 — `sdk_in_process` only; boundary retained for SDK swappability, not third-party adoption. See `synthesis/scope-reconciliation.md` §7.
 - **Date:** 2025-08-26
 - **Supersedes:** —
 - **Superseded by:** —
@@ -120,6 +121,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | AWS AgentCore | neutral | `src/bedrock_agentcore/runtime/ @ 826416a` | A client SDK over managed services, not an adapter contract. |
 | Microsoft Agent Framework | neutral | `python/packages/ @ e34bf48` | Not an adapter contract for agents — `Executor` is the node abstraction and agents are written against the framework. The wide provider surface (anthropic, gemini, bedrock, ollama, mistral, copilotstudio…) adapts *models*, not agents. |
 | Agent Control | confirms | `README.md @ 7cb21af` | The adapter thesis applied to *policy* rather than execution: framework adapters for LangChain, CrewAI, Google ADK and AWS Strands mean it governs runtimes it did not author, via a `@control()` decorator. **The only project in the study built on the assumption that it is not the whole platform** — which is exactly why it is integrable. |
+| **Product decision 2026-08-27** | amends | `synthesis/scope-reconciliation.md` §7 | SaaS repositioning: we build and operate the agents on a thin internal harness over the vendor SDKs, so `integration_mode` narrows to `sdk_in_process` and the other four modes are reserved-not-shipped. Recorded as **amends, not challenges**: the adapter boundary is *kept*, because its remaining job is to keep the SDK underneath swappable (Claude Agent SDK → OpenAI Agents SDK) rather than to admit foreign agents. The Cloudflare objection — ambient durability costs you the ability to run others' agents — no longer binds, since running others' agents is no longer a requirement. |
 
 ## Open questions
 

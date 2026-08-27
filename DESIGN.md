@@ -9,15 +9,17 @@ This document is the handoff. It states what we are building, why each piece is
 shaped the way it is, and — equally important — what we are deliberately not
 building.
 
-> **The implementation specification is in [`spec/`](spec/)** — eight documents
+> **The implementation specification is in [`spec/`](spec/)** — ten documents
 > settling schemas, consistency, canonicalisation, events, transition authorization,
-> the API, the adapter protocol, and conformance. This document is the *why*; the spec
+> the API, the adapter protocol, conformance, and the decided design questions. This document is the *why*; the spec
 > is the *exactly what*.
 >
 > **Two scopes, named separately.** This document describes the **target
-> architecture**. The **v0.1 shipment** is a subset — `Task`, agent revocation, the
-> live conformance-bench layer and `Recall` are all deferred, and messaging is
-> contingent on a spike that has not been run. See
+> architecture**. The **v0.1 shipment** is a subset — agent revocation, the live
+> conformance-bench layer and `Recall` are deferred. Messaging was contingent on a spike
+> that **has now run** (`spikes/01-ag2-storage`, integrate behind an owned compatibility
+> layer), and `Task` is **no longer deferred** (see §7 of the reconciliation, 2026-08-27:
+> routines are the unit customers buy). See
 > [`synthesis/scope-reconciliation.md`](synthesis/scope-reconciliation.md), which
 > adjudicates six ambiguities found in external review.
 
@@ -25,16 +27,29 @@ building.
 
 ## 1. The thesis
 
-**A control plane that runs other people's agents durably, under policy, with
-attributable authority.**
+**A SaaS platform an enterprise buys, where we build and operate the agents against the
+customer's own knowledge, connectors and data.**
 
-Four commitments distinguish it, and each exists because 13 projects showed nobody
-does it:
+The customer onboards knowledge as **signed bundles** (OKF v0.2 profile) plus connectors to
+their systems. **They never bring agent code.** We build and run the agents on a thin
+internal harness over the vendor SDKs (Claude Agent SDK, LangGraph, OpenAI Agents SDK).
+Deployment is a multi-tenant SaaS control plane plus a **per-customer VPC data plane**; only
+metadata, schedules and approvals cross that boundary.
 
-1. **Resumption is version-safe.** A run records a content digest of the agent
-   definition it started on and refuses to resume across a change.
-2. **Side effects are the platform's problem.** An effect ledger, written before the
-   effect, keyed deterministically.
+> **This replaced an earlier thesis** — "a framework-neutral control plane that runs other
+> people's agents" — on 2026-08-27. The architecture survives the change almost intact,
+> which is the useful part: see `synthesis/scope-reconciliation.md` §7 for what moved and
+> what did not.
+
+Four commitments distinguish it, and each exists because 13 projects showed nobody does it:
+
+1. **Resumption is version-safe.** A run records a content digest of the agent definition it
+   started on and refuses to resume across a change.
+2. **After a crash, we can tell you whether the effect happened.** No framework in the study
+   can. Phoenix records **intent before every effect**, keys it by the effect's **position in
+   the run**, and surfaces the genuinely uncertain cases to a human instead of retrying them.
+   A double refund and a missed refund are different failures, and guessing turns one into
+   the other.
 3. **Capability is declared, verified, and separated from behaviour.**
 4. **Authority is attributable.** Every policy decision and every approval names the
    principal behind it.
@@ -137,7 +152,7 @@ effect_ledger
 Five rules: the key is deterministic from `(run_id, logical_step_path,
 request_digest)`; the row is written **before** the effect; a duplicate returns the
 recorded outcome and reports that it was a replay; conflicting identity inputs raise
-rather than guess; and a `pending` row past its lease is **`INDETERMINATE`, not
+rather than guess; and a `claimed` row past its lease is **`INDETERMINATE`, not
 retryable** — it surfaces to a human, because retrying it is the double-charge bug
 this exists to prevent.
 
@@ -237,18 +252,27 @@ evaluations are **exempt from short-circuit cancellation** so the shadow sample 
 biased away from denied traffic. Aggregation matters as much as evaluation: knowing a
 candidate policy fired 4,102 times is actionable, knowing it fired once is not.
 
-### Minute 20 — write an adapter
+### Minute 20 — bind a new SDK (us, not the customer)
 
-```python
-class MyAdapter(Adapter):
-    async def start(self, run_ctx, config: bytes) -> Execution: ...
-    # Execution: run(handler), send(inputs), cancel(reason), close()
+Customers never write adapters. We do, once per SDK, and the adapter boundary exists so
+the SDK underneath stays swappable (ADR-0004). The contract is the gRPC service in
+[`spec/07`](spec/07-adapter-protocol.md) — **two RPCs**, not a five-method Python class:
 
-    capabilities = Capabilities(
-        streaming=Verified(True),      # a probe proves it
-        interrupt=Asserted(True),      # declared, unproven — and marked so
-        compaction=Unknown(),          # no claim; never read as False
-    )
+```protobuf
+service Adapter {
+  rpc Run(stream ControlFrame) returns (stream AdapterFrame);
+  rpc Describe(DescribeRequest) returns (AdapterContract);
+}
+```
+
+`integration_mode = sdk_in_process` is the only mode shipped. An in-process SDK adapter
+still speaks these frames: `ToolCall` comes **out**, `ToolResult`/`ToolDenied` go **in**,
+and the SDK's own tool executor is **disabled**. A capability declaration accompanies it:
+
+```
+streaming    = VERIFIED(true)     # a probe proves it
+interrupt    = ASSERTED(true)     # declared, unproven -- and marked so
+compaction   = UNKNOWN            # no claim; never read as false
 ```
 
 Four methods (AX), because durability lives in the control plane — putting
@@ -321,6 +345,27 @@ guarantee it appeared to offer was not one it could keep":
   prevent accidents; preventing intent requires the principal model in force at every
   entry point.
 
+## 7a. Implementation language — Go for the control plane
+
+**Decided 2026-08-27.** The control plane is written in **Go**.
+
+The spec was already written for a non-Python implementer, which is why this costs nothing
+to adopt now:
+
+- `spec/03-canonicalisation.md` specifies the profile in terms of **UTF-8 byte order** and an
+  integers-only number domain, precisely so it does not depend on one language's `json`
+  module. Go's `sort.Slice` over `[]byte` and `encoding/json` satisfy it directly.
+- The cross-language check already exists: **spike 02 ships a Node oracle**
+  (`spikes/02-definition-pin/canon_ref.mjs`) written from the normative text, and `make spec`
+  compares fixture ↔ Python ↔ JavaScript. A Go implementation becomes the third
+  independent implementation and reuses the same 21 accept / 9 reject vectors unchanged.
+- The Postgres statements in `spec/02` are plain SQL with no ORM assumptions, and spike 03
+  ran them against a real server.
+
+**The spikes are not being rewritten.** They are executable evidence for design claims, not
+production code, and rewriting them in Go would cost the falsification value they already
+earned. Python remains the language of the spikes and the verification tooling.
+
 ## 8. Sequencing
 
 Three tiers, ordered by dependency. Detail and deferral triggers in
@@ -328,7 +373,7 @@ Three tiers, ordered by dependency. Detail and deferral triggers in
 
 **Tier 1 — the spine.** Tenant/Principal/Credential → agent identity and versioned
 definition → run engine (single writer, log-derived state) → adapter contract with
-one ACP adapter → version-and-pin on resume → effect ledger.
+one Claude SDK adapter → version-and-pin on resume → effect ledger.
 
 **Tier 2 — the platform.** Cedar policy with three-way decisions → `Approval` with
 `decided_by` → three-boundary sandbox → capability declarations with the offline bench

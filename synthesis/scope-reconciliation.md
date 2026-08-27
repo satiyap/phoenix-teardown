@@ -36,6 +36,19 @@ deferred with named triggers.
 
 ## 2. Does v0.1 contain a `Task` resource? No.
 
+> **REVERSED 2026-08-27 — the deferral trigger is met.** §7 below repositions Phoenix as a
+> SaaS platform where we build and operate the agents, and **routines (schedule *or* trigger →
+> Run) are the unit customers buy**. The trigger recorded in `v01-boundary.md` was "scheduled
+> or recurring agent work becoming a product requirement"; it is now a product requirement,
+> not a hypothesis. `Task`/routines move to **Tier 2**.
+>
+> The *shape* below is unchanged and is what makes the reversal cheap: a routine **creates**
+> Runs and never becomes one, so `Run.task_id` is a nullable FK — additive exactly as
+> planned. Everything in this section about why `Task` is not a Run still holds; only the
+> question "does v0.1 ship it" flipped. Schema owed by spec 10 or 11
+> (`spec/00-overview.md` "Not yet specified").
+
+
 **The contradiction.** The domain model and ADR-0002 retain `Task → Run`. The
 boundary defers "`Task` as a universal spine". `DESIGN.md` calls it speculative
 generality. And `Task` appears in **none** of the three v0.1 tiers — verified by
@@ -94,6 +107,14 @@ verdict):
 Cedar, `genai-prices`.
 
 ## 4. `ag2.network` is contingent, not approved
+
+> **RESOLVED — spike 01 has run** (`spikes/01-ag2-storage/RESULT.md`). The verdict split by
+> route: a *clean* `ag2.network` integration **FAILED** (fixing OQ-024 would require changing
+> public dedupe semantics), while AG2 **behind an owned compatibility layer PASSED** — 480 of
+> AG2's own tests through our `SqlKnowledgeStore`, plus 12 gate tests using only public
+> composition. We own dedupe entirely; `find_envelope_by_causation` is never used for
+> correctness. The "CONTINGENT" label below is therefore historical.
+
 
 **The contradiction.** Messaging sits in v0.1 Tier 3 as INTEGRATE, while both
 `DESIGN.md` and the boundary require a storage spike *before committing*. No spike
@@ -192,3 +213,174 @@ OQ-033.
 | 4 | `ag2.network` approved? | **CONTINGENT** on a storage spike with a stated pass/fail test |
 | 5 | Strict validation vs tracked unknowns | Fixed in tooling; tracked unknowns are informational, untracked ones fail |
 | 6 | Next deliverable | **Implementation specification**, gated by two spikes |
+
+---
+
+## 7. SaaS, we run the agents (2026-08-27)
+
+A business-shape decision, arriving after the spec had survived three review rounds.
+**Phoenix is a SaaS platform an enterprise buys.** The customer onboards knowledge as signed
+bundles (OKF v0.2 profile) plus connectors to their systems; **we build and operate the
+agents** on a thin internal harness over the vendor SDKs (Claude Agent SDK, LangGraph, OpenAI
+Agents SDK). Customers bring knowledge, connectors and data — **never agent code**.
+Deployment is a multi-tenant SaaS control plane plus a **per-customer VPC data plane**, with
+only metadata, schedules and approvals crossing the boundary.
+
+The reason to record this rather than silently edit: the previous thesis — "a
+framework-neutral control plane that runs other people's agents" — was the *stated
+justification* for several decisions. Those decisions mostly survive, but **their reasons
+changed**, and a reason that no longer holds is how a design rots.
+
+### The nine consequences, before and after
+
+| # | Consequence | Before | After | Files |
+|---|---|---|---|---|
+| 1 | **Adapters narrow to SDK in-process** | `integration_mode` had five live modes; "ship with ACP so we adapt Claude Code and Codex on day one" | Enum retained (no migration later), but a `CHECK` restricts it to `sdk_in_process`; the other four are **reserved, not shipped**. First adapter is the **Claude Agent SDK**, second the OpenAI Agents SDK | `spec/01-schema.md` (`integration_mode_shipped`), `spec/00-overview.md:45`, `v01-boundary.md` Tier 1 #4, `DESIGN.md:342` |
+| 2 | **Tool execution stays platform-owned** | Normative, with "an adapter cannot bring its own tools" recorded as an accepted **cost** | Unchanged in substance. New normative subsection: an in-process SDK adapter MUST route every tool call through the same typed `ToolCall → ledger → ToolResult/ToolDenied` boundary, and **the SDK's native tool executor is disabled**. The restriction is now **the design**, not a cost — there is no third party asking to bring tools | `spec/07` §"In-process SDK adapters route tool calls the same way"; `spec/08` rows **30a/30b** |
+| 3 | **"No agent-authoring framework" softens** | Never #4: "We adapt agents; we do not compete with the frameworks that write them" | "No **public** authoring framework and no bring-your-own agent; we own a thin internal harness over the SDKs." Dated note explains the **Cloudflare lesson no longer binds** — ambient durability costs you the ability to run others' agents, which was fatal only while that was a requirement. ADR-0004 recorded **`amends`, not `challenges`**: the adapter boundary is kept so SDKs stay swappable | `v01-boundary.md` Never #4, `DESIGN.md` §1, `ADR-0004` |
+| 4 | **Conformance bench Tier 2 → Tier 3** | Offline bench in Tier 2, justified as catching an untrusted third-party declaration | Purpose narrows to **SDK-version drift**: an SDK bump silently falsifies a declaration. Real but slower, so it ships after the spine. ADR-0012 **stands** (`amends`): declarations still beat discovery, `UNKNOWN` still never degrades to `false` | `v01-boundary.md` Tier 3 #15, `spec/08` purpose note, `ADR-0012` |
+| 5 | **`Task` un-deferred** | §2 above: "**No `Task` in v0.1**"; boundary listed it under Deferred with intent | **Tier 2.** Routines (schedule *or* trigger → Run) are the unit customers buy, and the OKF bundle already carries a 10:00 IST daily cadence and a weekly roll-up *as prose* for want of a resource. Shape unchanged: a routine creates Runs, never becomes one; `Run.task_id` nullable FK. ADR-0002 recorded **`confirms`** | §2 (dated reversal), `v01-boundary.md` Tier 2 #16 + Deferred table, `ADR-0002`, `spec/00-overview.md` |
+| 6 | **Work-bundle spec owed** | `spikes/04-work-bundle/RESULT.md` referenced `10-work-bundles.md`, which does not exist — a dangling promise | Listed in "Not yet specified" with its required contents: `WorkBundle`, `Resource`, `Action`, `ActionReceipt`, `Verifier`, `effect_class`; **bundle-supplied** type→roles table; verifier pinned by a **different publisher** (spike 04 finding 1); freshness is **evidence**, not bundle state (finding 2); `indeterminate` keeps `external_operation_id` and inspection is a **separate Action** (finding 4). **Not written in this pass** | `spec/00-overview.md` |
+| 7 | **AX/SubstrATE is a provider, not the control plane** | Google AX read as architecture only; no decision on where sandbox lifecycle sits | **ADR-0016 raised as Proposed** (not Accepted): placement, suspension, resumption and eviction policy are **control-plane** concerns; process/filesystem/network isolation is a **provider's**. Cites AX's mechanism (actors suspended between turns, resumed on any worker) *and* its anti-pattern (no authN, no principal, no tenancy, no policy; `REFERENCE_ONLY`). **Spike 05 defined** and blocking | `decisions/ADR-0016-*.md`, `open-questions.md` (OQ-019 now blocking, OQ-042 added) |
+| 8 | **Go for the control plane** | Unstated; spikes are Python | Recorded as a decision. `spec/03` was already written for a non-Python implementer (UTF-8 byte order, integers-only domain), and the **Node oracle in spike 02** is the existing cross-language check — a Go implementation becomes the third independent one and reuses the 21 accept / 9 reject vectors. **Spikes are not rewritten**: they are executable evidence, not production code | `DESIGN.md` §7a |
+| 9 | **Pitch wording** | README: "framework-neutral control plane for persistent AI agents… MCP, A2A and ACP are interoperability protocols". Differentiator #2 phrased as a mechanism | SaaS framing in both. Four differentiators kept; **#2 reworded to the buyer's question** — after a crash, no framework can say whether the effect happened; Phoenix records intent before every effect, keys it by position in the run, and surfaces uncertain cases to a human. The "six of six" style evidence stays in the technical sections | `README.md` §Success condition, `DESIGN.md` §1 |
+
+### Also fixed: ten defects found in the same review
+
+| Defect | Fix |
+|---|---|
+| `spec/06-api.md:16` "answer its own approvals" | Now "decide approvals **assigned to it as approver**", with an explicit prohibition on deciding an approval gating its own run's effect. Test **29a** added |
+| `spec/07-adapter-protocol.md:379` test row | Close-without-`End` ⇒ `indeterminate` was unconditional; now split on whether an effect is unsettled, matching rule 5 |
+| `spec/02-consistency.md:78` | Still claimed the seq-race loser "gets a unique violation and rolls back". It **blocks** (spike 03 finding 1); `statement_timeout` now **mandatory** on the append path, `57014` retryable |
+| `spec/04-events.md:21,26` | Entry shape showed `trace_id` and omitted `epoch`; now `traceparent` (full W3C value) and `epoch`, both stated as assigned inside the insert |
+| `spec/01-schema.md` missing index | `approvals_pending_one` partial unique index added — spike 03's `schema.sql:145` had it and the spec did not |
+| `channel_leases` defined twice | Kept in `01` (with history table); `02` now references it instead of redefining it with different columns |
+| `DESIGN.md:140`, `v01-boundary.md:97` | "`pending` row" → "`claimed` row" |
+| `DESIGN.md:20` | "messaging is contingent on a spike that has not been run" → spike 01 has run; `Task` note updated |
+| README counts | 16 ADRs (15 Accepted + 1 Proposed), 10 spec docs, **124** gate assertions across 4 spikes, 48 invariant rows. Counted, not estimated |
+| `DESIGN.md:254` adapter shape | Five-method Python class replaced with the `spec/07` **two-RPC** gRPC service, scoped to `sdk_in_process` |
+
+### What did NOT change, and why that matters
+
+The repositioning touched the *justifications* far more than the *mechanisms*:
+
+- the schema, consistency model, canonicalisation profile, event log, epoch semantics,
+  effect lifecycle and state machine are **untouched**;
+- ADR-0004's adapter boundary **survives** with a different job;
+- ADR-0012's tri-state capability model **survives** with a narrower purpose;
+- **no ADR was reversed**, and the one raised is Proposed rather than Accepted.
+
+A design that only survives its original business case is not a design. This one moved from
+"run other people's agents" to "run our own agents on their knowledge" and lost nothing
+structural — the strongest evidence yet that the mechanisms were chosen for the right
+reasons.
+
+### Corrections to the corrections
+
+Two things in §1–§6 are now stale and are marked at their source rather than quietly edited:
+§2's "**No `Task` in v0.1**" is reversed above, and §4's "`ag2.network` CONTINGENT" was
+resolved by spike 01. Both carry dated notes in place.
+
+### `make check` — verbatim, 2026-08-27
+
+```
+$ make spec
+spec validation
+----------------------------------------------------
+  canonicalisation vectors   ok
+  rewind algorithm           ok
+  protobuf compiles          ok
+  openapi coverage           ok
+  effect lifecycle           ok
+  postgres gate              ok
+  superseded claims          ok
+  cross-references           ok
+  placeholders               ok
+  foreign-key targets        ok
+
+spec/ valid (all checks executed).
+```
+
+```
+$ make check
+project                    depth        cov  status
+------------------------------------------------------------
+ag2                        deep      100.0%  ok
+agent-control              targeted  100.0%  ok
+aws-agentcore              targeted   69.9%  ok
+cloudflare-agents          deep      100.0%  ok
+google-agent-platform      deep      100.0%  ok
+google-ax                  deep      100.0%  ok
+groupmind                  recon       0.0%  ok
+humanlayer                 targeted  100.0%  ok
+langgraph                  deep       99.4%  ok
+letta                      deep       99.4%  ok
+microsoft-agent-framework  targeted   69.9%  ok
+omnigent                   deep      100.0%  ok
+openhands                  deep       99.4%  ok
+pydantic-ai                deep      100.0%  ok
+
+3 tracked unknown(s) — informational, not a failure:
+  i langgraph: 1 tracked unknown(s) (C8) — accounted for in open-questions.md
+  i letta: 1 tracked unknown(s) (C5) — accounted for in open-questions.md
+  i openhands: 1 tracked unknown(s) (C5) — accounted for in open-questions.md
+
+All facts.yaml valid.
+spec validation
+----------------------------------------------------
+  canonicalisation vectors   ok
+  rewind algorithm           ok
+  protobuf compiles          ok
+  openapi coverage           ok
+  effect lifecycle           ok
+  postgres gate              ok
+  superseded claims          ok
+  cross-references           ok
+  placeholders               ok
+  foreign-key targets        ok
+
+spec/ valid (all checks executed).
+wrote synthesis/capability-matrix.md
+==================================================================
+PHOENIX TEARDOWN — STATUS
+==================================================================
+
+Projects (14 scaffolded)
+
+  project                      depth     ev    cov  ADR impact
+  --------------------------------------------------------------
+  ag2                          deep      A    100%          14
+  agent-control                targeted  A    100%          15
+  aws-agentcore                targeted  A     70%          15
+  cloudflare-agents            deep      A    100%          13
+  google-agent-platform        deep      A    100%          14
+  google-ax                    deep      A    100%          13
+  groupmind                    recon     C      0%           0
+  humanlayer                   targeted  A    100%          14
+  langgraph                    deep      A     99%          10
+  letta                        deep      A     99%          12
+  microsoft-agent-framework    targeted  A     70%          15
+  omnigent                     deep      A    100%          13
+  openhands                    deep      A     99%          11
+  pydantic-ai                  deep      A    100%          14
+
+Exit criteria: 25/25 answered
+
+ADRs: 16
+  Accepted       15
+  Proposed       1
+
+Synthesis deliverables
+
+  D1 capability matrix         generated  synthesis/capability-matrix.md
+  D2 ADR log                   16 files   decisions/
+  D3 domain model              FINAL      synthesis/domain-model.md
+  D4 reference architecture    FINAL      synthesis/reference-architecture.md
+  D5 build/reuse map           FINAL      synthesis/build-reuse-map.md
+  D6 v0.1 boundary             FINAL      synthesis/v01-boundary.md
+     licensing review          FINAL      synthesis/licensing.md
+     open questions            FINAL      open-questions.md
+
+9 deep + 4 targeted. Probe set: 173 probes.
+==================================================================
+```

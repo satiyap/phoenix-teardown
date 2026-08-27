@@ -74,9 +74,19 @@ SELECT $1, $2,
 RETURNING seq, epoch;
 ```
 
-Two concurrent appends compute the same `MAX(seq)+1`, both attempt the same primary
-key, and **one gets a unique violation and rolls back**. The loser retries. There is
-no lock service and no advisory lock.
+Two concurrent appends compute the same `MAX(seq)+1` and both attempt the same primary
+key. There is no lock service and no advisory lock.
+
+**The loser BLOCKS; it does not fail fast** — measured in spike 03 against Postgres 16.
+It waits on the winner's *uncommitted* index entry and only raises `23505` once the winner
+commits. An earlier version of this paragraph said it "gets a unique violation and rolls
+back", which skipped the blocking phase.
+
+**`statement_timeout` is therefore MANDATORY on the append path.** Without it a stuck
+writer blocks every competing append on that run indefinitely instead of yielding a
+retryable error. A fired timeout surfaces as `57014`, which is retryable here exactly as
+`23505` is. Keep the append transaction short and never hold it across an adapter call or a
+network request. See §Error mapping.
 
 **The epoch is read from `runs`, never passed in.** An ordinary append cannot name an
 epoch, so it cannot invent a future or a past one — the trigger in §01 rejects any
@@ -476,16 +486,9 @@ make an in-memory authority horizontally safe.
 **Decision: exactly one hub instance may serve a channel at a time, enforced by a
 lease on the same mechanism as runs.**
 
-```sql
-CREATE TABLE channel_leases (
-    tenant_id   BIGINT NOT NULL,
-    channel_id  TEXT   NOT NULL,
-    hub_id      TEXT   NOT NULL,
-    fence_token BIGINT NOT NULL,
-    expires_at  TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (tenant_id, channel_id)
-);
-```
+`channel_leases` and `channel_lease_history` are defined **once**, in
+[§01](01-schema.md) alongside `run_leases`. They were duplicated here with a different
+column set, which is how an implementer ends up building two tables.
 
 A hub must hold the channel lease before calling `post_envelope`. This is a
 restriction on *our* usage of AG2, not a change to AG2 — consistent with spike 01's

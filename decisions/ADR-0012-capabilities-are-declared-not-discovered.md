@@ -1,6 +1,7 @@
 # ADR-0012 — Adapter and provider capabilities are declared, not discovered
 
 - **Status:** Accepted (2026-08-26, Phase 5) — 11 projects. Split into Capability (declared metadata) and Extension (installed behaviour); fail-closed is positional.
+- **Amended:** 2026-08-27 — bench purpose narrows to SDK-version drift; moved to Tier 3.
 - **Date:** 2026-08-26
 - **Supersedes:** —
 - **Superseded by:** —
@@ -363,6 +364,7 @@ cannot act on is a bug report waiting to be filed.
 | AWS AgentCore | neutral | `src/bedrock_agentcore/ @ 826416a` | No declared capability model for agents or runtimes. |
 | Microsoft Agent Framework | neutral | `python/packages/core/agent_framework/_feature_stage.py @ e34bf48` | No declared capability model. `_feature_stage.py` marks *feature* stability in code — the same instinct as ADK's module-path stability tiers, but a different concept from a capability claim. |
 | Agent Control | confirms | `evaluators/ @ 7cb21af` | `EvaluatorSpec` declares which evaluator a control uses, with a builtin/contrib separation — declared rather than discovered, and the control names its evaluator instead of probing for one. |
+| **Product decision 2026-08-27** | amends | `synthesis/scope-reconciliation.md` §7 | We author every adapter, so no third party declares capabilities to us and the bench's original purpose — catching an untrusted declaration — is gone. Its purpose narrows to **SDK-version drift**, which is real but slower, so the bench moves Tier 2 → Tier 3. The ADR itself stands unchanged: declarations still beat discovery, `UNKNOWN` never degrades to `false`, and verified-vs-asserted is still tracked separately. |
 
 ## Open questions
 

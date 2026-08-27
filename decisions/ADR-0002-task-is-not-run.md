@@ -1,6 +1,7 @@
 # ADR-0002 — Task and Run are separate resources with separate state machines
 
 - **Status:** Accepted (2026-08-26, Phase 5) — 13 projects. Task/Run split has one real precedent (Omnigent, scheduled work only); Run state machine extended from HumanLayer and MAF.
+- **Reaffirmed:** 2026-08-27 — un-deferred into Tier 2; the deferral trigger in `scope-reconciliation.md` §2 is met.
 - **Date:** 2025-08-26
 - **Supersedes:** —
 - **Superseded by:** —
@@ -57,6 +58,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | AWS AgentCore | neutral | `src/bedrock_agentcore/runtime/models.py @ 826416a` | No Task or Run resource on the SDK surface; execution lifecycle is server-side. |
 | Microsoft Agent Framework | confirms | `python/packages/core/agent_framework/_workflows/_checkpoint.py:59-66 @ e34bf48` | `IDLE_WITH_PENDING_REQUESTS` is HumanLayer's `waiting_input` reached independently. And one precision our Run model needs: `iteration_count` "is not guaranteed to be unique across a workflow's lifecycle. It marks the superstep boundary the checkpoint sits on, and the same boundary can carry more than one checkpoint" — a run that pauses for a human records a second checkpoint at the same boundary. |
 | Agent Control | neutral | `models/src/agent_control_models/evaluation.py @ 7cb21af` | No run lifecycle; the evaluated unit is a `Step`. |
+| **Product decision 2026-08-27** | confirms | `synthesis/scope-reconciliation.md` §7 | `Task` is **un-deferred**. §2 of the reconciliation deferred it with the trigger "scheduled or recurring agent work becoming a product requirement"; that trigger is now met, because routines (schedule *or* trigger → Run) are the unit customers buy. The OKF bundle carries a 10:00 IST daily cadence and a weekly roll-up as content, which is a routine described in prose for want of a resource. The split holds in the form the ADR states: a routine **creates** Runs and never becomes one, so `Run.task_id` is a nullable FK — additive, as planned. |
 
 ## Amendment — 2026-08-26 (Phase 2, LangGraph)
 

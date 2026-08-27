@@ -13,12 +13,19 @@ whole point of a control plane.
 
 | Class | May | May not |
 |---|---|---|
-| **agent** | create/submit runs it owns, read its own runs, answer its own approvals | touch policies, adapters, tenants, or other principals' runs |
+| **agent** | create/submit runs it owns, read its own runs, decide approvals **assigned to it as approver** | touch policies, adapters, tenants, other principals' runs, or **decide an approval gating an effect of its own run** |
 | **admin** | everything, including policy and adapter registration | — |
 
 Separate header, separate key material: `Authorization: Bearer <token>` where the token
 carries its class. An agent token presented to a policy endpoint is `403`, not `401` —
 it authenticated fine, it is simply not permitted.
+
+**A principal may never decide an approval gating its own effect.** "Answer its own
+approvals" was the earlier wording and it was wrong: it reads as *the requester decides*,
+which is the opposite of what an approval is for. The rule is that the approver is the
+principal the approval was **assigned to**, and the requesting run's principal is excluded
+even when it holds an otherwise-valid agent token. Enforced on `POST
+/v1/approvals/{id}/decide`, tested as §08 inventory row 29a.
 
 **Every request resolves to a `Principal`.** There is no anonymous path. `tenant_id` is
 derived from the token and **never** read from the body or a path parameter, so
@@ -170,6 +177,14 @@ admin-only. The section heading previously said "admin only" for both, which con
 the line above it.
 
 ---
+
+## Approval authority — what this API does not do
+
+`POST /v1/approvals/{id}/decide` records **one** attributable terminal decision. There is no
+quorum, no m-of-n, no role requirement and no separation-of-duties enforcement beyond the
+self-approval prohibition above. That is a deliberate refusal on the evidence — see
+[§09](09-decisions.md) 7 — and workloads requiring more must delegate authorization to an
+external governed system.
 
 ## Idempotency
 

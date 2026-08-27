@@ -12,6 +12,14 @@ What CI must enforce, and why the bench is split in two.
 | **Offline** | every commit | nothing | yes | **yes** |
 | **Live** | nightly + on demand | credentials, a running adapter, money | yes, on the nightly | **no — deferred** |
 
+> **Purpose note (2026-08-27).** We build and operate every adapter, so this bench is no
+> longer about third-party honesty — nobody else declares capabilities to us. Its purpose is
+> **SDK-version drift**: the Claude Agent SDK or OpenAI Agents SDK changes behaviour under a
+> version bump and a declaration silently becomes false. That is a weaker, slower risk than
+> an untrusted declaration, which is why the bench moves from Tier 2 to **Tier 3**
+> (`v01-boundary.md`). ADR-0012 is unaffected: declarations still beat discovery, and
+> `UNKNOWN` still never degrades to `false`.
+
 > **Scope correction.** `v01-boundary.md` defers the live layer, and an earlier version of
 > this document mandated it. The live layer is **specified here but not shipped in v0.1**;
 > its trigger is "the third adapter, or the first capability-related production incident".
@@ -112,6 +120,9 @@ Every invariant in this spec, with its negative control. Consolidated from §01�
 | 19 | NFC and NFD digests agree | remove normalisation ⇒ differ |
 | 20 | Domain separation holds | drop `kind` ⇒ collision |
 | 21 | Exactly one `End` frame | accept two ⇒ two terminal states |
+| 29a | A principal cannot decide an approval gating **its own** run's effect | let the requester decide ⇒ self-approval, and the approval records a human who never chose |
+| 30a | An in-process SDK adapter's tool call produces an `effect_ledger` row | let the SDK's native executor run the tool ⇒ **no ledger row**, so the effect is unclaimed, unpoliced and unattested |
+| 30b | The SDK's native tool executor is disabled at adapter construction | leave it enabled ⇒ two execution paths, one ungoverned |
 | 22 | Close without `End` **and an unsettled effect** ⇒ `indeterminate` | map to `failed` ⇒ false certainty |
 | 22a | Close without `End` and **no** unsettled effect ⇒ `failed`, `adapter_disconnected` | map to `indeterminate` ⇒ manufactured uncertainty, human time spent on a known outcome |
 | 23 | Unset capability reads `UNKNOWN` | treat as `FALSE` ⇒ silent degradation |

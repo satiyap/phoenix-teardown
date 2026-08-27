@@ -115,9 +115,15 @@ CREATE TABLE adapter_contracts (
     identity       TEXT   NOT NULL,       -- 'acp:claude-code'
     digest         TEXT   NOT NULL,       -- DERIVED from the contract, not supplied
     protocol_version TEXT NOT NULL,
+    -- The enum is Omnigent's full taxonomy and is kept so the column never needs a
+    -- migration. Only 'sdk_in_process' is SHIPPED: we build and operate the agents on
+    -- a thin internal harness over the vendor SDKs, so there is no third-party
+    -- subprocess or TUI to adapt. The others are reserved, not supported.
     integration_mode TEXT NOT NULL
         CHECK (integration_mode IN ('sdk_in_process','cli_subprocess',
                                     'acp_subprocess','native_tui','native_server')),
+    CONSTRAINT integration_mode_shipped
+        CHECK (integration_mode = 'sdk_in_process'),   -- drop this to ship another
     -- the adapter's OWN checkpoint payload format, which runs pin (07 6)
     payload_schema_digest TEXT NOT NULL,
     declared_capabilities JSONB NOT NULL DEFAULT '{}',
@@ -579,6 +585,13 @@ CREATE TABLE approvals (
     CHECK ((status IN ('approved','denied'))
            = (decided_by IS NOT NULL AND decided_at IS NOT NULL))
 );
+
+-- At most ONE pending approval per gated action. Without this, two concurrent
+-- "request approval" paths create two pending rows for one effect and a human can
+-- approve one while another is still outstanding -- so the effect looks both
+-- approved and pending. Spike 03 asserts this index refuses the second insert.
+CREATE UNIQUE INDEX approvals_pending_one ON approvals (tenant_id, action_ref)
+    WHERE status = 'pending';
 
 CREATE INDEX approvals_pending ON approvals (tenant_id, requested_at)
     WHERE status = 'pending';

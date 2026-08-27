@@ -16,14 +16,17 @@ column existed, which contradicted the schema.
   "tenant_id": 1,
   "run_id": "01J8...",
   "seq": 42,
+  "epoch": 0,
   "event_type": "run.tool_call.requested",
   "payload": { },
-  "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+  "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
   "created_at": "2026-08-26T17:35:05.029075Z"
 }
 ```
 
-`seq` is assigned inside the insert (§02). `trace_id` rides the event so a trace can be
+`seq` and `epoch` are both assigned **inside the insert** (§02); a caller supplies
+neither. `traceparent` is the full W3C header value, not a bare trace id — the parent span
+and sampled flag are what make propagation work — and it rides the event so a trace can be
 reconstructed from the log alone (AG2's contribution).
 
 ## Naming rule

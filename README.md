@@ -25,7 +25,7 @@ projects/<slug>/
   teardown.md                  narrative, capped at ~10 pages
   sources.md                   URLs, file paths, commit SHAs, dates read
   dx-log.md                    timeboxed hands-on friction log
-decisions/ADR-*.md             10 provisional ADRs with falsification criteria
+decisions/ADR-*.md             16 ADRs (15 Accepted, ADR-0016 Proposed)
 synthesis/
   recon.md                     Phase 1 triage and depth budget
   licensing.md                 licence review, USE/INTEGRATE/REFERENCE/AVOID
@@ -110,8 +110,8 @@ answered, all six synthesis deliverables final.
 | 4 Targeted | + HumanLayer, AWS AgentCore, Microsoft Agent Framework, Agent Control |
 | 5 Synthesis | domain model, reference architecture, build/reuse map, v0.1 boundary |
 | 6 Handoff | `DESIGN.md` + developer journey |
-| 7 Spikes | AG2 storage swap, definition pin — 47 gate tests, verification rules |
-| 8 Spec | 8 documents, 30 required invariant tests with negative controls |
+| 7 Spikes | AG2 storage swap, definition pin, **Postgres concurrency**, **work-bundle generality** — 4 spikes, 124 gate assertions, verification rules |
+| 8 Spec | **10 documents** + compiling `.proto` and OpenAPI contracts; 48 required invariant tests with negative controls |
 
 **173 recorded ADR impacts**: 96 confirms, 19 amends, 10 challenges, 48 neutral.
 Four ADRs did not exist before the evidence (0011 pinning, 0012 capabilities,
@@ -196,18 +196,31 @@ the evidence behind it.
 ## Success condition
 
 The teardown has succeeded when a statement of this form can be written from
-evidence rather than taste:
+evidence rather than taste. **It has been written, and then rewritten** — the
+teardown replaced its own hypothesis, which is what it was for.
 
-> Our platform is a framework-neutral control plane for persistent AI agents.
-> Agents are stable security principals and logical actors; Tasks represent
-> intent and Runs represent execution. Agents communicate through durable
-> messages and delegated tasks. Runtime execution is provided by pluggable
-> harness adapters and sandbox providers. Context is divided into task state,
-> agent memory and shared workspace knowledge. MCP, A2A and ACP are
-> interoperability protocols rather than internal architecture. The control
-> plane owns identity, registry, task lifecycle, messaging, policy and
-> observability; distributed execution, sandboxing, workflow engines and model
-> inference are pluggable infrastructure.
+> Phoenix is a **SaaS platform an enterprise buys**. The customer onboards their
+> knowledge as **signed bundles** (OKF v0.2 profile) plus connectors to their systems,
+> and **we build and operate the agents** on a thin internal harness over the vendor
+> SDKs. Customers bring knowledge, connectors and data — **never agent code**.
+> Deployment is a multi-tenant SaaS control plane plus a **per-customer VPC data
+> plane**; only metadata, schedules and approvals cross the boundary.
+>
+> Agents are stable security principals; **Routines** carry intent (a schedule or a
+> trigger) and **Runs** carry execution. Execution runs on pluggable SDK adapters and
+> sandbox providers, with tool execution owned by the platform rather than the SDK.
+> Context divides into run state, workspace knowledge and the four state scopes. The
+> control plane owns identity, the registry, run and routine lifecycle, policy,
+> approvals, the effect ledger and observability; model inference, workflow
+> orchestration and isolation are someone else's.
+>
+> **What it does that nothing in the study does:** after a crash, it can tell you
+> whether the side effect happened — intent is recorded before every effect, keyed by
+> the effect's position in the run, and the genuinely uncertain cases go to a human
+> instead of being retried.
 
-That paragraph is currently a hypothesis. The teardown exists to earn it or
-replace it.
+The original hypothesis said "a framework-neutral control plane for persistent AI
+agents… MCP, A2A and ACP are interoperability protocols". The evidence held; the
+**business shape changed** (2026-08-27). See
+[`synthesis/scope-reconciliation.md`](synthesis/scope-reconciliation.md) §7 for every
+file that moved and, more usefully, for how little of the architecture did.

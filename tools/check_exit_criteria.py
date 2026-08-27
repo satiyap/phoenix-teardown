@@ -57,6 +57,9 @@ def adr_status() -> list[tuple[str, str, int]]:
         status = "unknown"
         if match := re.search(r"\*\*Status:\*\*\s*(.+)", text):
             status = match.group(1).strip().split("(")[0].strip()
+            # ADR-0016 writes **Proposed** for emphasis; strip markdown so the
+            # status column stays a clean enum rather than leaking asterisks.
+            status = status.replace('**', '').strip(' —-')
         rows.append((path.stem.split("-")[0] + "-" + path.stem.split("-")[1],
                      status, text.count("| ")))
     return rows

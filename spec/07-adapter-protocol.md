@@ -237,6 +237,35 @@ capability the platform records rather than silently tolerates.
 That is a real limitation and the sharpest edge of the design. It is also the only version
 in which "the platform owns effects" is true rather than aspirational.
 
+### In-process SDK adapters route tool calls the same way
+
+`sdk_in_process` is the only mode shipped, and it is the mode most likely to cheat: the
+vendor SDKs (Claude Agent SDK, LangGraph, OpenAI Agents SDK) all ship a working tool
+executor, and calling it is one line.
+
+**That executor MUST be disabled.** An in-process adapter routes every tool call across the
+same typed boundary as a remote one:
+
+```
+SDK asks for a tool
+   -> adapter emits Output{ToolCall}          (a function call, not a gRPC hop)
+   -> control plane: pinned-definition check, policy, intent, approval, claim, dispatch
+   -> adapter receives ControlFrame{ToolResult | ToolDenied}
+   -> adapter hands the result back to the SDK as that tool's return value
+```
+
+The transport collapses to a function call; **the contract does not**. Nothing may reach a
+customer system without an `effect_ledger` row, because a tool the SDK executes directly is
+an effect the platform cannot claim, police, or attest.
+
+This is why "an adapter cannot bring its own tools" moved from a cost to **the design**. In
+the earlier framing we accepted it reluctantly, to keep the platform's ownership of effects
+honest. Now that we build every adapter ourselves, there is no third party asking to bring
+their own tools, and the restriction costs nothing while buying the entire guarantee.
+
+Tested as §08 inventory row 30a, whose negative control lets the SDK execute a tool
+directly and asserts **no ledger row appears**.
+
 ## What must be typed, and why
 
 An earlier version made `TOOL_CALL`, `APPROVAL_REQUEST` and `CHECKPOINT` undifferentiated
@@ -376,7 +405,8 @@ propagate** — without the parent span and sampled flag the adapter starts a ne
 | Invariant | Test | Negative control |
 |---|---|---|
 | Exactly one `End` | adapter sends two | accept the second ⇒ two terminal states |
-| Close without `End` ⇒ `indeterminate` | kill the adapter mid-stream | map it to `failed` ⇒ a false "we know it failed" |
+| Close without `End` **and an unsettled effect** ⇒ `indeterminate` | kill the adapter mid-stream with a `claimed` effect | map it to `failed` ⇒ a false "we know it failed" |
+| Close without `End` and **no** unsettled effect ⇒ `failed`, `adapter_disconnected` | kill it with every effect settled | map it to `indeterminate` ⇒ manufactured uncertainty (see rule 5) |
 | `FAILED` requires `error_code` | omit it | allow it ⇒ retry logic cannot branch |
 | `Cancel` still yields `End` | cancel, assert `End` arrives | allow silent close ⇒ run hangs in `cancelling` |
 | `config` is never parsed | send malformed bytes | parse it ⇒ control-plane coupling |

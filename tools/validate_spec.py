@@ -470,6 +470,15 @@ SUPERSEDED = [
      "the claim is a conditional UPDATE; only INTENT is an insert"),
     (r"CREATE TABLE effect_claim_history", (),
      "effect rows are never reclaimed, so monotonic claim tokens are meaningless"),
+    # --- SaaS repositioning, 2026-08-27 (scope-reconciliation.md 7) ---
+    (r"adapt Claude Code and Codex", (),
+     "we build and operate the agents; the first adapter is the Claude Agent SDK"),
+    (r"answer its own approvals", (),
+     "a principal may never decide an approval gating its own effect"),
+    (r"one gets a unique violation and rolls back", (),
+     "spike 03: the seq-race loser BLOCKS, then raises 23505 after the winner commits"),
+    (r'"trace_id":', (),
+     "the log stores a full W3C `traceparent`, not a bare trace id"),
 ]
 
 
