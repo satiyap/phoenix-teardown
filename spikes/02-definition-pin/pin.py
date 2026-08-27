@@ -76,11 +76,22 @@ def _canon(v: Any, path: str = "$") -> Any:
     if isinstance(v, (list, tuple)):
         return [_canon(x, f"{path}[{i}]") for i, x in enumerate(v)]
     if isinstance(v, dict):
-        out = {}
+        out: dict[str, Any] = {}
+        origin: dict[str, str] = {}
         for k in v:
             if not isinstance(k, str):
                 raise NonCanonical(f"{path}: non-string key {k!r}")
-            out[unicodedata.normalize("NFC", k)] = _canon(v[k], f"{path}.{k}")
+            nk = unicodedata.normalize("NFC", k)
+            if nk in origin:
+                # Two DISTINCT keys that normalise to the same key. Overwriting
+                # one silently loses a field and produces a digest for an object
+                # the caller never supplied. Reject.
+                raise NonCanonical(
+                    f"{path}: keys {origin[nk]!r} and {k!r} both normalise to "
+                    f"{nk!r} under NFC. One would silently overwrite the other. "
+                    f"Rename one of them.")
+            origin[nk] = k
+            out[nk] = _canon(v[k], f"{path}.{nk}")
         return out
     raise NonCanonical(
         f"{path}: {type(v).__name__} is not canonically serialisable. "
@@ -110,9 +121,45 @@ def canonical_digest(obj: Any, *, kind: str = "generic") -> str:
         "canonicalization": f"{CANON_PROFILE}/v{CANON_VERSION}",
         "payload": _canon(obj),
     }
-    blob = json.dumps(envelope, sort_keys=True, separators=(",", ":"),
-                      ensure_ascii=False, allow_nan=False)
-    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+    blob = _emit(envelope)
+    return hashlib.sha256(blob).hexdigest()
+
+
+def _emit(v: Any) -> bytes:
+    """Serialise with an EXPLICIT sort rule: UTF-8 byte order.
+
+    `json.dumps(sort_keys=True)` sorts by Unicode CODE POINT. RFC 8785 requires
+    UTF-16 CODE UNIT order, and the two disagree for non-BMP characters:
+
+        code point order : U+E000, U+1F600      (Python)
+        UTF-16 unit order: U+1F600, U+E000      (JCS)
+
+    because a non-BMP character becomes a surrogate pair starting 0xD800, which
+    sorts BELOW U+E000. So `sort_keys=True` is NOT JCS, and this profile does not
+    pretend to be. We specify **UTF-8 byte order**: simpler to state, identical
+    to code point order (a property of UTF-8, so no surprises), and trivially
+    reimplementable in any language with a byte comparator.
+    """
+    if isinstance(v, dict):
+        items = sorted(v.items(), key=lambda kv: kv[0].encode("utf-8"))
+        inner = b",".join(_emit_str(k) + b":" + _emit(x) for k, x in items)
+        return b"{" + inner + b"}"
+    if isinstance(v, (list, tuple)):
+        return b"[" + b",".join(_emit(x) for x in v) + b"]"
+    if isinstance(v, str):
+        return _emit_str(v)
+    if isinstance(v, bool):
+        return b"true" if v else b"false"
+    if v is None:
+        return b"null"
+    if isinstance(v, int):
+        return str(v).encode("utf-8")
+    raise NonCanonical(f"_emit: unexpected {type(v).__name__} after canonicalisation")
+
+
+def _emit_str(s: str) -> bytes:
+    """JSON string escaping per RFC 8785 6.1 (the part we DO follow)."""
+    return json.dumps(s, ensure_ascii=False).encode("utf-8")
 
 
 @dataclass(frozen=True)
@@ -147,6 +194,37 @@ class ToolBinding:
 
 
 @dataclass(frozen=True)
+class ExtensionBinding:
+    """An extension is not a name, and its ORDER is semantic.
+
+    Two defects this replaces (both found in review):
+      1. extensions were digested as SORTED strings, so swapping two extensions
+         left the digest unchanged even though composition order changes
+         behaviour (Pydantic AI's outermost/innermost exists for this reason);
+      2. a bare name does not pin an implementation, so changing extension code
+         preserved the pin -- the same hole artifact_digest closes for tools.
+    """
+    name: str
+    artifact_digest: str                 # IMMUTABLE code identity -- required
+    config_digest: str = ""
+    position: str = "outermost"          # outermost | innermost
+
+    def __post_init__(self):
+        if not self.artifact_digest:
+            raise NonCanonical(
+                f"extension {self.name!r}: artifact_digest is required. A name "
+                f"alone does not pin an implementation.")
+        if self.position not in ("outermost", "innermost"):
+            raise NonCanonical(
+                f"extension {self.name!r}: position must be 'outermost' or "
+                f"'innermost', got {self.position!r}")
+
+    def as_canon(self) -> dict:
+        return {"name": self.name, "artifact_digest": self.artifact_digest,
+                "config_digest": self.config_digest, "position": self.position}
+
+
+@dataclass(frozen=True)
 class AdapterContract:
     """The adapter digest must be DERIVED, not caller-supplied."""
     identity: str               # "acp:claude-code"
@@ -156,12 +234,15 @@ class AdapterContract:
 
     @property
     def digest(self) -> str:
+        # kind= is load-bearing: without it this digest lives in the SAME domain
+        # as a definition digest, so domain separation is claimed in the envelope
+        # and not actually applied to the models that matter.
         return canonical_digest({
             "identity": self.identity,
             "protocol_version": self.protocol_version,
             "integration_mode": self.integration_mode,
             "declared_capabilities": self.declared_capabilities,
-        })
+        }, kind="adapter_contract")
 
 
 @dataclass(frozen=True)
@@ -169,7 +250,7 @@ class AgentDefinition:
     name: str
     instructions: str
     tools: tuple[ToolBinding, ...] = ()
-    extensions: tuple[str, ...] = ()     # installed behaviour (ADR-0012)
+    extensions: tuple[ExtensionBinding, ...] = ()   # ORDERED (ADR-0012)
     version: int = 1                     # human-facing only, NEVER digested
 
     def __post_init__(self):
@@ -177,6 +258,10 @@ class AgentDefinition:
         if len(names) != len(set(names)):
             dupes = sorted({n for n in names if names.count(n) > 1})
             raise NonCanonical(f"duplicate tool names: {dupes}")
+        enames = [e.name for e in self.extensions]
+        if len(enames) != len(set(enames)):
+            dupes = sorted({n for n in enames if enames.count(n) > 1})
+            raise NonCanonical(f"duplicate extension names: {dupes}")
 
     @property
     def digest(self) -> str:
@@ -185,8 +270,9 @@ class AgentDefinition:
             "instructions": self.instructions,
             # sorted by name: tool ORDER is not semantic, tool SET is
             "tools": [t.as_canon() for t in sorted(self.tools, key=lambda t: t.name)],
-            "extensions": sorted(self.extensions),
-        })
+            # NOT sorted: extension order IS semantic, because extensions compose
+            "extensions": [e.as_canon() for e in self.extensions],
+        }, kind="agent_definition")
 
 
 @dataclass(frozen=True)

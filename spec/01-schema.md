@@ -206,20 +206,93 @@ CREATE TABLE run_events (
     tenant_id      BIGINT NOT NULL,
     run_id         TEXT   NOT NULL,
     seq            BIGINT NOT NULL,        -- assigned INSIDE the txn; see 02
+    epoch          INTEGER NOT NULL,       -- rewind generation; see 04 and below
     event_type     TEXT   NOT NULL,        -- from the registry; see 04
     payload        JSONB  NOT NULL,
-    trace_id       TEXT,                   -- context rides the event (AG2)
+    traceparent    TEXT,                   -- full W3C header; context rides the event
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     -- (tenant, run, seq) as PK is the single-writer guarantee: two concurrent
     -- appends collide and one rolls back. No lock service. (Google AX.)
     PRIMARY KEY (tenant_id, run_id, seq),
-    FOREIGN KEY (tenant_id, run_id) REFERENCES runs (tenant_id, run_id)
+    FOREIGN KEY (tenant_id, run_id) REFERENCES runs (tenant_id, run_id),
+
+    CONSTRAINT run_events_epoch_nonneg CHECK (epoch >= 0)
 );
+
+-- Folding reads by (run, epoch, seq); make that the access path.
+CREATE INDEX run_events_fold ON run_events (tenant_id, run_id, epoch, seq);
 ```
 
-There is **no `UPDATE` or `DELETE` grant** on this table (see §02). State is derived
-by folding it, never stored in a parallel column that can drift.
+There is **no `UPDATE` or `DELETE` grant** on this table (see §02).
+
+### `epoch` — who may set it, and to what
+
+The epoch model in §04 is only sound if the *persistence* protocol cannot produce an
+invalid epoch history. Prose alone permitted an event to invent a future or past epoch,
+which review correctly flagged as the gap between the algorithm and the store.
+
+`runs` carries the authority:
+
+```sql
+ALTER TABLE runs ADD COLUMN current_epoch INTEGER NOT NULL DEFAULT 0
+    CONSTRAINT runs_epoch_nonneg CHECK (current_epoch >= 0);
+```
+
+Four rules, all enforced in the database rather than by convention:
+
+1. **An ordinary event MUST carry exactly `runs.current_epoch`.** Not less, not more.
+2. **Only a `run.rewound` event may change it**, and only to `current_epoch + 1`.
+3. **`seq` stays globally monotonic per run**, across epochs. `epoch` partitions `seq`;
+   it never restarts it. Therefore `(epoch, seq)` order and `seq` order **coincide**, and
+   §04's fold may use either — the contradiction review found is resolved by making
+   monotonicity an enforced invariant instead of an assumption.
+4. **Epochs are dense.** No skipping, so `current_epoch` is also the rewind count.
+
+```sql
+CREATE FUNCTION check_event_epoch() RETURNS trigger AS $$
+DECLARE cur INTEGER;
+BEGIN
+  SELECT current_epoch INTO cur FROM runs
+   WHERE tenant_id = NEW.tenant_id AND run_id = NEW.run_id
+   FOR UPDATE;                            -- serialises concurrent appends
+
+  IF NEW.event_type = 'run.rewound' THEN
+    IF NEW.epoch <> cur + 1 THEN
+      RAISE EXCEPTION 'a rewind must open epoch %, got %', cur + 1, NEW.epoch;
+    END IF;
+    IF (NEW.payload->>'to_epoch')::INTEGER > cur THEN
+      RAISE EXCEPTION 'cannot supersede epoch % which does not exist yet',
+                      NEW.payload->>'to_epoch';
+    END IF;
+    UPDATE runs SET current_epoch = NEW.epoch
+     WHERE tenant_id = NEW.tenant_id AND run_id = NEW.run_id;
+  ELSE
+    IF NEW.epoch <> cur THEN
+      RAISE EXCEPTION 'event in epoch % but run is at epoch % (an ordinary event '
+                      'may not change the epoch)', NEW.epoch, cur;
+    END IF;
+  END IF;
+
+  -- seq must be strictly increasing per run, regardless of epoch
+  IF EXISTS (SELECT 1 FROM run_events
+              WHERE tenant_id = NEW.tenant_id AND run_id = NEW.run_id
+                AND seq >= NEW.seq) THEN
+    RAISE EXCEPTION 'seq % is not greater than every existing seq for this run',
+                    NEW.seq;
+  END IF;
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+
+CREATE TRIGGER run_events_epoch_check
+  BEFORE INSERT ON run_events
+  FOR EACH ROW EXECUTE FUNCTION check_event_epoch();
+```
+
+The `FOR UPDATE` is what makes epoch assignment atomic: two concurrent appends to the
+same run serialise on the `runs` row, so they cannot both read `current_epoch = 3` and
+both claim to open epoch 4. This is the same single-writer discipline as the `seq` PK,
+extended to the one column the PK does not cover.
 
 ---
 

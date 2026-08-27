@@ -126,8 +126,15 @@ Deriving state from the log, precisely.
 1. **Order is `(tenant_id, run_id, seq)` ascending.** `created_at` is *not* an ordering
    key — clocks are not monotonic and coarse timers produce ties.
 2. **Resolve epochs before folding** (see §Rewind). A single backward pass computes the
-   live set; the fold then runs forward over it. One function owns this, following ADK's
-   rule that there is "a single source of truth for which events are live".
+   live set; the fold then runs forward over it in **`seq` order**. One function owns
+   this, following ADK's rule that there is "a single source of truth for which events
+   are live".
+
+   `seq` order and `(epoch, seq)` order are the same order, because `seq` is globally
+   monotonic per run and `epoch` never restarts it — enforced by the trigger in
+   [§01](01-schema.md#epoch--who-may-set-it-and-to-what), not assumed. An earlier draft
+   said "global seq order" here and "(epoch, seq) order" below; they agree only because
+   monotonicity is enforced, so the enforcement is the load-bearing part.
 3. **Unknown `event_type` is an error.** A reducer that skips unknown events silently
    computes a state that never existed. Fail with the type name.
 4. **A terminal event ends the fold.** Events after a terminal state are a bug; log
@@ -143,7 +150,8 @@ The naive rule ("drop the rewind event and everything at or after `from_seq`") i
 it also drops every event appended *after* the rewind, so a run could rewind but never
 continue. That was a real defect in the first version of this document.
 
-**Every event carries an `epoch`.** A run starts at epoch 0. `run.rewound{to_epoch,
+**Every event carries an `epoch`**, stored in `run_events.epoch` and assigned by the
+database, never by the caller (§01, §02). A run starts at epoch 0. `run.rewound{to_epoch,
 from_seq}` opens epoch *n+1* and declares that events in epochs ≤ `to_epoch` with
 `seq >= from_seq` are **superseded**.
 
@@ -168,7 +176,10 @@ live(events):
                         for (to_epoch, from_seq) in cuts)]
 ```
 
-Then fold `live(events)` in `(epoch, seq)` order.
+Then fold `live(events)` in **`seq` order**, which is identical to `(epoch, seq)` order
+because `seq` is globally monotonic per run (§01 enforces this with a trigger). If
+monotonicity were merely conventional, sorting by `(epoch, seq)` could *reorder history*
+— which is why it is a constraint and not a convention.
 
 Three properties this gives, all of which the naive rule lacked:
 
@@ -179,6 +190,22 @@ Three properties this gives, all of which the naive rule lacked:
   attempted.
 
 `seq` remains globally monotonic per run across epochs; `epoch` only partitions it.
+
+### What the store guarantees, so the algorithm can be simple
+
+The algorithm above is only sound because the persistence protocol cannot produce an
+invalid history. §01 enforces, in the database:
+
+| Rule | Mechanism |
+|---|---|
+| an ordinary event carries exactly `runs.current_epoch` | trigger; and §02's insert reads it from `runs` rather than accepting a parameter |
+| only `run.rewound` changes the epoch, and only to `current_epoch + 1` | trigger |
+| `to_epoch` cannot name an epoch that does not exist yet | trigger |
+| epoch assignment is atomic under concurrency | `SELECT ... FOR UPDATE` on the `runs` row |
+| `seq` strictly increases per run | primary key + trigger |
+| epochs are dense | `+ 1` only |
+
+Without these, `live()` is a function over histories that the store is free to violate.
 
 ---
 

@@ -61,15 +61,52 @@ must be consistent.
 The Google AX pattern, translated. `seq` is computed **inside the insert**:
 
 ```sql
-INSERT INTO run_events (tenant_id, run_id, seq, event_type, payload, trace_id)
-SELECT $1, $2, COALESCE(MAX(seq), 0) + 1, $3, $4, $5
-  FROM run_events WHERE tenant_id = $1 AND run_id = $2
-RETURNING seq;
+INSERT INTO run_events (tenant_id, run_id, seq, epoch, event_type, payload, traceparent)
+SELECT $1, $2,
+       COALESCE((SELECT MAX(seq) FROM run_events
+                  WHERE tenant_id = $1 AND run_id = $2), 0) + 1,
+       r.current_epoch,                    -- NEVER supplied by the caller
+       $3, $4, $5
+  FROM runs r
+ WHERE r.tenant_id = $1 AND r.run_id = $2
+RETURNING seq, epoch;
 ```
 
 Two concurrent appends compute the same `MAX(seq)+1`, both attempt the same primary
 key, and **one gets a unique violation and rolls back**. The loser retries. There is
 no lock service and no advisory lock.
+
+**The epoch is read from `runs`, never passed in.** An ordinary append cannot name an
+epoch, so it cannot invent a future or a past one — the trigger in §01 rejects any
+mismatch, and this statement structurally cannot produce one. Only the rewind operation
+below moves the epoch.
+
+### Rewind — the one operation that opens an epoch
+
+```sql
+BEGIN;
+  -- 1. take the run row, which serialises against concurrent appends
+  SELECT current_epoch INTO cur FROM runs
+   WHERE tenant_id = $1 AND run_id = $2 FOR UPDATE;
+
+  -- 2. append the rewind event in the NEXT epoch. The trigger enforces cur+1
+  --    and bumps runs.current_epoch in the same statement.
+  INSERT INTO run_events (tenant_id, run_id, seq, epoch, event_type, payload)
+  SELECT $1, $2,
+         COALESCE((SELECT MAX(seq) FROM run_events
+                    WHERE tenant_id = $1 AND run_id = $2), 0) + 1,
+         cur + 1, 'run.rewound',
+         jsonb_build_object('to_epoch', $3, 'from_seq', $4, 'reason', $5);
+
+  -- 3. rebuild the projection from the new live set, in the SAME transaction
+  UPDATE runs SET state = $folded_state
+   WHERE tenant_id = $1 AND run_id = $2;
+COMMIT;
+```
+
+A rewind must hold the run lease like any other write, and the projection is recomputed
+from `live(events)` rather than patched — the fold is cheap once, and a patched
+projection after a rewind is a guess.
 
 The caller must treat `23505` (unique violation) on this statement as *retryable*, and
 anything else as fatal. That distinction belongs in one place; see §Error mapping.
@@ -258,10 +295,19 @@ The history row is **not** deleted — that is what keeps tokens monotonic.
 ```sql
 UPDATE runs SET state = $new
  WHERE tenant_id = $1 AND run_id = $2
+   AND state = $expected_prior
    AND EXISTS (SELECT 1 FROM run_leases
                 WHERE tenant_id=$1 AND run_id=$2
-                  AND holder=$3 AND fence_token=$4);
+                  AND holder=$3 AND fence_token=$4
+                  AND expires_at > now());     -- REQUIRED: see below
 ```
+
+**`expires_at > now()` is not optional here.** Without it a worker whose lease has
+already expired — and whose run may have been reclaimed by another worker that has not
+yet deleted the stale row, or that holds a *higher* token — still matches the `EXISTS`
+and its write lands. The predicate must appear in **every** fenced write, and an earlier
+version of this document omitted it from exactly this general example while including it
+in the specific one, which is the kind of inconsistency an implementer copies.
 
 Zero rows updated means **the caller has been fenced out** — its lease was reclaimed.
 It must abandon the run, not retry. A worker that ignores this is the duplicate

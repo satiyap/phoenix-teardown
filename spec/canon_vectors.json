@@ -1,5 +1,6 @@
 {
   "profile": "nfc+intjson/v1",
+  "sort_rule": "keys sorted by UTF-8 byte order (NOT UTF-16 code units; NOT JCS)",
   "accept": [
     {
       "n": 1,
@@ -65,7 +66,7 @@
         ]
       },
       "digest": "1cbf5b1ef23cb173f8e19bdde499226fbbacad50598810b27a5766835571cdc5",
-      "note": "array order IS significant"
+      "note": "array order is significant"
     },
     {
       "n": 8,
@@ -74,7 +75,7 @@
         "n": 1.0
       },
       "digest": "50153b6132668fbe3a1cbbb1f0c0a48e77d3e5a44a88f1850827e0a4feb8fc81",
-      "note": "integral float -> integer; MUST EQUAL #9"
+      "note": "integral float: MUST EQUAL #9"
     },
     {
       "n": 9,
@@ -83,7 +84,7 @@
         "n": 1
       },
       "digest": "50153b6132668fbe3a1cbbb1f0c0a48e77d3e5a44a88f1850827e0a4feb8fc81",
-      "note": "integer 1"
+      "note": "integer"
     },
     {
       "n": 10,
@@ -92,7 +93,7 @@
         "n": -0.0
       },
       "digest": "c2ee7c80535394bca7780f48a1fe59492970ceb43d362681eb5caf598b2d2466",
-      "note": "negative zero -> 0; MUST EQUAL #11"
+      "note": "negative zero: MUST EQUAL #11"
     },
     {
       "n": 11,
@@ -101,7 +102,7 @@
         "n": 0
       },
       "digest": "c2ee7c80535394bca7780f48a1fe59492970ceb43d362681eb5caf598b2d2466",
-      "note": "integer 0"
+      "note": "zero"
     },
     {
       "n": 12,
@@ -110,7 +111,7 @@
         "n": 9007199254740991
       },
       "digest": "d574524f726f11abb503f1f52b7410d7342fa34e4d339d806ff8a0276b8af4ab",
-      "note": "2^53-1: largest accepted integer"
+      "note": "largest accepted integer (2^53-1)"
     },
     {
       "n": 13,
@@ -119,33 +120,137 @@
         "s": "4.5"
       },
       "digest": "be962f2baa1fc111e6346d639d9c6b0e6bca406461bc16d3d1bfad1119f23529",
-      "note": "fractional values encoded as STRINGS"
+      "note": "fractions travel as strings"
+    },
+    {
+      "n": 14,
+      "kind": "effect_key",
+      "payload": {
+        "": 1,
+        "😀": 2
+      },
+      "digest": "de6ef0452dea7bc07b402082ef3c2c6df5494098baaef09dcf5fb2cca6cee20d",
+      "note": "NON-BMP SORT: emoji U+1F600 vs private-use U+E000. UTF-8/code-point order puts U+E000 first; UTF-16 code-unit order (RFC 8785) puts U+1F600 first. This profile mandates UTF-8 byte order, so U+E000 sorts first."
+    },
+    {
+      "n": 15,
+      "kind": "effect_key",
+      "payload": {
+        "😀": 2,
+        "": 1
+      },
+      "digest": "de6ef0452dea7bc07b402082ef3c2c6df5494098baaef09dcf5fb2cca6cee20d",
+      "note": "same pair, insertion order reversed: MUST EQUAL #14"
+    },
+    {
+      "n": 16,
+      "kind": "effect_key",
+      "payload": {
+        "a": {
+          "z": 1,
+          "😀": 2,
+          "b": 3
+        }
+      },
+      "digest": "7a199873a4f2dba860f87013beb3507418022ac919bfb10159395ce86d037f48",
+      "note": "nested object sorted by the same rule"
+    },
+    {
+      "n": 17,
+      "kind": "effect_key",
+      "payload": {
+        "s": "\u0000\u001f\"\\"
+      },
+      "digest": "8a72b5436dc40a8c480765565ca29eb0a55a0f701f4dcf60b9c22af6a8b44289",
+      "note": "control chars, quote and backslash escaped per RFC 8785 6.1"
+    },
+    {
+      "n": 18,
+      "kind": "effect_key",
+      "payload": {
+        "s": "😀"
+      },
+      "digest": "87e17ee93c324a80a7800c09b8bfeaeb0436835f9e1e80f6c3cb4a017615f838",
+      "note": "non-BMP in a VALUE, emitted raw as UTF-8 (ensure_ascii=False)"
+    },
+    {
+      "n": 19,
+      "kind": "effect_key",
+      "payload": {
+        "a": [
+          {
+            "b": 1
+          },
+          {
+            "b": 2
+          }
+        ]
+      },
+      "digest": "a8c57d9899621393382dc8ec6cb7093d1f0ab3e6b93d0381a5bf9e0ec44566e1",
+      "note": "array of objects keeps order"
+    },
+    {
+      "n": 20,
+      "kind": "effect_key",
+      "payload": {
+        "t": true,
+        "f": false,
+        "n": null
+      },
+      "digest": "f1ead7b8a3d99d2fbcf7a214968bcd7cc7148f1e00f860e98c0e427b77af349f",
+      "note": "literals: true/false/null lowercase, unquoted"
     }
   ],
   "reject": [
     {
-      "case": "non-integral float",
-      "error": "$"
+      "case": {
+        "n": 1.5
+      },
+      "kind": "effect_key",
+      "error": "non-integral float: Python and ECMAScript formatting disagree"
     },
     {
-      "case": "integer > 2^53-1",
-      "error": "$"
+      "case": {
+        "n": 9007199254740992
+      },
+      "kind": "effect_key",
+      "error": "integer exceeds 2^53-1 and cannot round-trip as a JSON number"
     },
     {
-      "case": "NaN",
-      "error": "$"
+      "case": {
+        "n": 1e-07
+      },
+      "kind": "effect_key",
+      "error": "non-integral float (Python emits 1e-07, ECMAScript 1e-7)"
     },
     {
-      "case": "Infinity",
-      "error": "$"
+      "case": {
+        "n": {
+          "__nonfinite__": "inf"
+        }
+      },
+      "kind": "effect_key",
+      "error": "null has no canonical form",
+      "note": "encoded symbolically: JSON has no NaN/Infinity literal, so the fixture must not contain one. Implementations substitute their language's non-finite value for {'__nonfinite__': ...}."
     },
     {
-      "case": "arbitrary object",
-      "error": "$"
+      "case": {
+        "n": {
+          "__nonfinite__": "inf"
+        }
+      },
+      "kind": "effect_key",
+      "error": "null has no canonical form",
+      "note": "encoded symbolically: JSON has no NaN/Infinity literal, so the fixture must not contain one. Implementations substitute their language's non-finite value for {'__nonfinite__': ...}."
     },
     {
-      "case": "non-string key",
-      "error": "$: non-string key 1"
+      "case": {
+        "café": 1,
+        "café": 2
+      },
+      "kind": "effect_key",
+      "error": "two distinct keys normalise to the same key under NFC; one would silently overwrite the other"
     }
-  ]
+  ],
+  "reject_encoding": "A reject case of the form {'__nonfinite__': 'nan'|'inf'} denotes the language's NaN / Infinity value, which strict JSON cannot express."
 }

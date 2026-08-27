@@ -1,7 +1,8 @@
 """SPIKE 02 REVISED GATE — the eight properties the review demanded."""
 import os, tempfile
 import pytest
-from pin import (AgentDefinition, ToolBinding, AdapterContract, Pin,
+from pin import (
+    ExtensionBinding,AgentDefinition, ToolBinding, AdapterContract, Pin,
                  IncompatibleCheckpoint, ArtifactMissing, NonCanonical,
                  canonical_digest)
 from runtime import Store, Runtime, TripwireAdapter, AdapterInvoked
@@ -45,7 +46,18 @@ def test_equivalent_definitions_same_digest():
     (lambda: _defn(tools=(_tool(approval="always"),)),             "approval mode"),
     (lambda: _defn(tools=(_tool(cred="prod-key"),)),               "credential ref"),
     (lambda: _defn(tools=(_tool(), _tool("extra"))),               "added tool"),
-    (lambda: _defn(exts=("Instrumentation",)),                     "extension added"),
+    (lambda: _defn(exts=(ExtensionBinding(name="Instrumentation",
+                                         artifact_digest="ext-a1"),)),
+                                                                   "extension added"),
+    (lambda: _defn(exts=(ExtensionBinding(name="Instrumentation",
+                                         artifact_digest="ext-CHANGED"),)),
+                                                                   "extension artifact"),
+    (lambda: _defn(exts=(ExtensionBinding(name="A", artifact_digest="1"),
+                         ExtensionBinding(name="B", artifact_digest="2"))),
+                                                                   "extension order A,B"),
+    (lambda: _defn(exts=(ExtensionBinding(name="B", artifact_digest="2"),
+                         ExtensionBinding(name="A", artifact_digest="1"))),
+                                                                   "extension order B,A"),
 ])
 def test_every_execution_relevant_change_mismatches(store, mutate, label):
     rt, a = Runtime(store), _adapter()

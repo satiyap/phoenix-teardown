@@ -5,7 +5,8 @@ NEGATIVE CONTROL proving the test fails when the guarantee is removed.
 """
 import json, sqlite3
 import pytest
-from pin import (AgentDefinition, ToolBinding, AdapterContract, Pin, NonCanonical,
+from pin import (
+    ExtensionBinding,AgentDefinition, ToolBinding, AdapterContract, Pin, NonCanonical,
                  CANON_PROFILE, CANON_VERSION, canonical_digest,
                  IncompatibleCheckpoint, ArtifactMissing, ArtifactCorrupted,
                  ConcurrentResume)
@@ -162,12 +163,114 @@ def test_numbers_outside_the_profile_are_rejected(bad, label):
     with pytest.raises(NonCanonical):
         canonical_digest(bad, kind="effect_key")
 
-def test_reference_vectors_reproduce():
-    """The normative fixture must reproduce exactly — including its rejections."""
+def _subst(v):
+    """A reject case {"__nonfinite__": "nan"|"inf"} denotes a value strict JSON
+    cannot express. The fixture stays parseable; each language substitutes."""
+    if isinstance(v, dict):
+        if set(v) == {"__nonfinite__"}:
+            return float("nan") if v["__nonfinite__"] == "nan" else float("inf")
+        return {k: _subst(x) for k, x in v.items()}
+    return v
+
+
+def _fixture():
     import json, pathlib
-    fx = json.loads(pathlib.Path("canon_vectors.json").read_text())
+    return json.loads(pathlib.Path("canon_vectors.json").read_text())
+
+
+def test_reference_accept_vectors_reproduce():
+    fx = _fixture()
     assert fx["profile"] == f"{CANON_PROFILE}/v{CANON_VERSION}"
     for row in fx["accept"]:
         assert canonical_digest(row["payload"], kind=row["kind"]) == row["digest"], row["n"]
+
+
+def test_reference_reject_vectors_actually_reject():
+    """Review found this loop was literally `pass`.
+
+    A fixture that lists rejections without attempting them is decoration. Each
+    case must raise, and the test must fail if any is silently accepted.
+    """
+    fx = _fixture()
+    assert fx["reject"], "fixture has no rejection cases"
+    accepted = []
     for row in fx["reject"]:
-        pass   # rejection cases are asserted by the parametrised test above
+        case = _subst(row["case"])
+        try:
+            canonical_digest(case, kind=row["kind"])
+            accepted.append(row["error"])
+        except NonCanonical:
+            pass
+    assert not accepted, f"these MUST be rejected but were accepted: {accepted}"
+
+
+def test_fixture_is_strict_json():
+    """Python writes bare NaN/Infinity, which no other language can parse — the
+    JS oracle failed to even LOAD the fixture until this was fixed."""
+    import json, pathlib
+    raw = pathlib.Path("canon_vectors.json").read_text()
+    for literal in ("NaN", "Infinity", "-Infinity"):
+        assert f": {literal}" not in raw, f"fixture contains non-JSON literal {literal}"
+    json.loads(raw)
+
+
+# ---------------------------------------------------------------- INVARIANT 8
+# Key ordering and NFC collisions. Both were violated by the implementation
+# while the spec claimed otherwise (review finding 1).
+
+def test_nfc_colliding_keys_are_rejected_not_merged():
+    """Two distinct keys normalising to one must NOT silently overwrite.
+
+    Before the fix, {"café": 1, "cafe\u0301": 2} produced {"café": 2} — a digest
+    for an object the caller never supplied, with a field silently dropped.
+    """
+    with pytest.raises(NonCanonical) as e:
+        canonical_digest({"caf\u00e9": 1, "cafe\u0301": 2}, kind="effect_key")
+    assert "normalise" in str(e.value).lower()
+
+
+def test_key_order_is_utf8_byte_order_including_non_bmp():
+    """The sort rule must be independently specified, and it is UTF-8 byte order.
+
+    `json.dumps(sort_keys=True)` sorts by code point, NOT the UTF-16 code units
+    RFC 8785 requires; they disagree exactly for non-BMP characters, because a
+    surrogate pair starts 0xD800 which sorts below U+E000. This asserts our
+    documented rule rather than assuming Python's default matches it.
+    """
+    pair = {"\ue000": 1, "\U0001f600": 2}
+    reversed_insertion = {"\U0001f600": 2, "\ue000": 1}
+    a = canonical_digest(pair, kind="effect_key")
+    b = canonical_digest(reversed_insertion, kind="effect_key")
+    assert a == b, "insertion order must not affect the digest"
+
+    # and the order is the DOCUMENTED one: U+E000 before U+1F600
+    import pin
+    blob = pin._emit(pin._canon(pair)).decode()
+    assert blob.index("\ue000") < blob.index("\U0001f600"), (
+        "UTF-8 byte order puts U+E000 first; got UTF-16 order instead")
+
+
+def test_extension_order_changes_the_digest():
+    """Extensions compose, so order is semantic. They were being SORTED."""
+    a = ExtensionBinding(name="a", artifact_digest="d1")
+    b = ExtensionBinding(name="b", artifact_digest="d2")
+    x = AgentDefinition(name="r", instructions="i", extensions=(a, b))
+    y = AgentDefinition(name="r", instructions="i", extensions=(b, a))
+    assert x.digest != y.digest, "swapping two extensions must change the digest"
+
+
+def test_extension_requires_an_artifact_digest():
+    with pytest.raises(NonCanonical):
+        ExtensionBinding(name="a", artifact_digest="")
+
+
+def test_model_digests_are_domain_separated():
+    """AgentDefinition.digest and AdapterContract.digest omitted their kind, so
+    domain separation existed in the envelope but not in the models using it."""
+    payload = {"name": "x", "instructions": "y"}
+    generic = canonical_digest(payload, kind="generic")
+    d = AgentDefinition(name="x", instructions="y").digest
+    assert d != generic, "AgentDefinition.digest must not sit in the generic domain"
+    assert d == canonical_digest(
+        {"name": "x", "instructions": "y", "tools": [], "extensions": []},
+        kind="agent_definition")
