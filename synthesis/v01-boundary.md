@@ -74,7 +74,7 @@ Not "forgotten" — each has a named trigger that would pull it forward.
 | **Static policy comparison** (Cedar analysis) | `observe` mode gives empirical comparison, which is sufficient early | A policy change large enough that empirical evidence is too slow |
 | **Channel protocols** (turn expectations) | AG2's messaging works without them | Multi-agent conversations where turn order actually matters |
 | **Multi-surface collaboration** (session sharing, co-driving, comments) | Product surface, not platform | A customer with more than one human per session |
-| **Native TUI adapter** | The hardest integration mode; ACP covers the agents we care about | An agent worth adapting that offers no API |
+| **Native TUI adapter** | Out of scope under the SaaS/SDK-only shape (amended 2026-08-27): we operate the agents on vendor SDKs, so there is no third-party TUI to scrape. The earlier reason (superseded 2026-08-27) rested on ACP covering the agents we cared about, which no longer applies because ACP is not a shipped path either | A first-party need to drive a terminal-only tool, which would be a connector rather than an adapter |
 
 ---
 
@@ -158,8 +158,9 @@ v0.1 shipment are different scopes** (§1 of `scope-reconciliation.md`).
 > Control: it has no `Principal` model, so running it would mean a second policy
 > store unable to name the principal every decision must reference.
 >
-> **We never build** a compensation engine, a workflow engine, a model gateway, an
-> agent-authoring framework, or a bespoke policy/trace/message format — because the
+> **We never build** a compensation engine, a workflow engine, a model gateway, a
+> **public** agent-authoring framework (amended 2026-08-27: we own an internal harness over
+> the vendor SDKs), or a bespoke policy/trace/message format — because the
 > evidence says those are either solved elsewhere or absent everywhere for a reason.
 
 ### v0.1 shipment

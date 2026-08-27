@@ -24,6 +24,10 @@ column existed, which contradicted the schema.
 }
 ```
 
+*(Amended 2026-08-27: this entry showed `trace_id` and no `epoch`. `traceparent` replaced the
+bare id because propagation needs the parent span and sampled flag, and `epoch` was added with
+the rewind model.)*
+
 `seq` and `epoch` are both assigned **inside the insert** (§02); a caller supplies
 neither. `traceparent` is the full W3C header value, not a bare trace id — the parent span
 and sampled flag are what make propagation work — and it rides the event so a trace can be

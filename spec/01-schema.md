@@ -51,6 +51,9 @@ CREATE TABLE principals (
     PRIMARY KEY (tenant_id, principal_id),
     FOREIGN KEY (tenant_id, on_behalf_of)
         REFERENCES principals (tenant_id, principal_id)
+
+    -- lets approvals.decided_by pin the kind in its FK (see `approvals`)
+    CONSTRAINT principals_id_kind UNIQUE (tenant_id, principal_id, kind)
 );
 
 CREATE INDEX principals_active
@@ -112,7 +115,8 @@ column later is a migration, and the identity model is cheap to get right up fro
 ```sql
 CREATE TABLE adapter_contracts (
     tenant_id      BIGINT NOT NULL,
-    identity       TEXT   NOT NULL,       -- 'acp:claude-code'
+    identity       TEXT   NOT NULL,       -- 'sdk:claude-agent'
+                                          -- (an acp: identity was superseded 2026-08-27)
     digest         TEXT   NOT NULL,       -- DERIVED from the contract, not supplied
     protocol_version TEXT NOT NULL,
     -- The enum is Omnigent's full taxonomy and is kept so the column never needs a
@@ -154,7 +158,9 @@ CREATE TABLE runs (
     run_id         TEXT   NOT NULL,
     state          run_state NOT NULL DEFAULT 'draft',
 
-    -- intent lives ON the run in v0.1 (no Task resource yet)
+    -- intent lives ON the run for now. `Task`/routines are Tier 2 as of 2026-08-27;
+    -- `runs.task_id` arrives as a nullable FK in spec 10/11, and intent stays on the
+    -- run until then.
     agent_id       TEXT   NOT NULL,
     prompt         TEXT,
     created_by     TEXT   NOT NULL,        -- the acting principal
@@ -580,12 +586,21 @@ CREATE TABLE approvals (
     expires_at     TIMESTAMPTZ,
     decided_at     TIMESTAMPTZ,
     decided_by     TEXT,                   -- → principals. THE field nobody has.
+    -- Carried so the FK below can PIN the kind. Redundant by design: without it
+    -- `decided_by` is any principal, and "one attributable human decision"
+    -- (spec/09 7) is prose the schema does not enforce. Found 2026-08-27 while
+    -- applying decision D-A.
+    decided_by_kind principal_kind
+        CHECK (decided_by_kind IS NULL OR decided_by_kind = 'human'),
     decision_rationale TEXT,               -- durable on APPROVE as well as deny
 
     PRIMARY KEY (tenant_id, approval_id),
     FOREIGN KEY (tenant_id, run_id) REFERENCES runs (tenant_id, run_id),
-    FOREIGN KEY (tenant_id, decided_by)
-        REFERENCES principals (tenant_id, principal_id),
+    -- (principal_id, kind) must be UNIQUE on principals for this to be a legal FK;
+    -- see the `principals_id_kind` unique constraint. This is what makes "the
+    -- approver is a human" a database fact rather than an API convention.
+    FOREIGN KEY (tenant_id, decided_by, decided_by_kind)
+        REFERENCES principals (tenant_id, principal_id, kind),
     -- run_id is IN the FK, so an approval cannot gate an effect belonging to a
     -- DIFFERENT run. With separate FKs, approval-for-run-B could reference
     -- effect-of-run-A and the database would accept it.
@@ -594,7 +609,8 @@ CREATE TABLE approvals (
 
     -- a terminal decision MUST name its approver and when (invariant 8)
     CHECK ((status IN ('approved','denied'))
-           = (decided_by IS NOT NULL AND decided_at IS NOT NULL))
+           = (decided_by IS NOT NULL AND decided_at IS NOT NULL
+              AND decided_by_kind IS NOT NULL))
 );
 
 -- At most ONE pending approval per gated action. Without this, two concurrent

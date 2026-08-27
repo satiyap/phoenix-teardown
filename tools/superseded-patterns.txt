@@ -33,6 +33,15 @@ adapt(s|ing|ed)?\b.{0,60}\bagents?\b	2026-08-27	we build and operate the agents;
 someone else'?s agents?	2026-08-27	running others' agents is no longer a requirement
 other people'?s agents?	2026-08-27	running others' agents is no longer a requirement
 framework[- ]neutral	2026-08-27	the thesis is a SaaS platform where we build and operate the agents
+acp:	2026-08-27	adapter identities are `sdk:<vendor>`; there is no acp: identity
+claude-code	2026-08-27	the first adapter is the Claude Agent SDK; `claude-code` is not an identity we ship
+acp covers the agents we care about	2026-08-27	ACP is not a shipped path; the reason is now SaaS/SDK-only
+no task resource yet	2026-08-27	Task/routines are Tier 2; `runs.task_id` arrives in spec 10/11
+tells? (you )?whether the effect happened	2026-08-27	overclaim: it knows which effects are SETTLED and which are UNCERTAIN
+can tell you whether the effect happened	2026-08-27	overclaim: it knows which are settled and which are uncertain
+the restriction costs nothing	2026-08-27	the cost is real: vendor-hosted tools are unsupported until spike 06
+spike the storage swap before committing	2026-08-26	done: spikes/01-ag2-storage
+assigned to it as approver	2026-08-27	no assignee model exists; agents do not decide approvals in v0.1
 four[- ]methods?	2026-08-27	two RPCs; AX's four-method contract is upstream precedent, not our shape
 start → \{run, send, cancel, close\}	2026-08-27	the adapter surface is Run and Describe
 \btask\b.{0,40}\bdefer	2026-08-27	Task/routines moved to Tier 2; the deferral trigger is met

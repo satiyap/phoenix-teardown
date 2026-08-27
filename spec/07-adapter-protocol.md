@@ -156,7 +156,9 @@ message End {
 ## Contract, stated precisely
 
 Google AX's practice: state the *terminator count* in the contract, because that is what
-makes a third-party adapter implementable without reading our source.
+makes a **second** adapter implementable from the contract alone — which is how we keep SDKs
+swappable (amended 2026-08-27: this said "a third-party adapter", and no third party writes
+adapters for us).
 
 1. The control plane sends **exactly one `Start`**, first.
 2. It may then send **zero or more `Input`** frames, **zero or more `ToolResult` /
@@ -266,13 +268,17 @@ The transport collapses to a function call; **the contract does not**. Nothing m
 customer system without an `effect_ledger` row, because a tool the SDK executes directly is
 an effect the platform cannot claim, police, or attest.
 
-This is why "an adapter cannot bring its own tools" moved from a cost to **the design**. In
-the earlier framing we accepted it reluctantly, to keep the platform's ownership of effects
-honest. Now that we build every adapter ourselves, there is no third party asking to bring
-their own tools, and the restriction costs nothing while buying the entire guarantee.
+This is why "an adapter cannot bring its own tools" moved from a cost to **the design**
+(2026-08-27, with the SaaS repositioning): we build every adapter, so no third party is asking
+to bring tools.
 
-Tested as §08 inventory row 30a, whose negative control lets the SDK execute a tool
-directly and asserts **no ledger row appears**.
+**The cost is real, and naming it is the point.** Vendor-hosted tools are **unsupported until
+spike 06 decides** (OQ-043), and the analytics pack loses web search until then. An earlier
+version of this paragraph (superseded 2026-08-27) claimed the restriction was free while buying
+the entire guarantee — the guarantee is real, the zero cost was not.
+
+**Required by §08 inventory row 30a**, whose negative control lets the SDK execute a tool
+directly and asserts no ledger row appears. **No executable test exists yet — spike 06.**
 
 ## What must be typed, and why
 
@@ -367,7 +373,14 @@ usable for optimisation.
 
 ---
 
-## Transport, authentication, and limits
+## Transport, authentication, and limits — NOT SHIPPED IN v0.1 (2026-08-27)
+
+> **v0.1 ships in-process SDK adapters only**, so nothing below is exercised by the first
+> release: there is no remote adapter to authenticate. It is **retained rather than deleted
+> because the security reasoning must not be rediscovered** — Google AX ships a distributed
+> harness runtime with logging-only interceptors, no authN and no TLS, on a service that
+> provisions sandboxes. The first time we add a remote adapter, this section is the answer
+> already worked out. Treat it as a design commitment, not a v0.1 requirement.
 
 gRPC over TCP or a Unix socket. A remote adapter needs **no co-location** — the reason we
 chose a gRPC shape over ACP-over-stdio, with ACP sitting *behind* an adapter rather than

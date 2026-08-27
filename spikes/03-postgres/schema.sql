@@ -2,15 +2,23 @@
 -- Postgres scenarios exercise. Table and column names match the spec exactly so a
 -- divergence is a spec bug, not a translation bug.
 
+-- Re-running this file must fully rebuild. CREATE FUNCTION is not idempotent, so a
+-- second apply used to ABORT partway and leave a half-built schema -- which is how a
+-- test run reported PASS against a database missing the very constraint under test
+-- (found 2026-08-27). Hence CREATE OR REPLACE below, and DROP ... CASCADE here.
+DROP TRIGGER IF EXISTS run_events_epoch_check ON run_events;
 DROP TABLE IF EXISTS approvals, effect_ledger, run_events, run_leases,
                      run_lease_history, runs, principals CASCADE;
-DROP TYPE IF EXISTS effect_status CASCADE;
+DROP TYPE IF EXISTS effect_status, principal_kind CASCADE;
+
+CREATE TYPE principal_kind AS ENUM ('human', 'agent', 'service', 'remote');
 
 CREATE TABLE principals (
     tenant_id    BIGINT NOT NULL,
     principal_id TEXT   NOT NULL,
-    kind         TEXT   NOT NULL,
-    PRIMARY KEY (tenant_id, principal_id)
+    kind         principal_kind NOT NULL,
+    PRIMARY KEY (tenant_id, principal_id),
+    CONSTRAINT principals_id_kind UNIQUE (tenant_id, principal_id, kind)
 );
 
 CREATE TABLE runs (
@@ -38,7 +46,7 @@ CREATE TABLE run_events (
 );
 CREATE INDEX run_events_fold ON run_events (tenant_id, run_id, epoch, seq);
 
-CREATE FUNCTION check_event_epoch() RETURNS trigger AS $$
+CREATE OR REPLACE FUNCTION check_event_epoch() RETURNS trigger AS $$
 DECLARE cur INTEGER;
 BEGIN
   SELECT current_epoch INTO cur FROM runs
@@ -133,14 +141,18 @@ CREATE TABLE approvals (
     status      TEXT   NOT NULL
         CHECK (status IN ('pending','approved','denied','expired','superseded')),
     decided_by  TEXT,
+    decided_by_kind principal_kind
+        CHECK (decided_by_kind IS NULL OR decided_by_kind = 'human'),
     responded_at TIMESTAMPTZ,
     expires_at  TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (tenant_id, approval_id),
     FOREIGN KEY (tenant_id, run_id) REFERENCES runs (tenant_id, run_id),
-    FOREIGN KEY (tenant_id, decided_by) REFERENCES principals (tenant_id, principal_id),
+    FOREIGN KEY (tenant_id, decided_by, decided_by_kind)
+        REFERENCES principals (tenant_id, principal_id, kind),
     FOREIGN KEY (tenant_id, action_ref, run_id)
         REFERENCES effect_ledger (tenant_id, idempotency_key, run_id),
-    CHECK ((status IN ('approved','denied')) = (decided_by IS NOT NULL))
+    CHECK ((status IN ('approved','denied'))
+           = (decided_by IS NOT NULL AND decided_by_kind IS NOT NULL))
 );
 CREATE UNIQUE INDEX approvals_pending_one ON approvals (tenant_id, action_ref)
     WHERE status = 'pending';

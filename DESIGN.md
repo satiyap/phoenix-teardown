@@ -45,11 +45,11 @@ Four commitments distinguish it, and each exists because 13 projects showed nobo
 
 1. **Resumption is version-safe.** A run records a content digest of the agent definition it
    started on and refuses to resume across a change.
-2. **After a crash, we can tell you whether the effect happened.** No framework in the study
-   can. Phoenix records **intent before every effect**, keys it by the effect's **position in
-   the run**, and surfaces the genuinely uncertain cases to a human instead of retrying them.
-   A double refund and a missed refund are different failures, and guessing turns one into
-   the other.
+2. **Side effects are the platform's problem.** Phoenix records **intent before every
+   effect** and keys it by the effect's **position in the run**, so after a crash it knows
+   which effects are settled and which are uncertain — and hands the uncertain ones to a
+   human rather than retrying blind. No framework in the study does this. A double refund and
+   a missed refund are different failures, and guessing turns one into the other.
 3. **Capability is declared, verified, and separated from behaviour.**
 4. **Authority is attributable.** Every policy decision and every approval names the
    principal behind it.
@@ -94,7 +94,7 @@ identity is actually for — being nameable as a Cedar `principal`.
 │   refresher)                                                             │
 └───────────────────────────────┬─────────────────────────────────────────┘
                                 │ SOUTHBOUND gRPC bidi
-                                │ Run(stream) + Describe()          
+                                │ Run(stream) + Describe()
                     ┌───────────┼───────────┐
                  Adapter     Adapter     Adapter
                  (ACP)       (in-proc)   (native TUI)
@@ -220,7 +220,7 @@ phoenix run --agent revenue-analyst --bundle sonyliv-analytics \
 ```
 
 > **Amended 2026-08-27.** This step previously read "run someone else's agent" and invoked
-> `--adapter acp --agent claude-code`. Both are gone: we build and operate the agents, and
+> an ACP adapter with a third-party agent (both superseded 2026-08-27). Both are gone: we build and operate the agents, and
 > the customer supplies the **bundle**, not the agent. See
 > [`synthesis/scope-reconciliation.md`](synthesis/scope-reconciliation.md) §7.
 
@@ -404,7 +404,7 @@ Recorded so they are revisited against reality rather than rediscovered.
 
 1. **Integrating `ag2.network`** is the largest single dependency and the only
    precedent for messaging. Its file WAL and index pruning give its dedupe guarantee a
-   retention horizon we must replace. **Spike the storage swap before committing.**
+   retention horizon we must replace. **~~Mitigation: spike the storage swap~~ — done 2026-08-26** (`spikes/01-ag2-storage`), so this mitigation is superseded; the residual risk is maintaining the compatibility layer across AG2 releases.**
 2. **`Task` as a distinct resource** rests on one precedent, and Omnigent applies it
    only to scheduled work. If interactive runs never need it, it is speculative
    generality — the mistake ADR-0003 nearly made in the other direction.

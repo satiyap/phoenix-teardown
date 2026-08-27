@@ -513,7 +513,117 @@ self-test: a wrong README count fails the check.
   sentence not quoted]`. Detail is now printed only on failure. Misleading output in a green
   run is the same defect class as a green run that means nothing.
 
-### The gate's FINAL run, and `make check` — verbatim, 2026-08-27 (redo 2)
+### 7c. Redo 3 — closing (2026-08-27)
+
+Nine items, two decisions made for me, and **four defects I found while applying them** — one
+of which invalidated a claim this project has repeated since ADR-0015.
+
+#### D-A. Agents do not decide approvals in v0.1
+
+Applying this literally produced a contradiction my own gate caught within minutes, and the
+contradiction was instructive. The instruction's wording — *"Approvals are decided by `human`
+and `admin` principals"* — **mixes two axes**:
+
+| Axis | Values | Says |
+|---|---|---|
+| credential **class** | `agent` \| `admin` | what a *token* may do |
+| principal **kind** | `human` \| `agent` \| `service` \| `remote` | what the *actor* is |
+
+Adding a `human` row put three entries under a heading that reads "Two credential classes", and
+`check_openapi()` failed with *"06-api.md defines credential class `human` with no matching
+securityScheme"*. So the rule is recorded on the **principal-kind** axis instead: an admin token
+is *necessary but not sufficient*, because `approvals.decided_by` must reference a principal of
+kind `human`. A service account with admin rights cannot decide an approval.
+
+| Artifact | Before | After |
+|---|---|---|
+| `spec/06:16` | agent may "decide approvals **assigned to it as approver**" | agent may create/submit/read runs and **read** approvals; **may not decide any approval** → `403 wrong_credential_class` |
+| `spec/06:23` | a self-approval prohibition, and an assignee model | both retracted; §09 7 keeps the deferral. Two-axis explanation added |
+| `spec/08` row 29a | "a principal cannot decide an approval gating its own effect" | "an **agent** token on `/decide` is refused `403`"; negative control drops the class check ⇒ an agent decides and `decided_by` is not a human |
+
+The second wording was worse than the first, and worth naming: **"assigned to it as approver"
+invented a model with no column to hold it.** `approvals` has `decided_by`, not `assigned_to`.
+
+#### D-B. Remote adapter transport is a commitment, not shipped
+
+`spec/07` §Transport now carries a dated heading: **not shipped in v0.1**, in-process SDK
+adapters only, *retained because the security reasoning must not be rediscovered* — Google AX
+ships a distributed harness runtime with logging-only interceptors, no authN and no TLS, on a
+service that provisions sandboxes. `spec/07:159` "third-party adapter implementable" became
+"a **second** adapter implementable from the contract alone, which is how we keep SDKs
+swappable".
+
+#### The nine items
+
+| # | Item | `file:line` | Fix |
+|---|---|---|---|
+| 1 | identity comment; Native TUI reason | `spec/01:115`, `v01-boundary.md:77` | `'sdk:claude-agent'` with a dated note; TUI reason → out of scope under SaaS/SDK-only, since ACP is not the alternative either. `acp:` and `claude-code` added to the pattern file |
+| 2 | authoring-framework wording | `v01-boundary.md:161`, `exit-criteria.md:132` | "a **public** agent-authoring framework"; Q25 → "because we operate the agents ourselves and keep the adapter boundary to swap SDKs" |
+| 3 | Task comment | `spec/01:157` | `Task`/routines are Tier 2; `runs.task_id` arrives as a nullable FK in spec 10/11; intent stays on the run until then |
+| 4 | D-A | above | applied, then corrected |
+| 5 | overclaim | `README:228`, `DESIGN:48` | "records intent before every effect, so after a crash it knows which effects are **settled** and which are **uncertain** — and hands the uncertain ones to a human rather than retrying blind". Pattern added |
+| 6 | unmediated wording + D-B | `spec/07:269,271-272,274` | date added; "the restriction costs nothing" deleted → **"The cost is real: vendor-hosted tools are unsupported until spike 06 decides, and the analytics pack loses web search until then."**; "Tested as row 30a" → "**Required by** row 30a; **no executable test exists yet — spike 06**" |
+| 7 | stale mitigation | `DESIGN.md:405` | struck through + "done 2026-08-26, `spikes/01`; residual risk is the compatibility layer across AG2 releases" |
+| 8 | undated reasons; whitespace | `spec/04:27`, `spec/02:489` + seq-race, `spec/06` approval-authority; `DESIGN:97`, `reference-architecture:40` | dates and reasons added; trailing whitespace stripped (both from my own diagram edits); **`git diff --check` wired into `make check`** |
+| 9 | gate mutations | `tools/test_validate_spec.py` | six verifier misses added as mutations — `acp:claude-code`, `ACP covers the agents we care about`, `no Task resource yet`, `can tell you whether the effect happened`, `the restriction costs nothing`, `Spike the storage swap before committing`. All six failed the gate before the fix and pass after. **15 controls total** |
+
+#### Four defects found while applying, not on the list
+
+**1. "One attributable human decision" was prose, not a constraint.** This is the serious one.
+`spec/09` §7 has claimed *"one attributable human decision"* since it was written, and ADR-0015
+exists because no project in the study names its approver. But `decided_by` was a **plain
+foreign key to `principals` with no constraint on kind** — an agent or a service account could
+be recorded as the approver and the database would accept it. Applying D-A forced the question
+*"what actually stops an agent deciding?"* and the answer was **nothing in the schema**.
+
+Fixed by carrying `decided_by_kind` and pinning it inside the FK —
+`(tenant_id, decided_by, decided_by_kind) → principals (tenant_id, principal_id, kind)` — which
+needs a new `UNIQUE (tenant_id, principal_id, kind)` on `principals`. **Spike 03 scenario 9**
+proves an agent, a service account, and an agent claiming `kind='human'` are all refused.
+
+**2. `schema.sql` was not idempotent, and it produced a false PASS.** `CREATE FUNCTION` aborted
+on a second apply, leaving a **half-built schema**. A standalone run of the new approver test
+reported 6/6 against a database that did **not contain the constraint under test** — it passed
+because the inserts failed for unrelated reasons. Now `CREATE OR REPLACE`, trigger dropped
+first, both applies verified.
+
+**3. The new negative control corrupted the schema it measured.** It dropped both constraints,
+**committed**, and never restored them, so the first run passed and every later run failed. Now
+the drop-insert-observe sequence runs in a transaction that is **rolled back**, with a closing
+assertion that both constraints are present. Verified by running the suite twice: 42/42 both
+times. *A test must not leave the system it measures in a different state, and "run it twice"
+is the cheapest check for that.*
+
+**4. Two of my own edits introduced the whitespace item 8 asked me to fix.** The trailing
+spaces at `DESIGN.md:97` and `reference-architecture.md:40` were padding I added in redo 2 to
+keep ASCII diagrams aligned. Item 8's own remedy — `git diff --check` in `make check` — now
+prevents the class.
+
+Defects 2 and 3 are the same class as the retracted `observed` scenario: **a test that passes
+without exercising the mechanism it names.** Three instances in three passes is a pattern, and
+the countermeasure that actually worked here was asking the database which constraints it held
+rather than trusting the file that was supposed to create them.
+
+#### Counts
+
+| Number | Source of truth | Value |
+|---|---|---|
+| gate assertions | four `RESULT.md` headlines | **116** = 12 + 35 + **42** + 27 |
+| required invariant tests | `spec/08` inventory rows | **49** |
+| ADRs | `decisions/` `**Status:**` lines | **16 — 15 Accepted, 1 Proposed** |
+| gate self-test controls | `tools/test_validate_spec.py` | **15** |
+
+All three of the first are asserted by `validate_spec.py`, so they cannot drift again.
+
+#### Closing note
+
+**Remaining verifier findings after this pass are to be filed as OQs with an owner, not
+redone.** Three redos have reached diminishing returns on wording while surfacing one real
+architectural gap (the unenforced approver kind) and three test-soundness defects. That ratio
+is the argument for stopping: the gate now catches the wording class mechanically, and further
+prose review should become an issue queue rather than another pass.
+
+### The gate's FINAL run, and `make check` — verbatim, 2026-08-27 (redo 3)
 
 ```
 $ make spec
@@ -542,13 +652,24 @@ self-test: superseded-claims gate
   ok   'Our adapter exposes four methods.' in reference-architecture.md
   ok   'The ACP path ships first.' in ADR-0014 (decision section)
   ok   'a pending row past its lease' in exit-criteria.md
+  ok   identity comment 'acp:claude-code'
+  ok   'ACP covers the agents we care about'
+  ok   'no Task resource yet'
+  ok   'can tell you whether the effect happened'
+  ok   'the restriction costs nothing'
+  ok   'Spike the storage swap before committing'
   ok   a dated retraction in the same sentence is exempt
   ok   quoting WITHOUT a date is NOT exempt
   ok   a wrong invariant count in README fails the count check
   ok   an empty pattern file does not silently pass
 
-9 passed, 0 failed
+15 passed, 0 failed
 PASS — every mutation is caught and named; amendments are forgiven only when dated.
+```
+
+```
+$ git diff --check
+(clean)
 ```
 
 ```
@@ -559,12 +680,18 @@ self-test: superseded-claims gate
   ok   'Our adapter exposes four methods.' in reference-architecture.md
   ok   'The ACP path ships first.' in ADR-0014 (decision section)
   ok   'a pending row past its lease' in exit-criteria.md
+  ok   identity comment 'acp:claude-code'
+  ok   'ACP covers the agents we care about'
+  ok   'no Task resource yet'
+  ok   'can tell you whether the effect happened'
+  ok   'the restriction costs nothing'
+  ok   'Spike the storage swap before committing'
   ok   a dated retraction in the same sentence is exempt
   ok   quoting WITHOUT a date is NOT exempt
   ok   a wrong invariant count in README fails the count check
   ok   an empty pattern file does not silently pass
 
-9 passed, 0 failed
+15 passed, 0 failed
 PASS — every mutation is caught and named; amendments are forgiven only when dated.
 project                    depth        cov  status
 ------------------------------------------------------------

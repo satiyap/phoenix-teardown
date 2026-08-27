@@ -120,7 +120,7 @@ Every invariant in this spec, with its negative control. Consolidated from §01�
 | 19 | NFC and NFD digests agree | remove normalisation ⇒ differ |
 | 20 | Domain separation holds | drop `kind` ⇒ collision |
 | 21 | Exactly one `End` frame | accept two ⇒ two terminal states |
-| 29a | A principal cannot decide an approval gating **its own** run's effect | let the requester decide ⇒ self-approval, and the approval records a human who never chose |
+| 29a | An **agent** token on `POST /v1/approvals/{id}/decide` is refused `403 wrong_credential_class` | drop the credential-class check ⇒ an agent decides an approval, and the `decided_by` on record is not a human |
 | 30a | An in-process SDK adapter's tool call produces an `effect_ledger` row | let the SDK's native executor run the tool ⇒ **no ledger row**, so the effect is unclaimed, unpoliced and unattested |
 | 30b | The SDK's native tool executor is disabled at adapter construction | leave it enabled ⇒ two execution paths, one ungoverned |
 | 30c | An adapter that cannot disable native execution for a tool **cannot register that tool** | allow registration ⇒ an effect path the ledger never sees. *Vendor-hosted tools are unsupported in v0.1 (retracted 2026-08-27); whether a provider-reported-use class is admissible is spike 06's decision.* **NOT VERIFIED — spike 06** |

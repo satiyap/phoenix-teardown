@@ -37,7 +37,7 @@ component names the evidence that shaped it. Where a component exists because
 │                                    └────────────┘                        │
 └────────────────────────────────┬──────────────────────────────────────────┘
                                  │  SOUTHBOUND (gRPC bidi stream)
-                                 │  Run(stream) + Describe()      
+                                 │  Run(stream) + Describe()
         ┌────────────────────────┼────────────────────────┐
         ▼                        ▼                        ▼
    ┌─────────┐            ┌─────────┐             ┌─────────┐

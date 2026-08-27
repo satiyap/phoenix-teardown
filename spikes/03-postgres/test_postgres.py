@@ -286,7 +286,8 @@ def s4_claim_vs_denial():
     # deny, then attempt a claim
     with conn.cursor() as c:
         c.execute("UPDATE approvals SET status='denied', decided_by='alice',"
-                  " responded_at=now() WHERE tenant_id=1 AND approval_id='a4'")
+                  " decided_by_kind='human', responded_at=now()"
+                  " WHERE tenant_id=1 AND approval_id='a4'")
         c.execute("UPDATE effect_ledger SET status='denied' WHERE tenant_id=1"
                   " AND idempotency_key='k4' AND status='awaiting_approval'")
     conn.commit()
@@ -307,8 +308,8 @@ def s4_claim_vs_denial():
                   " request_digest, status) VALUES "
                   "(1,'k4b','r1','tool_call','d','awaiting_approval')")
         c.execute("INSERT INTO approvals (tenant_id, approval_id, run_id, action_ref,"
-                  " status, decided_by, responded_at, expires_at) VALUES "
-                  "(1,'a4b','r1','k4b','approved','alice',now(),"
+                  " status, decided_by, decided_by_kind, responded_at, expires_at)"
+                  " VALUES (1,'a4b','r1','k4b','approved','alice','human',now(),"
                   " now() + interval '24 hours')")
     conn.commit()
     p = mp.Process(target=_claimer, args=("k4b", "w1", out))
@@ -600,20 +601,109 @@ def s8_on_conflict_and_isolation():
     a.close(); b.close()
 
 
+# ---------------------------------------------------------------- 9
+def s9_approver_must_be_human():
+    """Is "one attributable human decision" ENFORCED, or only asserted?
+
+    Added 2026-08-27 (redo 3). spec/09 7 claims the approval model provides "one
+    attributable human decision", but `decided_by` was a plain FK to `principals`
+    with no constraint on kind -- so an agent or service principal could be
+    recorded as the approver and the claim was prose. The fix carries
+    `decided_by_kind` and pins it inside the foreign key.
+
+    Invariant: an approval can only be decided by a principal of kind='human'.
+    """
+    print("\n9. the approver must be a human (ADR-0015)")
+    conn = psycopg.connect(DSN)
+    fresh(conn)                       # correct delete order lives in one place
+    with conn.cursor() as c:
+        c.execute("INSERT INTO principals VALUES (1,'bot','agent')")
+        c.execute("INSERT INTO principals VALUES (1,'svc','service')")
+        c.execute("INSERT INTO effect_ledger (tenant_id, idempotency_key, run_id, kind,"
+                  " request_digest) VALUES (1,'k1','r1','tool_call','d')")
+    conn.commit()
+
+    def attempt(label, who, kind, expect_ok):
+        try:
+            with conn.cursor() as c:
+                c.execute("INSERT INTO approvals (tenant_id, approval_id, run_id,"
+                          " action_ref, status, decided_by, decided_by_kind, expires_at)"
+                          " VALUES (1,%s,'r1','k1','approved',%s,%s,"
+                          " now() + interval '1 hour')",
+                          (f"a-{who}-{kind}", who, kind))
+            conn.commit()
+            check(label, expect_ok)
+        except psycopg.errors.Error:
+            conn.rollback()
+            check(label, not expect_ok)
+
+    attempt("a HUMAN principal can be the approver", "alice", "human", True)
+    attempt("an AGENT principal cannot", "bot", "agent", False)
+    attempt("a SERVICE principal cannot", "svc", "service", False)
+    attempt("an agent cannot masquerade by claiming kind='human'", "bot", "human", False)
+
+    try:
+        with conn.cursor() as c:
+            c.execute("INSERT INTO approvals (tenant_id, approval_id, run_id, action_ref,"
+                      " status, decided_by, expires_at) VALUES (1,'a-nokind','r1','k1',"
+                      "'approved','alice', now() + interval '1 hour')")
+        conn.commit()
+        check("a terminal approval without decided_by_kind is refused", False)
+    except psycopg.errors.Error:
+        conn.rollback()
+        check("a terminal approval without decided_by_kind is refused", True)
+
+    # Negative control: without the kind pinned in the FK, an agent IS recorded.
+    #
+    # Run inside a transaction that is ROLLED BACK. An earlier version dropped the
+    # constraints and committed, so the schema stayed broken and every later run of
+    # this scenario "failed" against a database missing the constraint under test.
+    # A test must not leave the system it measures in a different state.
+    try:
+        with conn.cursor() as c:
+            c.execute("ALTER TABLE approvals DROP CONSTRAINT "
+                      "approvals_tenant_id_decided_by_decided_by_kind_fkey")
+            c.execute("ALTER TABLE approvals DROP CONSTRAINT "
+                      "approvals_decided_by_kind_check")
+            c.execute("INSERT INTO approvals (tenant_id, approval_id, run_id, action_ref,"
+                      " status, decided_by, decided_by_kind, expires_at) VALUES "
+                      "(1,'a-nc','r1','k1','approved','bot','agent',"
+                      " now() + interval '1 hour')")
+            c.execute("SELECT decided_by, decided_by_kind FROM approvals"
+                      " WHERE approval_id='a-nc'")
+            got = c.fetchone()
+        check("NC without the kind in the FK an AGENT IS recorded as approver",
+              got == ("bot", "agent"))
+    except psycopg.errors.Error as exc:
+        check("NC without the kind in the FK an AGENT IS recorded as approver",
+              False, str(exc)[:60])
+    finally:
+        conn.rollback()          # restore the constraints for every later run
+
+    with conn.cursor() as c:
+        c.execute("SELECT count(*) FROM pg_constraint WHERE conrelid='approvals'::regclass"
+                  " AND conname LIKE '%decided_by_kind%'")
+        restored = c.fetchone()[0]
+    check("the negative control left the schema intact", restored == 2,
+          f"{restored} of 2 constraints present")
+    conn.close()
+
+
 def main() -> int:
     print("Postgres gate — spec/01-schema.md + spec/02-consistency.md")
     print(f"DSN: {DSN}")
     for fn in (s1_epoch_append_vs_rewind, s2_errcode_mapping,
                s3_claims_across_processes, s4_claim_vs_denial,
                s5_claim_vs_lease_expiry, s6_sweeper_vs_late_settlement,
-               s7_run_lease_fencing, s8_on_conflict_and_isolation):
+               s7_run_lease_fencing, s8_on_conflict_and_isolation,
+               s9_approver_must_be_human):
         fn()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:
         for f in FAIL:
             print(f"  FAILED: {f}")
         return 1
-    print("PASS — all eight scenarios hold against real Postgres.")
+    print("PASS — all nine scenarios hold against real Postgres.")
     return 0
 
 

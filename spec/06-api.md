@@ -13,19 +13,38 @@ whole point of a control plane.
 
 | Class | May | May not |
 |---|---|---|
-| **agent** | create/submit runs it owns, read its own runs, decide approvals **assigned to it as approver** | touch policies, adapters, tenants, other principals' runs, or **decide an approval gating an effect of its own run** |
+| **agent** | create/submit runs it owns, read them, and **read** approvals on them | **decide any approval**; touch policies, adapters, tenants, or other principals' runs |
 | **admin** | everything, including policy and adapter registration | — |
 
 Separate header, separate key material: `Authorization: Bearer <token>` where the token
 carries its class. An agent token presented to a policy endpoint is `403`, not `401` —
 it authenticated fine, it is simply not permitted.
 
-**A principal may never decide an approval gating its own effect.** "Answer its own
-approvals" was the earlier wording and it was wrong: it reads as *the requester decides*,
-which is the opposite of what an approval is for. The rule is that the approver is the
-principal the approval was **assigned to**, and the requesting run's principal is excluded
-even when it holds an otherwise-valid agent token. Enforced on `POST
-/v1/approvals/{id}/decide`, tested as §08 inventory row 29a.
+**An agent credential may not decide an approval.** `POST /v1/approvals/{id}/decide` with an
+agent token is `403 wrong_credential_class`.
+
+Two axes, and conflating them is a mistake worth naming because the first draft of this
+paragraph made it:
+
+- **Credential class** (`agent` | `admin`) says what a *token* may do. There are two, and
+  adding a third for approvals would have been wrong.
+- **Principal kind** (`human` | `agent` | `service` | `remote`) says what the *actor* is.
+  `approvals.decided_by` must reference a principal of kind **`human`** — enforced in the
+  schema by a composite foreign key (§01), not merely by this route.
+
+So an admin token is *necessary* but not *sufficient*: it must also carry a human principal.
+A service account with admin rights cannot decide an approval, which is the whole point of
+ADR-0015.
+
+> **Retracted 2026-08-27 (redo 3).** Two wordings stood here in turn, and both are gone.
+> The first (superseded 2026-08-27) let an agent answer approvals on its own runs, which reads
+> as *the requester decides* — the opposite of what an approval is for. The second (superseded
+> 2026-08-27) named an approver-assignment that does not exist — **an assignee model with no
+> column to hold it**, since `approvals` has `decided_by` and not `assigned_to`.
+>
+> Whether an agent may ever be an approver is deferred **with** the multi-party question, for
+> the same reason: it needs a real organisational policy to answer, not a schema guess. See
+> [§09](09-decisions.md) 7.
 
 **Every request resolves to a `Principal`.** There is no anonymous path. `tenant_id` is
 derived from the token and **never** read from the body or a path parameter, so
@@ -184,7 +203,7 @@ the line above it.
 
 `POST /v1/approvals/{id}/decide` records **one** attributable terminal decision. There is no
 quorum, no m-of-n, no role requirement and no separation-of-duties enforcement beyond the
-self-approval prohibition above. That is a deliberate refusal on the evidence — see
+self-approval prohibition above. That is a deliberate refusal on the evidence, recorded 2026-08-27 — see
 [§09](09-decisions.md) 7 — and workloads requiring more must delegate authorization to an
 external governed system.
 

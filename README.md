@@ -110,10 +110,10 @@ answered, all six synthesis deliverables final.
 | 4 Targeted | + HumanLayer, AWS AgentCore, Microsoft Agent Framework, Agent Control |
 | 5 Synthesis | domain model, reference architecture, build/reuse map, v0.1 boundary |
 | 6 Handoff | `DESIGN.md` + developer journey |
-| 7 Spikes | AG2 storage swap, definition pin, **Postgres concurrency**, **work-bundle generality** — 4 spikes, **109 gate assertions**, verification rules |
+| 7 Spikes | AG2 storage swap, definition pin, **Postgres concurrency**, **work-bundle generality** — 4 spikes, **116 gate assertions**, verification rules |
 | 8 Spec | **10 documents** + compiling `.proto` and OpenAPI contracts; 49 required invariant tests with negative controls |
 
-**How the 109 is counted.** 12 (spike 01) + 35 (02) + 35 (03) + 27 (04), read from the
+**How the 116 is counted.** 12 (spike 01) + 35 (02) + 42 (03) + 27 (04), read from the
 `**Gate assertions: n**` line each `RESULT.md` declares. **`make check` asserts this sum**, so
 the number cannot drift again; the same check asserts the invariant-row count against
 `spec/08-conformance.md` and the ADR split against `decisions/`.
@@ -225,10 +225,10 @@ teardown replaced its own hypothesis, which is what it was for.
 > approvals, the effect ledger and observability; model inference, workflow
 > orchestration and isolation are someone else's.
 >
-> **What it does that nothing in the study does:** after a crash, it can tell you
-> whether the side effect happened — intent is recorded before every effect, keyed by
-> the effect's position in the run, and the genuinely uncertain cases go to a human
-> instead of being retried.
+> **What it does that nothing in the study does:** it **records intent before every
+> effect**, keyed by the effect's position in the run, so after a crash it knows which
+> effects are settled and which are uncertain — and hands the uncertain ones to a human
+> rather than retrying blind.
 
 The original hypothesis, superseded 2026-08-27, described a neutral control plane for
 persistent AI agents with MCP, A2A and ACP as interoperability protocols. The evidence held; the

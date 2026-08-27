@@ -487,8 +487,9 @@ make an in-memory authority horizontally safe.
 lease on the same mechanism as runs.**
 
 `channel_leases` and `channel_lease_history` are defined **once**, in
-[§01](01-schema.md) alongside `run_leases`. They were duplicated here with a different
-column set, which is how an implementer ends up building two tables.
+[§01](01-schema.md) alongside `run_leases`. *(Moved there 2026-08-27: the DDL appeared in both
+documents with a different column set, which is how an implementer ends up building two
+tables.)*
 
 A hub must hold the channel lease before calling `post_envelope`. This is a
 restriction on *our* usage of AG2, not a change to AG2 — consistent with spike 01's

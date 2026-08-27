@@ -85,6 +85,19 @@ MUTATIONS = [
      "decisions/ADR-0014-*.md", "The ACP path ships first."),
     ("'a pending row past its lease' in exit-criteria.md",
      "synthesis/exit-criteria.md", "Consider a pending row past its lease."),
+    # The verifier's actual misses on 3026e38. Each passed the gate before redo 3.
+    ("identity comment 'acp:claude-code'",
+     "spec/01-schema.md", "-- identity looks like 'acp:claude-code'."),
+    ("'ACP covers the agents we care about'",
+     "synthesis/v01-boundary.md", "ACP covers the agents we care about."),
+    ("'no Task resource yet'",
+     "spec/01-schema.md", "Intent lives on the run (no Task resource yet)."),
+    ("'can tell you whether the effect happened'",
+     "README.md", "After a crash it can tell you whether the effect happened."),
+    ("'the restriction costs nothing'",
+     "spec/07-adapter-protocol.md", "And the restriction costs nothing."),
+    ("'Spike the storage swap before committing'",
+     "synthesis/v01-boundary.md", "Mitigation: spike the storage swap before committing."),
 ]
 
 
