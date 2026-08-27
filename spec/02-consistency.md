@@ -81,32 +81,97 @@ anything else as fatal. That distinction belongs in one place; see §Error mappi
 Stated as explicit units, because "it's all transactional" is how half-applied
 mutations happen.
 
-### Appending an event with a state change
+### `runs.state` is a projection, not a second authority
 
-```
-BEGIN
-  INSERT INTO run_events (...) -- with the seq computation above
-  UPDATE runs SET state = $new, last_activity_at = now() WHERE ...
-COMMIT
+The earlier version of §04 claimed state is "never stored in a parallel column" while
+the schema stored `runs.state` and this document updated it. Both cannot be true. The
+resolution:
+
+**The log is the authority. `runs.state` is a named, rebuildable projection**, maintained
+transactionally with the event that causes it, and reconstructible by folding at any
+time.
+
+That is the practical choice — folding a long log on every read is not viable, and
+`WHERE state = 'waiting_input'` needs an index — but it must be *stated*, because a
+projection has obligations a derived value does not:
+
+1. **Written in the same transaction as its event.** Never in a follow-up statement.
+2. **Compare-and-swap on the expected prior state**, so a concurrent writer cannot
+   interleave.
+3. **Rebuildable** by a documented function, and CI asserts projection == fold for every
+   run in a fixture corpus.
+4. **Never read as truth in a correctness decision.** The pin comparison, the effect
+   claim and the lease all read the authoritative rows, not the projection.
+
+```sql
+BEGIN;
+  -- 1. append (seq computed inside the insert, as above)
+  INSERT INTO run_events (...) SELECT ... RETURNING seq;
+
+  -- 2. advance the projection with CAS on the expected prior state AND the fence
+  UPDATE runs
+     SET state = $new, last_activity_at = now()
+   WHERE tenant_id = $tenant
+     AND run_id = $run
+     AND state = $expected_prior          -- CAS: no interleaving
+     AND EXISTS (SELECT 1 FROM run_leases
+                  WHERE tenant_id = $tenant AND run_id = $run
+                    AND holder = $worker AND fence_token = $token
+                    AND expires_at > now());
+  -- 0 rows => either the state moved under us, or we are fenced. Abort the txn.
+COMMIT;
 ```
 
-One transaction. A state that disagrees with the log is not a recoverable condition,
-so it must be impossible rather than repaired.
+Zero rows updated means **abort, not retry-with-a-new-expectation** — the caller's model
+of the run is stale and it must re-read before deciding anything.
 
 ### Claiming and performing an effect — three transactions, deliberately
 
+```sql
+-- TX1: CLAIM. Returns the token this worker must present at settlement.
+INSERT INTO effect_ledger (tenant_id, idempotency_key, run_id, kind,
+                           request_digest, claim_owner, claim_token,
+                           lease_expires_at)
+VALUES ($tenant, $key, $run, $kind, $digest, $worker,
+        COALESCE((SELECT max_claim_token FROM effect_claim_history
+                   WHERE tenant_id=$tenant AND idempotency_key=$key), 0) + 1,
+        now() + interval '5 minutes')
+ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
+RETURNING claim_token;
+-- no row  =>  someone else owns it. STOP. Read the existing row; do NOT execute.
 ```
-TX1:  claim         INSERT INTO effect_ledger (... status='claimed',
-                    lease_expires_at = now() + interval '5 minutes')
-                    ON CONFLICT DO NOTHING RETURNING 1
-      -- no row returned => someone else owns it. STOP. Do not execute.
 
+```
 (no transaction)    perform the side effect        <-- outside any transaction
-
-TX2:  settle        UPDATE effect_ledger SET status='succeeded'|'failed',
-                    completed_at = now(), result_ref = $x
-                    WHERE tenant_id=$1 AND idempotency_key=$2
 ```
+
+```sql
+-- TX2: SETTLE, fenced. Must prove BOTH still-owner AND still-open.
+UPDATE effect_ledger
+   SET status = $outcome, completed_at = now(), result_ref = $ref
+ WHERE tenant_id = $tenant
+   AND idempotency_key = $key
+   AND claim_owner = $worker      -- we still own it
+   AND claim_token = $token       -- ...under THIS claim, not a later one
+   AND status = 'claimed';        -- ...and nobody has already settled it
+-- 0 rows updated => WE ARE FENCED OUT. Do not retry, do not overwrite.
+```
+
+**Why all three predicates.** A `lease_expires_at` column alone is not fencing. The
+sequence that breaks a naive settle-by-key:
+
+```
+worker A claims the effect
+A stalls (GC pause, VM migration)
+the claim lease expires
+the sweeper marks the row 'indeterminate'   <-- a human is now investigating
+A wakes and settles it 'succeeded'          <-- silently overwrites the truth
+```
+
+With `claim_owner = $worker AND claim_token = $token AND status = 'claimed'`, A's update
+matches zero rows and A learns it has been fenced. This is the same fencing problem as
+the run lease, and it needs the same answer — the earlier version of this document said
+"fenced" while storing neither an owner nor a token.
 
 **The effect must not run inside a transaction.** Holding a transaction open across a
 network call to a third party is how a database gets a lock held for a 30-second
@@ -143,15 +208,50 @@ is the gap spike 02 left open.
 ### Acquire
 
 ```sql
--- fence tokens are monotonic per run
-INSERT INTO run_leases (tenant_id, run_id, holder, fence_token, expires_at)
-VALUES ($1, $2, $3,
-        (SELECT COALESCE(MAX(fence_token), 0) + 1
-           FROM run_leases_history WHERE tenant_id=$1 AND run_id=$2),
-        now() + $ttl)
-ON CONFLICT (tenant_id, run_id) DO NOTHING
-RETURNING fence_token;
+-- Fence tokens must be monotonic ACROSS reclaims, so the high-water mark lives in
+-- run_lease_history and outlives the lease row.
+BEGIN;
+  INSERT INTO run_lease_history (tenant_id, run_id, max_fence_token)
+  VALUES ($tenant, $run, 1)
+  ON CONFLICT (tenant_id, run_id)
+    DO UPDATE SET max_fence_token = run_lease_history.max_fence_token + 1,
+                  updated_at = now()
+  RETURNING max_fence_token;                              -- => $token
+
+  INSERT INTO run_leases (tenant_id, run_id, holder, fence_token, expires_at)
+  VALUES ($tenant, $run, $worker, $token, now() + interval '60 seconds')
+  ON CONFLICT (tenant_id, run_id) DO NOTHING
+  RETURNING fence_token;
+  -- no row => another worker holds it. The history bump is harmless: tokens are
+  -- monotonic, not dense.
+COMMIT;
 ```
+
+### Renew
+
+```sql
+UPDATE run_leases SET expires_at = now() + interval '60 seconds'
+ WHERE tenant_id=$tenant AND run_id=$run
+   AND holder=$worker AND fence_token=$token AND expires_at > now();
+-- 0 rows => the lease already expired and may have been reclaimed. STOP WORKING.
+```
+
+Renewal every 20s against a 60s TTL: two missed renewals before expiry, so a single
+slow cycle does not lose the lease.
+
+**`expires_at > now()` in the predicate is essential.** Without it a stalled worker can
+renew a lease that has already been reclaimed by someone else, resurrecting a fenced
+holder.
+
+### Release
+
+```sql
+DELETE FROM run_leases
+ WHERE tenant_id=$tenant AND run_id=$run
+   AND holder=$worker AND fence_token=$token;
+```
+
+The history row is **not** deleted — that is what keeps tokens monotonic.
 
 ### Every subsequent write carries the token
 
@@ -172,10 +272,14 @@ execution the lease exists to prevent.
 ```sql
 BEGIN ISOLATION LEVEL SERIALIZABLE;
   DELETE FROM run_leases
-   WHERE tenant_id=$1 AND run_id=$2 AND expires_at < now()
-  RETURNING holder, fence_token;      -- record to history for monotonicity
+   WHERE tenant_id=$tenant AND expires_at < now()
+  RETURNING run_id, holder, fence_token;
 COMMIT;
 ```
+
+History is already advanced at acquire time, so reclaim only removes the row. Two
+sweepers racing produce a `40001`, and one retries — which is why this is the single
+`SERIALIZABLE` operation in the system.
 
 TTL defaults: **run lease 60s with renewal every 20s**; **effect claim 5 min, no
 renewal**. An effect claim is short-lived by design — if it expires, the effect is

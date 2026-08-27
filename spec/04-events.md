@@ -1,9 +1,11 @@
 # 04 — Event registry
 <!-- status: final -->
 
-The log is the source of truth: run state is **derived by folding it**, never stored in
-a parallel column that can drift (Google AX). That makes the event schema a contract,
-not an implementation detail.
+The log is the **authority**: run state is derived by folding it. `runs.state` is a
+named, rebuildable **projection** of that fold, not a second authority — see
+[§02](02-consistency.md#runsstate-is-a-projection-not-a-second-authority) for the
+obligations that come with it. An earlier version of this document claimed no parallel
+column existed, which contradicted the schema.
 
 ---
 
@@ -50,7 +52,7 @@ carry arbitrary user data; the *type* may not be invented by a caller. An unknow
 | `run.cancel_requested` | `{reason, requested_by}` | `state=cancelling` |
 | `run.cancelled` | `{reason}` | `state=cancelled`, `ended_at` |
 | `run.discarded` | `{reason}` | `state=discarded`, `ended_at` |
-| `run.rewound` | `{before_seq, reason}` | see below |
+| `run.rewound` | `{to_epoch, from_seq, reason}` | opens a new epoch; see §Rewind |
 
 `run.cancel_requested` and `run.cancelled` are **separate events**, from AG2: a request
 is not a fact, and the owner may decline. `state=cancelling` is the honest interval
@@ -123,15 +125,60 @@ Deriving state from the log, precisely.
 
 1. **Order is `(tenant_id, run_id, seq)` ascending.** `created_at` is *not* an ordering
    key — clocks are not monotonic and coarse timers produce ties.
-2. **Apply rewinds first.** For each `run.rewound{before_seq}`, drop that event and
-   every event with `seq >= before_seq`, then continue. ADK's rule: one function is
-   "the single source of truth for which events are live".
+2. **Resolve epochs before folding** (see §Rewind). A single backward pass computes the
+   live set; the fold then runs forward over it. One function owns this, following ADK's
+   rule that there is "a single source of truth for which events are live".
 3. **Unknown `event_type` is an error.** A reducer that skips unknown events silently
    computes a state that never existed. Fail with the type name.
 4. **A terminal event ends the fold.** Events after a terminal state are a bug; log
    loudly and stop rather than continuing.
 5. **The fold is pure.** Same events in, same state out — no clock, no randomness, no
    I/O. This is what makes it testable and what makes replay meaningful.
+
+---
+
+## Rewind — epochs, not deletion
+
+The naive rule ("drop the rewind event and everything at or after `from_seq`") is wrong:
+it also drops every event appended *after* the rewind, so a run could rewind but never
+continue. That was a real defect in the first version of this document.
+
+**Every event carries an `epoch`.** A run starts at epoch 0. `run.rewound{to_epoch,
+from_seq}` opens epoch *n+1* and declares that events in epochs ≤ `to_epoch` with
+`seq >= from_seq` are **superseded**.
+
+```
+epoch 0:  seq 1  2  3  4  5          <- 4 and 5 superseded by the rewind
+                       └──────── run.rewound{to_epoch:0, from_seq:4}  (seq 6, epoch 1)
+epoch 1:  seq 7  8  9                <- the new branch, live
+```
+
+### The algorithm, normatively
+
+```
+live(events):
+    # 1. collect supersession ranges, newest epoch first
+    cuts = [(e.payload.to_epoch, e.payload.from_seq)
+            for e in events if e.event_type == 'run.rewound']
+
+    # 2. an event is live unless some cut supersedes it
+    return [e for e in events
+            if e.event_type != 'run.rewound'
+            and not any(e.epoch <= to_epoch and e.seq >= from_seq
+                        for (to_epoch, from_seq) in cuts)]
+```
+
+Then fold `live(events)` in `(epoch, seq)` order.
+
+Three properties this gives, all of which the naive rule lacked:
+
+- **Continuation works** — events after the rewind are in a later epoch and survive.
+- **Rewinds compose** — a rewind of a rewind is just another cut.
+- **Nothing is deleted** — `run_events` stays append-only, so the full history is
+  auditable even where it is not live. A superseded event is still evidence of what was
+  attempted.
+
+`seq` remains globally monotonic per run across epochs; `epoch` only partitions it.
 
 ---
 
@@ -152,7 +199,9 @@ during a rollout.
 |---|---|---|
 | Fold is deterministic | same log ⇒ same state, 100 runs | introduce `now()` into the fold ⇒ flaky |
 | Ordering is by `seq`, not time | shuffle `created_at`, keep `seq` | order by `created_at` ⇒ wrong state |
-| Rewind drops the right range | rewind mid-log, assert live set | skip rewind handling ⇒ dropped events reappear |
+| Rewind supersedes the right range | rewind mid-log, assert the live set | skip epoch handling ⇒ superseded events reappear |
+| **A run can continue after a rewind** | rewind, append, fold | use the naive `seq >=` rule ⇒ post-rewind events vanish |
+| Rewinds compose | rewind a rewind | handle only the last cut ⇒ wrong live set |
 | Unknown type fails loudly | inject `run.invented` | skip unknowns ⇒ silently wrong state |
 | `approval.decided` requires `decided_by` | omit it | drop the check ⇒ an anonymous approval |
 | Post-terminal events are rejected | append after `run.succeeded` | allow them ⇒ a resurrected run |

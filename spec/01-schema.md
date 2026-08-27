@@ -8,6 +8,15 @@ cross-tenant relationship is a constraint violation, not a silent success.
 Convention: `tenant_id BIGINT` (not UUID) because it appears in every index and
 narrower keys matter. `id` columns are `TEXT` holding a sortable ULID.
 
+**Two exceptions to the composite-FK rule, stated rather than hidden:**
+
+1. `state_entries.scope_key` is unconstrained text, because its referent depends on
+   `scope` (a principal id, a session id, or empty for app scope). A polymorphic FK is
+   not expressible in SQL. Enforced by a trigger instead — see §Polymorphic scope.
+2. `policies.scope = 'project'` is accepted by the enum but **has no referent in
+   v0.1**, because `Project` is not a v0.1 resource. The API rejects it (`422`) until
+   `projects` exists. Recorded here so the gap is visible rather than surprising.
+
 ---
 
 ## Identity
@@ -61,8 +70,12 @@ by the database rather than by policy code that might not run.
 CREATE TABLE agent_definitions (
     tenant_id      BIGINT NOT NULL,
     digest         TEXT   NOT NULL,       -- sha256 hex, see 03-canonicalisation
-    body           JSONB  NOT NULL,       -- the canonical definition document
-    canon_profile  TEXT   NOT NULL,       -- e.g. 'nfc+jcs/v1' — pins the rules used
+    body           JSONB  NOT NULL,       -- canonical definition document; `tools`
+                                          -- and `extensions` are arrays of full
+                                          -- BINDINGS (03), each carrying an
+                                          -- artifact_digest. A name alone does not
+                                          -- pin an implementation.
+    canon_profile  TEXT   NOT NULL,       -- e.g. 'nfc+intjson/v1' — pins the rules used
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     PRIMARY KEY (tenant_id, digest),
@@ -105,6 +118,8 @@ CREATE TABLE adapter_contracts (
     integration_mode TEXT NOT NULL
         CHECK (integration_mode IN ('sdk_in_process','cli_subprocess',
                                     'acp_subprocess','native_tui','native_server')),
+    -- the adapter's OWN checkpoint payload format, which runs pin (07 6)
+    payload_schema_digest TEXT NOT NULL,
     declared_capabilities JSONB NOT NULL DEFAULT '{}',
     registered_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -142,6 +157,9 @@ CREATE TABLE runs (
     pinned_adapter_digest    TEXT NOT NULL,
     pinned_payload_schema    TEXT NOT NULL,   -- the ADAPTER's own format
     checkpoint_schema_version INTEGER NOT NULL,
+
+    FOREIGN KEY (tenant_id, pinned_adapter_identity, pinned_adapter_digest)
+        REFERENCES adapter_contracts (tenant_id, identity, digest),
 
     -- failure classification: queryable, so retry logic can branch (Omnigent)
     error_code     TEXT,
@@ -221,8 +239,15 @@ CREATE TABLE effect_ledger (
     request_digest TEXT   NOT NULL,
     result_ref     TEXT,
     error_code     TEXT,
+
+    -- FENCING. A lease_expires_at alone is NOT fencing: worker A can claim,
+    -- stall past expiry, have the sweeper mark it indeterminate, then wake and
+    -- settle it 'succeeded'. Settlement must therefore prove BOTH that it still
+    -- owns the claim and that the claim is still open.
+    claim_owner    TEXT   NOT NULL,            -- worker identity
+    claim_token    BIGINT NOT NULL,            -- monotonic per key; bumped on re-claim
     claimed_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    lease_expires_at TIMESTAMPTZ NOT NULL,     -- fenced; see 02
+    lease_expires_at TIMESTAMPTZ NOT NULL,
     completed_at   TIMESTAMPTZ,
 
     -- THE PRIMITIVE. Claiming is an insert; losing the race is a conflict.
@@ -230,6 +255,15 @@ CREATE TABLE effect_ledger (
     FOREIGN KEY (tenant_id, run_id) REFERENCES runs (tenant_id, run_id),
 
     CHECK ((status IN ('succeeded','failed')) = (completed_at IS NOT NULL))
+);
+
+-- Monotonic claim tokens must outlive the ledger row's claim, for the same reason
+-- run_lease_history exists: a re-claim after expiry must not reissue token 1.
+CREATE TABLE effect_claim_history (
+    tenant_id       BIGINT NOT NULL,
+    idempotency_key TEXT   NOT NULL,
+    max_claim_token BIGINT NOT NULL,
+    PRIMARY KEY (tenant_id, idempotency_key)
 );
 
 -- a claim whose lease has expired and never completed is INDETERMINATE, and
@@ -244,7 +278,7 @@ retention (spike 01, criterion 2):
 ```
 idempotency_key = sha256_hex(canon({
     kind:            "effect_key",
-    canonicalization: "nfc+jcs/v1",
+    canonicalization: "nfc+intjson/v1",
     payload: {
         tenant_id, run_id,
         logical_step_path,     -- position, not time
@@ -295,6 +329,44 @@ key is a constraint violation, not a convention someone remembers.
 
 ---
 
+### Polymorphic scope enforcement
+
+`state_entries.scope_key` cannot carry a foreign key, so the constraint is a trigger:
+
+```sql
+CREATE FUNCTION check_state_scope() RETURNS trigger AS $$
+BEGIN
+  IF NEW.scope = 'app' THEN
+    IF NEW.scope_key <> '' THEN
+      RAISE EXCEPTION 'app scope requires an empty scope_key';
+    END IF;
+  ELSIF NEW.scope = 'user' THEN
+    PERFORM 1 FROM principals
+      WHERE tenant_id = NEW.tenant_id AND principal_id = NEW.scope_key;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'user scope_key % is not a principal in tenant %',
+        NEW.scope_key, NEW.tenant_id;
+    END IF;
+  ELSIF NEW.scope = 'session' THEN
+    PERFORM 1 FROM sessions
+      WHERE tenant_id = NEW.tenant_id AND session_id = NEW.scope_key;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'session scope_key % is not a session in tenant %',
+        NEW.scope_key, NEW.tenant_id;
+    END IF;
+  END IF;
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+
+CREATE TRIGGER state_entries_scope_check
+  BEFORE INSERT OR UPDATE ON state_entries
+  FOR EACH ROW EXECUTE FUNCTION check_state_scope();
+```
+
+A trigger is weaker than a foreign key — it does not cascade, and it can be bypassed by
+a superuser with `session_replication_role`. That is the cost of polymorphism, and it is
+why the exception is documented at the top rather than discovered here.
+
 ## Approval — with an approver
 
 ```sql
@@ -319,6 +391,8 @@ CREATE TABLE approvals (
     FOREIGN KEY (tenant_id, run_id) REFERENCES runs (tenant_id, run_id),
     FOREIGN KEY (tenant_id, decided_by)
         REFERENCES principals (tenant_id, principal_id),
+    FOREIGN KEY (tenant_id, action_ref)
+        REFERENCES effect_ledger (tenant_id, idempotency_key),
 
     -- a terminal decision MUST name its approver and when (invariant 8)
     CHECK ((status IN ('approved','denied'))
@@ -379,7 +453,9 @@ CREATE TABLE policy_decisions (
 
     PRIMARY KEY (tenant_id, decision_id),
     FOREIGN KEY (tenant_id, run_id) REFERENCES runs (tenant_id, run_id),
-    FOREIGN KEY (tenant_id, policy_id) REFERENCES policies (tenant_id, policy_id)
+    FOREIGN KEY (tenant_id, policy_id) REFERENCES policies (tenant_id, policy_id),
+    FOREIGN KEY (tenant_id, principal_id)
+        REFERENCES principals (tenant_id, principal_id)
 );
 
 CREATE INDEX policy_decisions_shadow
@@ -409,6 +485,36 @@ CREATE TABLE run_leases (
 );
 
 CREATE INDEX run_leases_expiring ON run_leases (tenant_id, expires_at);
+
+-- Fence tokens must be monotonic ACROSS reclaims, so the high-water mark has to
+-- outlive the lease row it came from. Without this table, a reclaim after a
+-- DELETE would reissue token 1 and a stalled holder's writes would be accepted.
+CREATE TABLE run_lease_history (
+    tenant_id      BIGINT NOT NULL,
+    run_id         TEXT   NOT NULL,
+    max_fence_token BIGINT NOT NULL,
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, run_id),
+    FOREIGN KEY (tenant_id, run_id) REFERENCES runs (tenant_id, run_id)
+);
+
+-- One hub per channel (see 02). Same mechanism, different resource.
+CREATE TABLE channel_leases (
+    tenant_id      BIGINT NOT NULL,
+    channel_id     TEXT   NOT NULL,
+    hub_id         TEXT   NOT NULL,
+    fence_token    BIGINT NOT NULL,
+    acquired_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at     TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (tenant_id, channel_id)
+);
+
+CREATE TABLE channel_lease_history (
+    tenant_id      BIGINT NOT NULL,
+    channel_id     TEXT   NOT NULL,
+    max_fence_token BIGINT NOT NULL,
+    PRIMARY KEY (tenant_id, channel_id)
+);
 ```
 
 `fence_token` exists because a TTL alone is insufficient: a paused holder can wake

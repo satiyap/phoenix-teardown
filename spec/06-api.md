@@ -34,8 +34,8 @@ cross-tenant access is not expressible in a request.
 POST /v1/definitions
 { "name": "reviewer", "instructions": "...", "tools": [...], "extensions": [...] }
 
-201 { "digest": "a1b2...", "canon_profile": "nfc+jcs/v1" }
-200 { "digest": "a1b2...", "canon_profile": "nfc+jcs/v1" }   # already existed
+201 { "digest": "a1b2...", "canon_profile": "nfc+intjson/v1" }
+200 { "digest": "a1b2...", "canon_profile": "nfc+intjson/v1" }   # already existed
 ```
 
 `200` versus `201` distinguishes "created" from "already present". Posting the same

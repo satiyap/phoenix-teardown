@@ -7,10 +7,16 @@ What CI must enforce, and why the bench is split in two.
 
 ## Two layers — Omnigent's actual CI split
 
-| Layer | Runs | Needs | Fails the build |
-|---|---|---|---|
-| **Offline** | every commit | nothing | yes |
-| **Live** | nightly + on demand | credentials, a running adapter, money | yes, on the nightly |
+| Layer | Runs | Needs | Fails the build | In v0.1? |
+|---|---|---|---|---|
+| **Offline** | every commit | nothing | yes | **yes** |
+| **Live** | nightly + on demand | credentials, a running adapter, money | yes, on the nightly | **no — deferred** |
+
+> **Scope correction.** `v01-boundary.md` defers the live layer, and an earlier version of
+> this document mandated it. The live layer is **specified here but not shipped in v0.1**;
+> its trigger is "the third adapter, or the first capability-related production incident".
+> Everything below marked *live* is therefore a design commitment, not a v0.1 CI
+> requirement.
 
 Live probes cost credentials and spend, so they cannot gate every commit. But
 **declaration completeness costs nothing**, and putting it offline is what stops the

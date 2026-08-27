@@ -26,14 +26,50 @@ class NonCanonical(Exception):
 _ALLOWED = (str, int, bool, type(None), float, list, tuple, dict)
 
 
+# JCS numbers, honestly scoped.
+#
+# RFC 8785 3.2.2.3 mandates ECMAScript Number::toString. Python's json does NOT
+# implement it: it emits "1.0" where JCS requires "1", and "1e-07" where
+# ECMAScript requires "1e-7". Rather than reimplement ECMAScript formatting and
+# risk a subtle cross-language mismatch, the profile RESTRICTS the number domain
+# to the range where Python and JCS provably agree, and REJECTS the rest.
+#
+# A rejected number is a loud error the caller must resolve (usually by encoding
+# the value as a string). A silently mis-serialised number is a digest that
+# differs across languages, which is the failure this whole profile exists to
+# prevent.
+_INT_SAFE = 2**53 - 1
+
+
+def _jcs_number(v: float, path: str) -> int:
+    """Accept only integral values in the JS-safe range; reject everything else."""
+    if not v.is_integer():
+        raise NonCanonical(
+            f"{path}: non-integral number {v!r} is outside profile nfc+jcs/v1. "
+            f"Python's json and ECMAScript Number::toString disagree on exponent "
+            f"and fraction formatting, so a fractional value would digest "
+            f"differently across languages. Encode it as a string.")
+    if abs(v) > _INT_SAFE:
+        raise NonCanonical(
+            f"{path}: {v!r} exceeds 2^53-1 and cannot round-trip through a JSON "
+            f"number in every language. Encode it as a string.")
+    return int(v)
+
+
 def _canon(v: Any, path: str = "$") -> Any:
     """Reject anything whose serialisation is not stable across processes."""
-    if isinstance(v, bool) or v is None or isinstance(v, int):
+    if isinstance(v, bool) or v is None:
+        return v
+    if isinstance(v, int):
+        if abs(v) > _INT_SAFE:
+            raise NonCanonical(
+                f"{path}: integer {v!r} exceeds 2^53-1 and cannot round-trip "
+                f"through a JSON number in every language. Encode it as a string.")
         return v
     if isinstance(v, float):
         if math.isnan(v) or math.isinf(v):
             raise NonCanonical(f"{path}: non-finite float {v!r} has no canonical form")
-        return v
+        return _jcs_number(v, path)
     if isinstance(v, str):
         # NFC so 'café' (composed) and 'cafe\u0301' (decomposed) agree.
         return unicodedata.normalize("NFC", v)
@@ -57,7 +93,7 @@ def _canon(v: Any, path: str = "$") -> Any:
 # RFC 8785 (JCS) alone does NOT normalise Unicode, so "JCS" is an insufficient
 # spec. Ours is: NFC normalisation of every string and key, THEN JCS-style
 # serialisation (sorted keys, tight separators, no NaN/Inf, UTF-8).
-CANON_PROFILE = "nfc+jcs"
+CANON_PROFILE = "nfc+intjson"
 CANON_VERSION = 1
 
 

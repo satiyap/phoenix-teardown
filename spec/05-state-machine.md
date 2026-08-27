@@ -73,13 +73,18 @@ authorization spec; the API in §06 enforces it.
 | `queued` | `running` | claim | **worker only** | requires winning the lease |
 | `queued` | `discarded` | discard | owner, operator | only while unclaimed |
 | `running` | `waiting_input` | request approval | worker, adapter | |
-| `waiting_input` | `running` | approval decided | **worker only** | after `approval.decided`; the *human* decides the approval, the *worker* resumes the run |
+| `waiting_input` | `running` | approval **approved** | **worker only** | the *human* decides, the *worker* resumes |
+| `waiting_input` | `running` | approval **denied** | **worker only** | resumes carrying a **denial result**; see below |
+| `waiting_input` | `failed` | approval denied **and** the adapter cannot proceed | worker | `error_code = approval_denied` |
+| `waiting_input` | `failed` | approval **expired** | system | `error_code = approval_expired` |
+| `waiting_input` | `waiting_input` | approval **superseded** | worker | a new approval replaces it; still blocked |
 | `running` | `succeeded` / `failed` | adapter terminates | worker | must carry `error_code` on failure |
 | `running` | `cancelling` | request cancel | owner, operator | a **request**, not a fact |
 | `waiting_input` | `cancelling` | request cancel | owner, operator | |
 | `cancelling` | `cancelled` | adapter acknowledges | worker, system | system on lease expiry |
 | `running` | `expired` | deadline passes | **system only** | |
-| `running` | `indeterminate` | effect claim expires unsettled | **system only** | never a retry |
+| `running` | `indeterminate` | **an effect claim for this run is unsettled** and the adapter is gone | **system only** | never a retry; see below |
+| `running` | `failed` | adapter stream closed abnormally with **no unsettled effect** | worker, system | `error_code = adapter_disconnected` |
 | `queued`/`running` | `incompatible` | pin mismatch on resume | **worker only** | before any adapter call |
 | any terminal | — | — | **nobody** | terminal is terminal |
 
@@ -89,9 +94,39 @@ authorization spec; the API in §06 enforces it.
 `running` means holding the lease, and the lease is what prevents duplicate execution
 — so the transition and the lease acquisition are the same act.
 
+**Indeterminacy is about unresolved *effects*, not about an abnormal *stream close*.**
+§07 says a stream that closes without `End` makes the run indeterminate. That is too
+broad: if the adapter died before claiming any effect, nothing external happened and we
+know it. The rule is therefore:
+
+```
+adapter gone, and some effect_ledger row for this run is still 'claimed'
+    -> indeterminate      (we may have caused something; a human must look)
+
+adapter gone, and no effect for this run is unsettled
+    -> failed, error_code = adapter_disconnected   (we know nothing happened)
+```
+
+Manufacturing uncertainty is not free — every `indeterminate` run costs human attention,
+so the state must be reserved for cases where uncertainty is real.
+
 **Only the system may set `expired` or `indeterminate`.** Both are consequences of time
 passing, not of anyone's request. Exposing them to an API caller would let a client
 declare an effect indeterminate, which is a way to skip a safety check.
+
+**Denial resumes the run; it does not fail it.** A denied approval is an *answer*, and the
+adapter is entitled to receive it and decide what to do — retry differently, take a
+compliant path, or give up. So `waiting_input → running` accepts a denial, and the worker
+delivers `ToolResult{denied, reason}` to the adapter as the tool's outcome.
+
+The run only reaches `failed` if the adapter then terminates, with
+`error_code = approval_denied`. Treating denial as an automatic run failure would be
+wrong twice over: it discards the adapter's ability to adapt, and it makes "the human said
+no" indistinguishable from "the tool crashed".
+
+Expiry and supersession are different again: expiry is a **system** transition to `failed`
+(nobody answered), and supersession leaves the run in `waiting_input` because a *new*
+question is now outstanding.
 
 **A human decides an approval; a worker resumes the run.** `waiting_input → running` is
 worker-only even though a *human* made the decision. The decision is recorded as
@@ -108,7 +143,7 @@ transaction** as the state change.
 | Transition | Precondition |
 |---|---|
 | `queued → running` | lease acquired **and** pin matched **and** artifact resolved and verified |
-| `waiting_input → running` | a matching `approvals` row is terminal with `decided_by` set |
+| `waiting_input → running` | a matching `approvals` row is terminal (`approved` **or** `denied`) with `decided_by` set |
 | `cancelling → cancelled` | no `effect_ledger` row for this run is still `claimed`, **or** the lease has expired |
 | `* → succeeded` | no `effect_ledger` row for this run is `claimed` — an unsettled effect means the run is not done |
 | `* → any terminal` | `ended_at` set in the same statement (schema `CHECK` enforces) |

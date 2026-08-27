@@ -1,69 +1,151 @@
-[
-  {
-    "n": 1,
-    "kind": "effect_key",
-    "payload": {},
-    "digest": "99b8e1c162394799246cfc64622837f444e7ec8b1c09a1fc8428a81128115f29"
-  },
-  {
-    "n": 2,
-    "kind": "effect_key",
-    "payload": {
-      "a": 1
+{
+  "profile": "nfc+intjson/v1",
+  "accept": [
+    {
+      "n": 1,
+      "kind": "effect_key",
+      "payload": {},
+      "digest": "4fe8320e537447f9310c9e62684990617e18c3e748c537153b2a567a97e14ef6",
+      "note": "empty object"
     },
-    "digest": "5ba8b395f3df58790a4e12060adbc9110dfd1aa877421ad4ec08fd28ac898bcb"
-  },
-  {
-    "n": 3,
-    "kind": "agent_definition",
-    "payload": {
-      "a": 1
+    {
+      "n": 2,
+      "kind": "effect_key",
+      "payload": {
+        "a": 1
+      },
+      "digest": "dcd367749cedc70ee9abc6f29f7daf0a3665a4bf0ac13cc3cdfee86df243abf6",
+      "note": "baseline"
     },
-    "digest": "728021a557cbf3ef9483676c9c2da2952f23feb08c7b5797a9a0bd10a37f52a4"
-  },
-  {
-    "n": 4,
-    "kind": "effect_key",
-    "payload": {
-      "s": "café"
+    {
+      "n": 3,
+      "kind": "agent_definition",
+      "payload": {
+        "a": 1
+      },
+      "digest": "a040c2b8fc415fc9447e8f74e1e52a4071479f1d91f29af92df80cedb630cb55",
+      "note": "domain separation: MUST DIFFER from #2"
     },
-    "digest": "57559b7e2b726eda36bc593080f468f8bfea9d1d195c078f0649179521d0e1e1"
-  },
-  {
-    "n": 5,
-    "kind": "effect_key",
-    "payload": {
-      "s": "café"
+    {
+      "n": 4,
+      "kind": "effect_key",
+      "payload": {
+        "s": "café"
+      },
+      "digest": "5f0b2a10ca64589a468496aa779ffa0138a2f451e05c6dd3b5d5bc094d64fa66",
+      "note": "NFC"
     },
-    "digest": "57559b7e2b726eda36bc593080f468f8bfea9d1d195c078f0649179521d0e1e1"
-  },
-  {
-    "n": 6,
-    "kind": "effect_key",
-    "payload": {
-      "b": 2,
-      "a": 1
+    {
+      "n": 5,
+      "kind": "effect_key",
+      "payload": {
+        "s": "café"
+      },
+      "digest": "5f0b2a10ca64589a468496aa779ffa0138a2f451e05c6dd3b5d5bc094d64fa66",
+      "note": "NFD: MUST EQUAL #4"
     },
-    "digest": "cb9d48e93fa12f5f483075dc9a2a2c0415d8a87f6e44179d0c73b9686f6c4dc5"
-  },
-  {
-    "n": 7,
-    "kind": "effect_key",
-    "payload": {
-      "k": [
-        1,
-        2,
-        3
-      ]
+    {
+      "n": 6,
+      "kind": "effect_key",
+      "payload": {
+        "b": 2,
+        "a": 1
+      },
+      "digest": "4485a589208d3e24486f18e40800f23548580aab3063d6434d11f1a24623a58a",
+      "note": "key order normalised"
     },
-    "digest": "90aac871e9ac40d26d0352e50f151d8ebf57aea009413f1cfc3aca597718a89d"
-  },
-  {
-    "n": 8,
-    "kind": "effect_key",
-    "payload": {
-      "n": 1.0
+    {
+      "n": 7,
+      "kind": "effect_key",
+      "payload": {
+        "k": [
+          1,
+          2,
+          3
+        ]
+      },
+      "digest": "1cbf5b1ef23cb173f8e19bdde499226fbbacad50598810b27a5766835571cdc5",
+      "note": "array order IS significant"
     },
-    "digest": "b43c826dcf9c5cb36251734fb9e39abe3c221476d42cf8e93c1aeda9cb8372ee"
-  }
-]
+    {
+      "n": 8,
+      "kind": "effect_key",
+      "payload": {
+        "n": 1.0
+      },
+      "digest": "50153b6132668fbe3a1cbbb1f0c0a48e77d3e5a44a88f1850827e0a4feb8fc81",
+      "note": "integral float -> integer; MUST EQUAL #9"
+    },
+    {
+      "n": 9,
+      "kind": "effect_key",
+      "payload": {
+        "n": 1
+      },
+      "digest": "50153b6132668fbe3a1cbbb1f0c0a48e77d3e5a44a88f1850827e0a4feb8fc81",
+      "note": "integer 1"
+    },
+    {
+      "n": 10,
+      "kind": "effect_key",
+      "payload": {
+        "n": -0.0
+      },
+      "digest": "c2ee7c80535394bca7780f48a1fe59492970ceb43d362681eb5caf598b2d2466",
+      "note": "negative zero -> 0; MUST EQUAL #11"
+    },
+    {
+      "n": 11,
+      "kind": "effect_key",
+      "payload": {
+        "n": 0
+      },
+      "digest": "c2ee7c80535394bca7780f48a1fe59492970ceb43d362681eb5caf598b2d2466",
+      "note": "integer 0"
+    },
+    {
+      "n": 12,
+      "kind": "effect_key",
+      "payload": {
+        "n": 9007199254740991
+      },
+      "digest": "d574524f726f11abb503f1f52b7410d7342fa34e4d339d806ff8a0276b8af4ab",
+      "note": "2^53-1: largest accepted integer"
+    },
+    {
+      "n": 13,
+      "kind": "effect_key",
+      "payload": {
+        "s": "4.5"
+      },
+      "digest": "be962f2baa1fc111e6346d639d9c6b0e6bca406461bc16d3d1bfad1119f23529",
+      "note": "fractional values encoded as STRINGS"
+    }
+  ],
+  "reject": [
+    {
+      "case": "non-integral float",
+      "error": "$"
+    },
+    {
+      "case": "integer > 2^53-1",
+      "error": "$"
+    },
+    {
+      "case": "NaN",
+      "error": "$"
+    },
+    {
+      "case": "Infinity",
+      "error": "$"
+    },
+    {
+      "case": "arbitrary object",
+      "error": "$"
+    },
+    {
+      "case": "non-string key",
+      "error": "$: non-string key 1"
+    }
+  ]
+}

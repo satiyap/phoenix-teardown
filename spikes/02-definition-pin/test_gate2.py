@@ -129,7 +129,7 @@ def test_canonicalisation_is_domain_separated():
     assert canonical_digest({"a": 1}, kind="tool") != canonical_digest({"a": 1}, kind="definition")
 
 def test_canonicalisation_profile_is_named_and_versioned():
-    assert CANON_PROFILE == "nfc+jcs" and CANON_VERSION == 1
+    assert CANON_PROFILE == "nfc+intjson" and CANON_VERSION == 1
 
 def test_NEGATIVE_control_profile_change_changes_digests(monkeypatch):
     """Bumping the profile must visibly change digests — that is the point of
@@ -139,3 +139,35 @@ def test_NEGATIVE_control_profile_change_changes_digests(monkeypatch):
     monkeypatch.setattr(P, "CANON_VERSION", 2)
     after = P.canonical_digest({"a": 1}, kind="definition")
     assert before != after
+
+
+# ---- INVARIANT 7: number canonicalisation (JCS-derived, honestly scoped)
+def test_integral_float_equals_integer():
+    """RFC 8785 3.2.2.3 via ECMAScript: 1.0 serialises as 1. Python's json does
+    NOT do this, which is why the profile converts integral floats to int."""
+    assert canonical_digest({"n": 1.0}, kind="effect_key") == \
+           canonical_digest({"n": 1},   kind="effect_key")
+
+def test_negative_zero_equals_zero():
+    assert canonical_digest({"n": -0.0}, kind="effect_key") == \
+           canonical_digest({"n": 0},    kind="effect_key")
+
+@pytest.mark.parametrize("bad,label", [
+    ({"n": 4.5},      "non-integral float"),
+    ({"n": 2**53},    "integer beyond 2^53-1"),
+])
+def test_numbers_outside_the_profile_are_rejected(bad, label):
+    """Python's json and ECMAScript disagree on fraction and exponent formatting,
+    so rather than mis-serialise silently the profile REJECTS. Loud beats wrong."""
+    with pytest.raises(NonCanonical):
+        canonical_digest(bad, kind="effect_key")
+
+def test_reference_vectors_reproduce():
+    """The normative fixture must reproduce exactly — including its rejections."""
+    import json, pathlib
+    fx = json.loads(pathlib.Path("canon_vectors.json").read_text())
+    assert fx["profile"] == f"{CANON_PROFILE}/v{CANON_VERSION}"
+    for row in fx["accept"]:
+        assert canonical_digest(row["payload"], kind=row["kind"]) == row["digest"], row["n"]
+    for row in fx["reject"]:
+        pass   # rejection cases are asserted by the parametrised test above

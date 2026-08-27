@@ -51,7 +51,7 @@ Ordered by dependency: each item is buildable once the ones above it exist.
 
 | # | Capability | Decision | Evidence |
 |---|---|---|---|
-| 13 | **Agent-to-agent messaging** | **CONTINGENT — INTEGRATE `ag2.network` if the storage spike passes**, otherwise port the `Envelope` schema and build the hub on our log. The spike has not been run. | ADR-0003; AG2 is the only precedent in 13 projects; gate defined in `scope-reconciliation.md` §4 |
+| 13 | **Agent-to-agent messaging** | **INTEGRATE `ag2.network` behind an owned compatibility layer.** The spike has run and split the verdict: clean integration FAILED (fixing OQ-024 requires changing public dedupe semantics), the compatibility route PASSED (12 tests, public composition only). We own dedupe entirely — AG2's `find_envelope_by_causation` is never used for correctness. | ADR-0003; `spikes/01-ag2-storage/RESULT.md` |
 | 14 | **Cost measurement** | INTEGRATE `genai-prices`, with Omnigent's fail-closed-on-unpriced rule | Omnigent, Pydantic AI |
 
 ---
@@ -115,11 +115,11 @@ Stating these is the point of the governing rule.
 
 Recorded so they can be revisited against reality rather than rediscovered.
 
-1. **Integrating `ag2.network` rather than building messaging.** It is the largest
-   single dependency and the only precedent — if its file-WAL and index-pruning
-   design resists replacement, we inherit a retention-horizon bug in a subsystem we
-   do not control. **Mitigation: spike the storage swap before committing** (this is
-   a Phase 6 task, not a Phase 5 conclusion).
+1. **Integrating `ag2.network` rather than building messaging.** ~~Mitigation: spike the
+   storage swap before committing.~~ **Done — see `spikes/01-ag2-storage/RESULT.md`.**
+   The residual risk changed shape: we now depend on `post_envelope`'s signature and the
+   `Envelope` schema rather than on internal index behaviour, which is a smaller surface,
+   but the compatibility layer is ours to maintain across AG2 releases.
 2. **`Task` as a distinct resource on one precedent.** Omnigent separates Task from
    Run only for scheduled work. If interactive runs never need it, `Task` is
    speculative generality — the exact mistake ADR-0003 nearly made in the other
@@ -166,9 +166,10 @@ v0.1 shipment are different scopes** (§1 of `scope-reconciliation.md`).
 > **We defer** agent revocation, the live probe layer, `Recall`, and `Task` — each
 > with a named trigger, not forgotten.
 >
-> **We integrate** Cedar and `genai-prices`. **Messaging is contingent**: integrate
-> `ag2.network` only if the storage spike passes, otherwise port its `Envelope`
-> schema and build the hub on our own log. **The spike has not been run.**
+> **We integrate** Cedar, `genai-prices`, and `ag2.network` **behind a compatibility
+> layer we own** — the spike proved the hub runs on our storage (480 upstream tests, 201
+> channel WALs through our `append()`) and that dedupe is ours to own by public
+> composition, because `post_envelope` never consults the causation lookup.
 >
 > **We port** Agent Control's `deny | steer | observe` vocabulary, Omnigent's
 > positional fail-closed rule, Pydantic AI's SSRF guard, ADK's four state scopes and

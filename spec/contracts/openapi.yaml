@@ -1,0 +1,247 @@
+openapi: 3.1.0
+info:
+  title: Agent Platform control-plane API (v0.1 execution spine)
+  version: 0.1.0
+  description: |
+    Generated companion to spec/06-api.md. The Markdown is the prose source; this file
+    is the machine-readable contract, and `make spec` asserts they do not diverge in
+    path set.
+
+    Two invariants that are easy to lose in an OpenAPI file and are load-bearing here:
+      1. `tenant_id` NEVER appears in a request. It is derived from the credential.
+      2. No route sets `running`, `expired` or `indeterminate` — those are system
+         transitions only. See spec/05-state-machine.md.
+servers:
+  - url: https://api.example.internal
+security:
+  - userToken: []
+components:
+  securitySchemes:
+    userToken:
+      type: http
+      scheme: bearer
+      description: |
+        Two credential classes exist. A USER token carries a principal and may decide
+        approvals. A WORKER token may advance runs but must never decide an approval,
+        because an approver must be a nameable human (ADR-0015).
+    workerToken:
+      type: http
+      scheme: bearer
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema: { type: string }
+      description: Platform-wide idempotent retry (AgentCore's clientToken pattern).
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:    { type: string }
+        message: { type: string }
+        details: { type: object, additionalProperties: true }
+    RunState:
+      type: string
+      description: |
+        Client-settable states only appear in transitions the API permits. `running`,
+        `expired` and `indeterminate` are system-owned and never a route's target.
+      enum: [created, queued, running, waiting_input, cancelling, cancelled,
+             succeeded, failed, expired, indeterminate, discarded]
+    Definition:
+      type: object
+      required: [name, instructions]
+      properties:
+        name:         { type: string }
+        instructions: { type: string }
+        tools:
+          type: array
+          description: Full bindings; each REQUIRES an artifact_digest.
+          items:
+            type: object
+            required: [name, artifact_digest]
+            properties:
+              name:            { type: string }
+              artifact_digest: { type: string }
+              config_digest:   { type: string }
+        extensions:
+          type: array
+          description: |
+            ORDERED, not sorted. Order is semantic (composition order changes
+            behaviour), and each binding pins an artifact.
+          items:
+            type: object
+            required: [name, artifact_digest]
+            properties:
+              name:            { type: string }
+              artifact_digest: { type: string }
+              config_digest:   { type: string }
+              position:        { type: string, enum: [outermost, innermost] }
+    DigestResponse:
+      type: object
+      required: [digest, canon_profile]
+      properties:
+        digest:        { type: string }
+        canon_profile: { type: string, const: "nfc+intjson/v1" }
+paths:
+  /v1/definitions:
+    post:
+      summary: Register a definition; content-addressed, so this is idempotent by nature
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Definition' }
+      responses:
+        '201': { description: created,        content: { application/json: { schema: { $ref: '#/components/schemas/DigestResponse' } } } }
+        '200': { description: already existed, content: { application/json: { schema: { $ref: '#/components/schemas/DigestResponse' } } } }
+        '422': { description: not canonicalisable under nfc+intjson/v1 (e.g. a fractional number), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /v1/definitions/{digest}:
+    get:
+      parameters: [{ name: digest, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: the definition body }
+        '404': { description: unknown digest }
+  /v1/agents:
+    post:
+      summary: Create an agent pointing at a definition digest
+      responses:
+        '201': { description: created }
+  /v1/agents/{id}:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    get:
+      responses:
+        '200': { description: the agent }
+        '404': { description: unknown, or in another tenant (404 not 403 — see 06) }
+    patch:
+      summary: Repoint the agent at a different definition digest
+      description: |
+        This BLOCKS resume for in-flight runs pinned to the old digest, deliberately.
+        See spec/09-decisions.md 2.
+      responses:
+        '200': { description: repointed }
+  /v1/runs:
+    post:
+      summary: Create a run (no Task in v0.1 — runs are created directly)
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      responses:
+        '201': { description: created, state=created }
+    get:
+      parameters:
+        - { name: state,  in: query, schema: { $ref: '#/components/schemas/RunState' } }
+        - { name: limit,  in: query, schema: { type: integer, maximum: 200 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200': { description: page of runs }
+  /v1/runs/{id}:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    get:
+      responses:
+        '200': { description: the run }
+        '404': { description: unknown, or another tenant }
+  /v1/runs/{id}/submit:
+    post:
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '202': { description: state=queued }
+        '409': { description: not in a submittable state }
+  /v1/runs/{id}/cancel:
+    post:
+      summary: Request cancellation — a request, not a fact
+      description: |
+        Returns state=cancelling. The run is not cancelled until the adapter
+        acknowledges; cancel-request and cancel-fact are different events (AG2).
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '202': { description: state=cancelling }
+  /v1/runs/{id}/discard:
+    post:
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: state=discarded }
+  /v1/runs/{id}/events:
+    get:
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: since_seq, in: query, schema: { type: integer } }
+      responses:
+        '200': { description: events in (epoch, seq) order, superseded ones flagged }
+  /v1/runs/{id}/stream:
+    get:
+      summary: SSE stream of run events
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: text/event-stream }
+  /v1/approvals:
+    get:
+      parameters: [{ name: status, in: query, schema: { type: string, enum: [pending, approved, denied, expired, superseded] } }]
+      responses:
+        '200': { description: approvals, served from the partial index on pending }
+  /v1/approvals/{id}/decide:
+    post:
+      summary: Decide an approval; requires a USER token
+      description: |
+        `decided_by` is taken from the token and NEVER from the request body. A worker
+        token is refused with 403: an approval must name a human approver (ADR-0015).
+        Deciding twice returns 409 with the EXISTING decision, not an error that hides it.
+      security: [{ userToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision:  { type: string, enum: [approved, denied] }
+                rationale: { type: string }
+      responses:
+        '200': { description: decided }
+        '403': { description: a worker token may not decide an approval }
+        '409': { description: already decided; body carries the existing decision }
+  /v1/policies:
+    post:
+      responses:
+        '201': { description: created, mode defaults to observe }
+  /v1/policies/{id}/promote:
+    post:
+      summary: observe → steer → deny, one step at a time
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                to: { type: string, enum: [steer, deny] }
+      responses:
+        '200': { description: promoted }
+        '409': { description: cannot skip a mode }
+  /v1/policies/{id}/decisions:
+    get:
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: enforced, in: query, schema: { type: boolean } }
+      responses:
+        '200': { description: shadow decisions when enforced=false }
+  /v1/policies/{id}/stats:
+    get:
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: window, in: query, schema: { type: string } }
+      responses:
+        '200': { description: would-deny counts for empirical shadow comparison }
+  /v1/adapters:
+    post:
+      responses:
+        '201': { description: registered }
+    get:
+      summary: The capability catalogue
+      description: |
+        A capability may be true, false, or UNKNOWN — and UNKNOWN is a first-class
+        answer, never degraded to false.
+      responses:
+        '200': { description: adapters with declared capabilities and confidence }

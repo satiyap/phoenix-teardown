@@ -1,0 +1,133 @@
+syntax = "proto3";
+package platform.adapter.v1;
+
+service Adapter {
+  // The control plane sends exactly one Start, then zero or more Input or
+  // Cancel frames. The adapter streams zero or more Output frames terminated
+  // by EXACTLY ONE End frame.
+  rpc Run(stream ControlFrame) returns (stream AdapterFrame);
+
+  // Declared capabilities, queried before any Run. Answers a request the
+  // control plane makes to decide whether to attempt an operation at all.
+  rpc Describe(DescribeRequest) returns (AdapterContract);
+}
+
+message DescribeRequest {
+  // empty today; present so the RPC can gain fields without a breaking change
+}
+message ControlFrame {
+  oneof frame {
+    Start start = 1;      // exactly one, first
+    Input input = 2;       // zero or more
+    Cancel cancel = 3;     // at most one
+  }
+}
+
+message Start {
+  string run_id                = 1;
+  bytes  config                = 2;  // OPAQUE — see below
+  bytes  resumed_payload       = 3;  // adapter's own checkpoint bytes, may be empty
+  string payload_schema_digest = 4;  // which format resumed_payload is in
+  string traceparent           = 5;  // W3C traceparent header value, verbatim:
+                                     //   "00-<32 hex trace>-<16 hex span>-<2 hex flags>"
+                                     // NOT a bare trace id — propagation needs the
+                                     // parent span and the sampled flag.
+  string tracestate            = 6;  // W3C tracestate, may be empty
+  Deadline deadline            = 7;
+}
+
+message Input  { bytes data = 1; }
+
+message Deadline {
+  // absolute, so a slow start does not silently extend the budget
+  int64 unix_millis = 1;
+}
+
+message Cancel {
+  enum Reason {
+    REASON_UNSPECIFIED = 0;
+    USER_REQUESTED     = 1;
+    TIMEOUT            = 2;
+    POLICY_DENIED      = 3;
+    INTERNAL_ERROR     = 4;
+  }
+  Reason reason  = 1;
+  string detail  = 2;
+}
+
+message AdapterFrame {
+  oneof frame {
+    Output output = 1;     // zero or more
+    End    end    = 2;     // EXACTLY ONE, last
+  }
+}
+
+// Three frames MUST be typed, because the control plane makes decisions about
+// them. The rest stay opaque. See "What must be typed, and why" below.
+message Output {
+  string step_id = 1;      // stable across replay; feeds logical_step_path
+
+  oneof body {
+    Opaque          text             = 2;   // display only
+    Opaque          thought          = 3;   // display only
+    ToolCall        tool_call        = 4;   // TYPED: policy, digest, claim
+    ToolResult      tool_result      = 5;   // TYPED: settles the claim
+    ApprovalRequest approval_request = 6;   // TYPED: binds to an Approval row
+    Checkpoint      checkpoint       = 7;   // envelope typed, payload opaque
+  }
+}
+
+message Opaque { bytes data = 1; }
+
+message ToolCall {
+  string tool_name  = 1;   // must match a tool in the pinned definition
+  string arguments  = 2;   // canonical JSON, per profile nfc+intjson/v1
+  string call_id    = 3;   // adapter-scoped; correlates the ToolResult
+}
+
+message ToolResult {
+  string call_id    = 1;
+  bool   ok         = 2;
+  string content    = 3;
+  string error_code = 4;   // required when ok = false
+}
+
+message ApprovalRequest {
+  string call_id      = 1;   // the ToolCall being gated
+  string question     = 2;   // shown to the human, verbatim
+  string risk_summary = 3;
+}
+
+message Checkpoint {
+  bytes  payload               = 1;   // OPAQUE — the adapter's own format
+  string payload_schema_digest = 2;   // which format; pinned on the run
+}
+
+message End {
+  enum Terminal {
+    TERMINAL_UNSPECIFIED = 0;
+    SUCCEEDED            = 1;
+    FAILED               = 2;
+    CANCELLED            = 3;
+  }
+  Terminal terminal   = 1;
+  string   error_code = 2;   // required when terminal = FAILED
+  string   error_detail = 3;
+}
+message AdapterContract {
+  string identity            = 1;
+  string protocol_version    = 2;
+  string integration_mode    = 3;   // §01's enum
+  string payload_schema_digest = 4;
+  map<string, Capability> capabilities = 5;
+}
+
+message Capability {
+  // BOTH enums put the unknown case at zero, because proto3 cannot distinguish
+  // "absent" from "default". An undeclared capability must never read as a claim,
+  // and an undeclared CONFIDENCE must never read as "asserted".
+  enum Value      { VALUE_UNKNOWN = 0; TRUE = 1; FALSE = 2; }
+  enum Confidence { CONFIDENCE_UNKNOWN = 0; ASSERTED = 1; VERIFIED = 2; }
+  Value      value      = 1;
+  Confidence confidence = 2;
+}

@@ -1,9 +1,15 @@
 # Implementation specification — v0.1
 <!-- status: final -->
 
-The handoff from analysis to construction. `DESIGN.md` states *what* and *why*;
-this states *exactly what to build*, at the level a second implementer could work
-from without asking questions.
+The handoff from analysis to construction. `DESIGN.md` states *what* and *why*; this
+states *exactly what to build*.
+
+> **This is the EXECUTION SPINE, not the whole v0.1 shipment.** Review correctly found
+> that an earlier version of this line overclaimed. What is specified here is the
+> spine — identity, definitions, runs, the log, effects, approvals, policy records,
+> the adapter contract, and the invariants that bind them. What v0.1 *also* ships and
+> this spec does **not** yet cover is listed in §Not yet specified below, with an owner
+> for each.
 
 **Scope: the v0.1 shipment**, not the target architecture. See
 [`../synthesis/scope-reconciliation.md`](../synthesis/scope-reconciliation.md) §1 for
@@ -21,7 +27,28 @@ the difference — `Task`, agent revocation, the live conformance-bench layer an
 | 05 | [`05-state-machine.md`](05-state-machine.md) | Run states and **who may trigger each transition** |
 | 06 | [`06-api.md`](06-api.md) | The northbound HTTP contract |
 | 07 | [`07-adapter-protocol.md`](07-adapter-protocol.md) | The southbound stream contract |
-| 08 | [`08-conformance.md`](08-conformance.md) | The offline bench, and what CI must enforce |
+| 08 | [`08-conformance.md`](08-conformance.md) | The offline bench, what CI enforces, and the required invariant tests |
+| 09 | [`09-decisions.md`](09-decisions.md) | Six open design questions, decided with reasoning |
+
+## Not yet specified — the rest of the v0.1 shipment
+
+Each is in `v01-boundary.md` Tier 1–3 and is **not** covered by documents 01–08. Listing
+them is the difference between an incomplete spec and a spec that pretends otherwise.
+
+| Area | Boundary tier | Needs |
+|---|---|---|
+| `Credential` with separate exchanger/refresher | 1 | resource schema, OAuth2 flows, the secretless egress-proxy contract |
+| Sandbox — three boundaries | 2 | provider interface, egress guard blocklist, storage-boundary rule |
+| Knowledge (filesystem skills) | 2 | layout, resolution order, digest participation |
+| Messaging (`ag2.network`) | 3 | the compatibility layer's public surface, channel-lease integration |
+| Cost measurement (`genai-prices`) | 3 | usage capture, the fail-closed-on-unpriced rule |
+| ACP adapter | 1 | the concrete mapping from §07 frames to ACP |
+| OTel semantics | 2 | span names, attribute namespace, semconv version |
+
+**Sequencing note.** Documents 01–08 are the spine because everything above depends on
+them: a credential is held by a `Principal`, a sandbox is entered by a `Run`, a cost is
+attributed to a `Run`, and messaging needs the channel lease from §02. Specifying the
+spine first is deliberate; claiming it was everything was not.
 
 ## Non-negotiables
 
