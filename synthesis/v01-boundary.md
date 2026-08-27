@@ -1,6 +1,8 @@
 # v0.1 product boundary
 <!-- status: final -->
 
+*SOURCE OF TRUTH: [`synthesis/scope.yaml`](scope.yaml) — `make check` asserts these tables match it.*
+
 The scope decision the study exists to support. Three lists: **in v0.1**,
 **deferred with intent**, and **never**. Every line cites the evidence that put it
 there.

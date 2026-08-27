@@ -1,5 +1,7 @@
 # Phoenix Teardown
 
+*SOURCE OF TRUTH: [`synthesis/scope.yaml`](synthesis/scope.yaml) — `make check` asserts these tables match it.*
+
 A comparative architecture teardown of 14 agent platforms, run to produce one
 thing: enough design evidence to freeze a v0.1 architecture for our own platform.
 

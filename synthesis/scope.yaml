@@ -1,0 +1,112 @@
+# SOURCE OF TRUTH FOR SCOPE.
+#
+# Written 2026-08-27, after a scope change propagated through eight commits and the
+# same tier list had to be corrected in four documents by hand. Every value here was
+# read OUT of the documents named below; nothing was decided in this file.
+#
+# `make check` (tools/validate_spec.py, "scope vs source of truth") asserts:
+#   - synthesis/v01-boundary.md  tier / deferred / never tables  == tiers, deferred, never
+#   - README.md                  status counts                   == counts
+#   - spec/00-overview.md        "Not yet specified" rows        == owed_specs
+#
+# The markdown is NOT generated from this file. It is asserted against it, so a change
+# made in either place and not the other fails the build instead of drifting.
+
+harness: 'Pydantic AI 2.35.0 — one internal harness (v01-boundary.md Tier 1 item 4)'
+
+adapters_shipped:
+  - 'sdk_in_process — the only adapter mode shipped in v0.1; the SDK native tool executor is disabled'
+
+# Numbers are the item numbers as v01-boundary.md prints them — the sequence is not
+# contiguous (9 is followed by 11), and it is copied rather than renumbered so a row
+# can be matched to the document. Text is the bolded capability name of each row.
+tiers:
+  tier1:
+    - number: 1
+      item: 'Tenant, Principal, Credential'
+    - number: 2
+      item: 'Agent identity + versioned definition + content digest'
+    - number: 3
+      item: 'Run engine: single writer, log-derived state'
+    - number: 4
+      item: 'Adapter contract + one SDK adapter'
+    - number: 5
+      item: 'Version-and-pin on resume'
+    - number: 6
+      item: 'Effect ledger'
+  tier2:
+    - number: 7
+      item: 'Policy in Cedar: `deny \| steer \| observe`'
+    - number: 8
+      item: '`Approval` resource with `decided_by`'
+    - number: 9
+      item: 'Sandbox: three boundaries, one provider each'
+    - number: 11
+      item: 'Knowledge (files) + State (four scopes)'
+    - number: 12
+      item: 'OTel with GenAI semconv + a propagation test'
+    - number: 16
+      item: '`Task` / routines: schedule *or* trigger → Run'
+  tier3:
+    - number: 13
+      item: 'Agent-to-agent messaging'
+    - number: 14
+      item: 'Cost measurement'
+    - number: 15
+      item: 'Capability declarations + offline bench'
+
+deferred:
+  - item: 'Live conformance-bench layer'
+    trigger: 'The third adapter, or the first capability-related production incident'
+  - item: 'Continuous observed capability statistics'
+    trigger: 'Capability-based routing becoming a real feature'
+  - item: 'Recall (semantic memory service)'
+    trigger: 'A user needing cross-session semantic recall that files cannot serve'
+  - item: 'Agent-level revocation lifecycle'
+    trigger: 'First multi-tenant deployment, or first compromised-agent incident'
+  - item: 'Static policy comparison'
+    trigger: 'A policy change large enough that empirical evidence is too slow'
+  - item: 'Channel protocols'
+    trigger: 'Multi-agent conversations where turn order actually matters'
+  - item: 'Multi-surface collaboration'
+    trigger: 'A customer with more than one human per session'
+  - item: 'Native TUI adapter'
+    trigger: 'A first-party need to drive a terminal-only tool, which would be a connector rather than an adapter'
+
+never:
+  - number: 1
+    item: 'No compensation / rollback / saga engine.'
+  - number: 2
+    item: 'No workflow / DAG engine of our own.'
+  - number: 3
+    item: 'No model gateway or provider abstraction.'
+  - number: 4
+    item: 'No _public_ authoring framework, and no customer-supplied agent code'
+  - number: 5
+    item: 'No bespoke policy DSL, trace format, or messaging protocol.'
+
+# Counts README states. Each is ALSO derived from its own artifact by the older
+# "counts vs source of truth" check, so this file cannot quietly move a number:
+# scope.yaml, README.md and the artifact must all three agree.
+counts:
+  adr_status:
+    total: 16
+    accepted: 15
+    proposed: 1
+  spec_docs: 10
+  invariant_rows: 50
+  spike_assertions: 116
+
+# The "Not yet specified" rows of spec/00-overview.md: the part of the v0.1 shipment
+# the spine documents do not yet cover.
+owed_specs:
+  - '`Credential` with separate exchanger/refresher'
+  - 'Sandbox — three boundaries'
+  - 'Knowledge (filesystem skills)'
+  - 'Messaging (`ag2.network`)'
+  - 'Cost measurement (`genai-prices`)'
+  - 'Pydantic AI adapter'
+  - 'OTel semantics'
+  - '`tasks` / `routines`'
+  - 'Agent harness (Pydantic AI) (spec 12)'
+  - 'Work bundles (`10-work-bundles.md`)'

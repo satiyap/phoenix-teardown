@@ -1,7 +1,7 @@
 # Verification rules
 <!-- status: final -->
 
-Six rules, adopted after two rounds of external review found that **I verified the
+Seven rules, adopted after two rounds of external review found that **I verified the
 thing I built rather than the thing I claimed** — twice, in the same shape.
 
 These are binding on every spike and on the implementation specification.
@@ -110,18 +110,20 @@ where the *fix for* an unsound step was itself unsound.
 
 The instances, all real:
 
-| What it did | State it did not own |
-|---|---|
-| inserted the `observed` ledger row by hand | asserted the guard's *output*, so the guard was never exercised |
-| `schema.sql` was not idempotent | a second apply left a **half-built** schema; a test then passed against a database missing the constraint under test |
-| a negative control dropped two constraints and **committed** | every later run failed against a schema the test had broken |
-| DDL check used a fixed `specddl` schema + `SET search_path`, then `DROP SCHEMA CASCADE` | **the spike's own tables**, created under that `search_path` |
-| DDL check used a fixed `specddl_check` database + `DROP DATABASE ... WITH (FORCE)` | **a pre-existing database of that name**, belonging to whoever created it |
+| What it did | Rule violated | State it did not own |
+|---|---|---|
+| inserted the `observed` ledger row by hand | **2 and 4**, not 7 | nothing — the row was its own; the defect is that it asserted the guard's *output*, so the guard was never exercised and no negative control could have gone red (`synthesis/scope-reconciliation.md:456-458`) |
+| `schema.sql` was not idempotent | **6**, not 7 | nothing — the schema was its own; the defect is that the PASS was written from a standalone 6/6 run rather than the full gate command, against a second apply that left a **half-built** schema missing the constraint under test (`synthesis/scope-reconciliation.md:584-588`) |
+| a negative control dropped two constraints and **committed** | **7** | every later run failed against a schema the test had broken |
+| DDL check used a fixed `specddl` schema + `SET search_path`, then `DROP SCHEMA CASCADE` | **7** | **the spike's own tables**, created under that `search_path` |
+| DDL check used a fixed `specddl_check` database + `DROP DATABASE ... WITH (FORCE)` | **7** | **a pre-existing database of that name**, belonging to whoever created it |
 
-An earlier version of this rule said *"a verification step should have no destructive statement
-in it at all"*. **That was overbroad** and was corrected the same day: the spike's own
-`fresh()` deletes rows from fixture tables it created, which is legitimate. The verb was never
-the problem — **ownership** was.
+The first two rows were listed here as rule-7 instances and are not: each mutated only state it
+owned. Classified under the earlier rules they actually violate, **added 2026-08-27**; they stay
+in the table because both were found in the same review sweep.
+
+An earlier version of this rule said *"a verification step should have no destructive statement in it at all"* — **superseded 2026-08-27** as overbroad, because the spike's own `fresh()` deletes rows from fixture tables it created, which is legitimate.
+The verb was never the problem — **ownership** was.
 
 Two clauses do the work. *Prefer rollback* removes the destructive statement where possible: the
 DDL check now creates a `specddl_<12 hex>` schema inside one transaction and rolls it back

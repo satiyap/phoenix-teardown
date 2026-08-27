@@ -1,4 +1,6 @@
 # Exit Criteria
+<!-- status: frozen 2026-08-27 -->
+Frozen as of 2026-08-26 (Phase 5). Scope is governed by [`v01-boundary.md`](v01-boundary.md) / [`scope.yaml`](scope.yaml); where this document disagrees, the boundary wins.
 
 The teardown is complete only when every question below has a written answer
 that cites evidence. `tools/check_exit_criteria.py` parses this file: it counts

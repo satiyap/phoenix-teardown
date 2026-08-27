@@ -599,6 +599,17 @@ _EXEMPT_FILES = {
 }
 
 
+# Frozen 2026-08-27 (Phase 5 artefacts). Excluded from the scan the way `projects/`
+# is: both documents were written at a point in the study and are no longer edited,
+# so rewriting them to match a later scope would falsify the record. Where they
+# disagree with the boundary, v01-boundary.md / scope.yaml wins, which each file now
+# says at the top.
+_FROZEN_FILES = {
+    "reference-architecture.md",
+    "exit-criteria.md",
+}
+
+
 def _scanned_files() -> list[Path]:
     """Everything that states what WE build. `projects/` is excluded by omission:
     a teardown describes another system, and its findings must not be rewritten to
@@ -610,8 +621,14 @@ def _scanned_files() -> list[Path]:
     if (SPEC / "contracts").is_dir():
         files += [f for f in sorted((SPEC / "contracts").glob("*"))
                   if f.suffix in {".yaml", ".yml", ".proto", ".json"}]
-    files += sorted((ROOT / "synthesis").glob("*.md"))
+    files += [f for f in sorted((ROOT / "synthesis").glob("*.md"))
+              if f.name not in _FROZEN_FILES]
     files += sorted((ROOT / "decisions").glob("*.md"))
+    # The verification rules bind the spec, so a superseded claim in them is a
+    # superseded claim in the standard. It was outside the scan until 2026-08-27.
+    vr = ROOT / "spikes" / "VERIFICATION-RULES.md"
+    if vr.exists():
+        files.append(vr)
     for name in ("DESIGN.md", "README.md", "open-questions.md"):
         p = ROOT / name
         if p.exists():
@@ -794,6 +811,125 @@ def check_counts() -> list[str]:
     return errs
 
 
+def _md_rows(body: str, start: str, end: str) -> list[list[str]]:
+    """Table rows between two markers, as cell lists. `\\|` is an escaped pipe."""
+    i = body.find(start)
+    if i < 0:
+        return []
+    j = body.find(end, i + len(start))
+    rows = []
+    for line in body[i:(j if j > 0 else len(body))].splitlines():
+        if not line.startswith("| "):
+            continue
+        cells = [c.strip() for c in re.split(r"(?<!\\)\|", line)[1:-1]]
+        if not cells or set("".join(cells)) <= set("-: "):
+            continue
+        rows.append(cells)
+    return rows
+
+
+def _bold(cell: str) -> str:
+    m = re.match(r"\*\*(.+?)\*\*", cell)
+    return m.group(1) if m else cell
+
+
+def check_scope_source_of_truth() -> list[str]:
+    """The three scope-restating documents must match synthesis/scope.yaml.
+
+    A scope change in August 2026 propagated through eight commits, and the same
+    tier list was corrected by hand in four documents. The lists now live in one
+    machine-readable file; the markdown is NOT generated from it, it is ASSERTED
+    against it, so an edit to either side that is not made to the other fails here.
+    """
+    src = ROOT / "synthesis" / "scope.yaml"
+    if not src.exists():
+        return ["synthesis/scope.yaml is missing, so scope is UNVERIFIED"]
+    try:
+        import yaml
+    except ImportError:
+        return ["pyyaml is not installed, so scope vs scope.yaml is UNVERIFIED"]
+    scope = yaml.safe_load(src.read_text())
+    errs: list[str] = []
+
+    def compare(what: str, want: list[str], got: list[str]) -> None:
+        if want == got:
+            return
+        missing = [x for x in want if x not in got]
+        extra = [x for x in got if x not in want]
+        detail = []
+        if missing:
+            detail.append(f"in scope.yaml but not in the document: {missing}")
+        if extra:
+            detail.append(f"in the document but not in scope.yaml: {extra}")
+        if not detail:
+            detail.append(f"same items, different order: {got}")
+        errs.append(f"{what}: " + "; ".join(detail))
+
+    # 1. v01-boundary.md tier / deferred / never tables
+    bnd_path = ROOT / "synthesis" / "v01-boundary.md"
+    if not bnd_path.exists():
+        errs.append("synthesis/v01-boundary.md is missing")
+    else:
+        bnd = bnd_path.read_text()
+        for key, start, end in (("tier1", "### Tier 1", "### Tier 2"),
+                                ("tier2", "### Tier 2", "### Tier 3"),
+                                ("tier3", "### Tier 3", "## Deferred with intent")):
+            want = [f"{e['number']} {e['item']}" for e in scope["tiers"][key]]
+            got = [f"{r[0]} {_bold(r[1])}" for r in _md_rows(bnd, start, end)
+                   if r[0].isdigit()]
+            compare(f"v01-boundary.md {key}", want, got)
+
+        want = [f"{e['item']} -> {e['trigger']}" for e in scope["deferred"]]
+        got = [f"{_bold(r[0])} -> {r[2]}"
+               for r in _md_rows(bnd, "## Deferred with intent", "## Never")
+               if len(r) >= 3 and r[0].startswith("**")]
+        compare("v01-boundary.md deferred", want, got)
+
+        want = [f"{e['number']} {e['item']}" for e in scope["never"]]
+        got = [f"{r[0]} {_bold(r[1])}"
+               for r in _md_rows(bnd, "## Never",
+                                 "## What v0.1 explicitly does not guarantee")
+               if r[0].isdigit()]
+        compare("v01-boundary.md never", want, got)
+
+    # 2. README status counts
+    readme = ROOT / "README.md"
+    if not readme.exists():
+        errs.append("README.md is missing")
+    else:
+        body = readme.read_text()
+        c = scope["counts"]
+        adr = c["adr_status"]
+        m = re.search(r"(\d+) ADRs \((\d+) Accepted, (\d+) Proposed\)", body)
+        if not m:
+            errs.append("README states no ADR split to compare with scope.yaml")
+        elif [int(x) for x in m.groups()] != [adr["total"], adr["accepted"],
+                                              adr["proposed"]]:
+            errs.append(f"README says {m.group(0)}; scope.yaml says {adr}")
+        for label, pat, want in (
+                ("spec_docs", r"\*\*(\d+) documents\*\*", c["spec_docs"]),
+                ("invariant_rows", r"(\d+) required invariant tests",
+                 c["invariant_rows"]),
+                ("spike_assertions", r"\*\*(\d+) gate assertions\*\*",
+                 c["spike_assertions"])):
+            m = re.search(pat, body)
+            if not m:
+                errs.append(f"README states no {label} count to compare with scope.yaml")
+            elif int(m.group(1)) != want:
+                errs.append(f"README says {label}={m.group(1)}; scope.yaml says {want}")
+
+    # 3. spec/00-overview.md "Not yet specified" rows
+    ov = SPEC / "00-overview.md"
+    if not ov.exists():
+        errs.append("spec/00-overview.md is missing")
+    else:
+        rows = _md_rows(ov.read_text(), "## Not yet specified", "**Sequencing note.**")
+        got = [r[0].replace("**", "") for r in rows if r[0] != "Area"]
+        compare("spec/00-overview.md owed_specs", list(scope["owed_specs"]), got)
+
+    return errs
+
+
 def check_placeholders() -> list[str]:
     errs = []
     for f in sorted(SPEC.glob("*.md")):
@@ -836,6 +972,7 @@ def main() -> int:
         ("postgres gate", check_postgres_gate()),
         ("superseded claims", check_superseded_claims()),
         ("counts vs source of truth", check_counts()),
+        ("scope vs source of truth", check_scope_source_of_truth()),
         ("cross-references", check_references()),
         ("placeholders", check_placeholders()),
         ("foreign-key targets", check_fk_targets()),

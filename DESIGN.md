@@ -14,14 +14,14 @@ building.
 > the API, the adapter protocol, conformance, and the decided design questions. This document is the *why*; the spec
 > is the *exactly what*.
 >
-> **Two scopes, named separately.** This document describes the **target
-> architecture**. The **v0.1 shipment** is a subset — agent revocation, the live
-> conformance-bench layer and `Recall` are deferred. Messaging was contingent on a spike
-> that **has now run** (`spikes/01-ag2-storage`, integrate behind an owned compatibility
-> layer). `Task` is **no longer deferred** — reversed 2026-08-27, see §7 of the reconciliation:
-> routines are the unit customers buy). See
-> [`synthesis/scope-reconciliation.md`](synthesis/scope-reconciliation.md), which
-> adjudicates six ambiguities found in external review.
+> **Two scopes, named separately.** This document describes the **target architecture**; the
+> **v0.1 shipment** is a subset, and what is in it, deferred from it, or never built is stated
+> once in [`synthesis/v01-boundary.md`](synthesis/v01-boundary.md) — asserted against
+> `synthesis/scope.yaml` by `make check` — with the ambiguities adjudicated in
+> [`synthesis/scope-reconciliation.md`](synthesis/scope-reconciliation.md).
+> *(**Amended 2026-08-27:** this note restated the deferral list, so the same scope change had
+> to be edited here and in the boundary. Nothing is dropped — every sentence it carried is in
+> the boundary, dated.)*
 
 ---
 
@@ -393,24 +393,14 @@ earned. Python remains the language of the spikes and the verification tooling.
 
 ## 8. Sequencing
 
-Three tiers, ordered by dependency. Detail and deferral triggers in
-[`synthesis/v01-boundary.md`](synthesis/v01-boundary.md).
+Three tiers, ordered by dependency — Tier 1 the spine, Tier 2 the platform, Tier 3 integrate.
+The items in each tier, and the trigger that would pull a deferred one forward, are in
+[`synthesis/v01-boundary.md`](synthesis/v01-boundary.md), which `make check` asserts against
+`synthesis/scope.yaml`.
 
-**Tier 1 — the spine.** Tenant/Principal/Credential → agent identity and versioned
-definition → run engine (single writer, log-derived state) → adapter contract with
-one Pydantic AI adapter → version-and-pin on resume → effect ledger.
-
-**Tier 2 — the platform.** Cedar policy with three-way decisions → `Approval` with
-`decided_by` → three-boundary sandbox → knowledge and four state scopes → `Task`/routines
-→ OTel with an asserted propagation test. *(Amended 2026-08-27: the offline conformance
-bench moved out of this tier to Tier 3, and `Task` moved in. See
-`synthesis/v01-boundary.md`.)*
-
-**Tier 3 — integrate.** `genai-prices` for cost, and the capability/offline-bench layer
-(moved here 2026-08-27: we author every adapter, so its purpose narrows to SDK-version
-drift). `ag2.network` for messaging — the storage spike **has run** and passed on the
-compatibility route
-on our own log.
+*(**Amended 2026-08-27:** the three tier lists were restated here and each had to be corrected
+by hand when the boundary moved. They are a pointer now. Nothing is dropped — every item and
+every dated amendment this section carried is in the boundary.)*
 
 ## 9. The riskiest decisions
 
