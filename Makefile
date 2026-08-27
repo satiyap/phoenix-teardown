@@ -15,7 +15,7 @@ help:
 setup:
 	@command -v node >/dev/null || echo "WARNING: node missing — the canonicalisation oracle cannot run"
 	python3 -m venv .venv
-	$(PY) -m pip install -q pyyaml==6.0.2 grpcio-tools==1.68.1
+	$(PY) -m pip install -q pyyaml==6.0.2 grpcio-tools==1.83.0
 	@test -f .env || cp .env.example .env
 	@echo "ready. add LLM_API_KEY to .env"
 
