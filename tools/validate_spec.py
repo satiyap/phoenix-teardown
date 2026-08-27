@@ -179,9 +179,11 @@ def check_proto_compiles() -> list[str]:
 
 
 def check_openapi() -> list[str]:
-    """The OpenAPI file must parse AND cover exactly the paths 06 documents.
+    """Compare OPERATIONS, security, states and schemas — not just path strings.
 
-    Prevents the drift where prose gains an endpoint the contract never learns about.
+    Review finding: "the validator compares only path strings, not HTTP verbs,
+    parameters, security, schemas or response codes. A GET changed to POST would
+    still pass." Each check below closes one of those.
     """
     oa = SPEC / "contracts" / "openapi.yaml"
     if not oa.exists():
@@ -196,19 +198,152 @@ def check_openapi() -> list[str]:
     except Exception as exc:                                    # noqa: BLE001
         return [f"openapi.yaml does not parse: {exc}"]
 
-    declared = set(doc.get("paths", {}))
+    errs: list[str] = []
     md = (SPEC / "06-api.md").read_text()
+    VERBS = ("get", "post", "patch", "put", "delete")
+
+    # --- 1. operations must match, VERB INCLUDED
     documented = set()
     for verb, path in re.findall(r"^(POST|GET|PATCH|PUT|DELETE)\s+(/v1/\S+)", md,
                                 re.MULTILINE):
-        path = path.split("?")[0].rstrip(",.")
-        documented.add(path)
+        documented.add((verb.lower(), path.split("?")[0].rstrip(",.")))
+    declared = {(m, path) for path, item in doc.get("paths", {}).items()
+                for m in item if m in VERBS}
+    for verb, path in sorted(documented - declared):
+        errs.append(f"06-api.md documents {verb.upper()} {path}; openapi.yaml lacks it")
+    for verb, path in sorted(declared - documented):
+        errs.append(f"openapi.yaml declares {verb.upper()} {path}; 06-api.md lacks it")
 
-    errs = []
-    for missing in sorted(documented - declared):
-        errs.append(f"06-api.md documents {missing} but openapi.yaml omits it")
-    for extra in sorted(declared - documented):
-        errs.append(f"openapi.yaml declares {extra} but 06-api.md does not document it")
+    # --- 2. the run-state enum must match 05 exactly
+    sm = (SPEC / "05-state-machine.md").read_text()
+    md_states = set(re.findall(r"^\| `([a-z_]+)`", sm, re.MULTILINE))
+    md_states |= {s for grp in re.findall(r"^\| ((?:`[a-z_]+` / )+`[a-z_]+`)", sm,
+                                          re.MULTILINE)
+                  for s in re.findall(r"`([a-z_]+)`", grp)}
+    schema_states = set(
+        doc.get("components", {}).get("schemas", {}).get("RunState", {}).get("enum", []))
+    if schema_states:
+        for missing in sorted(md_states - schema_states):
+            errs.append(f"RunState enum omits `{missing}` which 05 defines")
+        for extra in sorted(schema_states - md_states):
+            errs.append(f"RunState enum has `{extra}` which 05 does not define")
+    else:
+        errs.append("openapi.yaml has no RunState enum to compare")
+
+    # --- 3. credential CLASSES must be the ones 06 defines
+    md_classes = set()
+    for name in re.findall(r"^\| \*\*(\w+)\*\* \|", md, re.MULTILINE):
+        md_classes.add(name.lower())
+    declared_schemes = {k.lower().replace("token", "")
+                        for k in doc.get("components", {})
+                                    .get("securitySchemes", {})}
+    for cls in sorted(md_classes - declared_schemes):
+        errs.append(f"06-api.md defines credential class `{cls}` with no matching "
+                    f"securityScheme")
+
+    # --- 4. admin-only sections must be secured as admin
+    admin_paths = set()
+    for m in re.finditer(r"### (\w[\w ]*) — admin only(.*?)(?=\n### |\n## |\Z)",
+                         md, re.DOTALL):
+        for verb, path in re.findall(r"^(POST|GET|PATCH|PUT|DELETE)\s+(/v1/\S+)",
+                                    m.group(2), re.MULTILINE):
+            admin_paths.add((verb.lower(), path.split("?")[0].rstrip(",.")))
+    for verb, path in sorted(admin_paths):
+        op = doc.get("paths", {}).get(path, {}).get(verb)
+        if not isinstance(op, dict):
+            continue
+        schemes = {k for entry in op.get("security", []) for k in entry}
+        if "adminToken" not in schemes:
+            errs.append(f"{verb.upper()} {path} is admin-only in 06-api.md but "
+                        f"openapi.yaml does not require adminToken")
+
+    # --- 5. required Idempotency-Key must be required
+    idem_required = set()
+    m = re.search(r"`Idempotency-Key` is \*\*required\*\* on (.*?)[,.]", md, re.DOTALL)
+    if m:
+        for verb, path in re.findall(r"(POST|GET|PATCH)\s+(/v1/\S+)", m.group(1)):
+            idem_required.add((verb.lower(), path.rstrip(",.")))
+    for verb, path in sorted(idem_required):
+        op = doc.get("paths", {}).get(path, {}).get(verb)
+        if not isinstance(op, dict):
+            errs.append(f"{verb.upper()} {path} requires Idempotency-Key but is not "
+                        f"in openapi.yaml")
+            continue
+        params = op.get("parameters", [])
+        names = []
+        for prm in params:
+            ref = prm.get("$ref", "")
+            if ref:
+                names.append(ref.rsplit("/", 1)[-1])
+            elif prm.get("name") == "Idempotency-Key":
+                names.append("required" if prm.get("required") else "optional")
+        if not any("Required" in n or n == "required" for n in names):
+            errs.append(f"{verb.upper()} {path} must REQUIRE Idempotency-Key "
+                        f"(06-api.md), but openapi.yaml does not")
+
+    # --- 6. no operation may be schema-less
+    for path, item in doc.get("paths", {}).items():
+        for verb, op in item.items():
+            if verb not in VERBS or not isinstance(op, dict):
+                continue
+            if not op.get("operationId"):
+                errs.append(f"{verb.upper()} {path} has no operationId")
+            success = [c for c in op.get("responses", {}) if c.startswith("2")]
+            if not success:
+                errs.append(f"{verb.upper()} {path} declares no 2xx response")
+            for code in success:
+                body = op["responses"][code]
+                if isinstance(body, dict) and "$ref" not in body \
+                        and "content" not in body and code != "204":
+                    errs.append(f"{verb.upper()} {path} {code} has no response schema")
+
+    # --- 7. tool/extension bindings must carry the canonicalisation requirements
+    schemas = doc.get("components", {}).get("schemas", {})
+    tb = schemas.get("ToolBinding", {})
+    if "artifact_digest" not in tb.get("required", []):
+        errs.append("ToolBinding does not require artifact_digest, so a version string "
+                    "could pin mutable code")
+    eb = schemas.get("ExtensionBinding", {})
+    if "artifact_digest" not in eb.get("required", []):
+        errs.append("ExtensionBinding does not require artifact_digest")
+    defn = schemas.get("Definition", {}).get("properties", {})
+    if defn.get("extensions", {}).get("type") != "array":
+        errs.append("Definition.extensions must be an ORDERED array of bindings")
+    return errs
+
+
+def check_effect_lifecycle() -> list[str]:
+    """The intent->approval->claim->dispatch->settle protocol, plus its DDL.
+
+    Review: "when is the effect claimed relative to human approval?" was
+    undefined, and claiming first makes a slow human produce `indeterminate`.
+    """
+    errs: list[str] = []
+    sc = (SPEC / "01-schema.md").read_text()
+    for needed, why in [
+        ("'intended'", "no `intended` status, so an effect must be claimed before "
+                       "approval and a slow human produces `indeterminate`"),
+        ("'awaiting_approval'", "no `awaiting_approval` status"),
+        ("effect_claim_fields_together", "no CHECK keeping lease fields NULL on an "
+                                         "unclaimed row"),
+    ]:
+        if needed not in sc:
+            errs.append(f"01-schema.md: {why}")
+    if "effect_claim_history" in sc and "earlier draft" not in sc:
+        errs.append("01-schema.md: effect_claim_history is defined but effect rows are "
+                    "never reclaimed, so monotonic claim tokens describe an impossible "
+                    "transition")
+    if not re.search(r"FOREIGN KEY \(tenant_id, action_ref, run_id\)", sc):
+        errs.append("01-schema.md: approvals.action_ref FK omits run_id, so an approval "
+                    "can gate an effect belonging to a different run")
+
+    script = SPEC / "effect_lifecycle_test.py"
+    if not script.exists():
+        return errs + ["spec/effect_lifecycle_test.py missing"]
+    res = subprocess.run([sys.executable, str(script)], capture_output=True, text=True)
+    if res.returncode != 0:
+        tail = (res.stdout + res.stderr).strip().splitlines()[-3:]
+        errs.append(f"effect lifecycle test failed: {' | '.join(x.strip() for x in tail)}")
     return errs
 
 
@@ -259,6 +394,7 @@ def main() -> int:
         ("rewind algorithm", check_rewind_algorithm()),
         ("protobuf compiles", check_proto_compiles()),
         ("openapi coverage", check_openapi()),
+        ("effect lifecycle", check_effect_lifecycle()),
         ("cross-references", check_references()),
         ("placeholders", check_placeholders()),
         ("foreign-key targets", check_fk_targets()),

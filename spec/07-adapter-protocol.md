@@ -38,9 +38,11 @@ message DescribeRequest {
 ```protobuf
 message ControlFrame {
   oneof frame {
-    Start start = 1;      // exactly one, first
-    Input input = 2;       // zero or more
-    Cancel cancel = 3;     // at most one
+    Start      start       = 1;   // exactly one, first
+    Input      input       = 2;   // zero or more
+    Cancel     cancel      = 3;   // at most one
+    ToolResult tool_result = 4;   // the platform's ANSWER to a ToolCall
+    ToolDenied tool_denied = 5;   // policy or an approver refused
   }
 }
 
@@ -58,6 +60,25 @@ message Start {
 }
 
 message Input  { bytes data = 1; }
+
+// The platform's answer to a ToolCall. It travels CONTROL PLANE -> ADAPTER,
+// because the platform executes the tool. See "Who executes a tool" below.
+message ToolResult {
+  string call_id    = 1;
+  bool   ok         = 2;
+  string content    = 3;
+  string error_code = 4;   // required when ok = false
+}
+
+// A distinct frame, not ToolResult{ok:false}, because "refused" and "failed" are
+// operationally different and an adapter should be able to branch on it.
+message ToolDenied {
+  string call_id  = 1;
+  enum Reason { REASON_UNKNOWN = 0; POLICY = 1; APPROVAL_DENIED = 2;
+                APPROVAL_EXPIRED = 3; }
+  Reason reason   = 2;
+  string guidance = 3;   // remediation text; Agent Control's `steer` payload
+}
 
 message Deadline {
   // absolute, so a slow start does not silently extend the budget
@@ -89,12 +110,10 @@ message Output {
   string step_id = 1;      // stable across replay; feeds logical_step_path
 
   oneof body {
-    Opaque          text             = 2;   // display only
-    Opaque          thought          = 3;   // display only
-    ToolCall        tool_call        = 4;   // TYPED: policy, digest, claim
-    ToolResult      tool_result      = 5;   // TYPED: settles the claim
-    ApprovalRequest approval_request = 6;   // TYPED: binds to an Approval row
-    Checkpoint      checkpoint       = 7;   // envelope typed, payload opaque
+    Opaque   text      = 2;   // display only
+    Opaque   thought   = 3;   // display only
+    ToolCall tool_call = 4;   // TYPED: a REQUEST to execute, not an execution
+    Checkpoint checkpoint = 5; // envelope typed, payload opaque
   }
 }
 
@@ -106,18 +125,13 @@ message ToolCall {
   string call_id    = 3;   // adapter-scoped; correlates the ToolResult
 }
 
-message ToolResult {
-  string call_id    = 1;
-  bool   ok         = 2;
-  string content    = 3;
-  string error_code = 4;   // required when ok = false
-}
+// ToolResult and ToolDenied are defined ABOVE, with the ControlFrame they travel
+// in — they are platform-to-adapter, not adapter output.
 
-message ApprovalRequest {
-  string call_id      = 1;   // the ToolCall being gated
-  string question     = 2;   // shown to the human, verbatim
-  string risk_summary = 3;
-}
+// NOTE: there is no ApprovalRequest frame. The adapter does not ask for approval;
+// it requests a tool call, and the PLATFORM decides whether that needs a human,
+// from the tool's approval_mode in the pinned definition and from policy. An
+// adapter that could choose when to seek approval could also choose not to.
 
 message Checkpoint {
   bytes  payload               = 1;   // OPAQUE — the adapter's own format
@@ -165,6 +179,60 @@ state.
 
 ---
 
+## Who executes a tool
+
+**The platform executes tools. The adapter requests them.** This is the decision review
+correctly identified as unmade, and it determines the direction of every frame above.
+
+The first draft had `ToolCall` *and* `ToolResult` as adapter **outputs**, which is
+incoherent given everything else in this spec: it let an adapter report the result of an
+effect the platform is supposed to own, settle a platform-owned claim, and skip policy
+entirely. There was also no authorization step — nothing between "adapter says it wants to
+call a tool" and "the tool ran".
+
+### The handshake
+
+```
+adapter  --> ToolCall{call_id, tool_name, arguments}          Output
+                 |
+                 |  control plane, in order:
+                 |    1. tool_name must exist in the PINNED definition   (else ToolDenied)
+                 |    2. evaluate Cedar policy                          (deny -> ToolDenied)
+                 |    3. derive the effect key from the canonical args   (03)
+                 |    4. record INTENT in the effect ledger             (02, phase 1)
+                 |    5. if approval required -> awaiting_approval, create Approval
+                 |            ... a human answers, minutes or hours later ...
+                 |            denied -> ToolDenied{APPROVAL_DENIED}
+                 |    6. CLAIM atomically (02, phase 3)
+                 |    7. DISPATCH the tool
+                 |    8. SETTLE the claim, fenced (02, phase 5)
+                 v
+adapter  <-- ToolResult{call_id, ok, content} | ToolDenied{call_id, reason}   ControlFrame
+```
+
+The adapter blocks on `call_id` and continues when the answer arrives. It never learns
+whether a human was involved, and it cannot tell a fast approval from no approval — which
+is the property that makes approval policy changeable without touching adapters.
+
+### Why not let the adapter execute and report
+
+It is the more common design, and most harnesses in the study work that way. It is
+incompatible with three things we have already committed to:
+
+| Commitment | Broken by adapter-side execution |
+|---|---|
+| effect ledger owns at-most-once (ADR-0014) | the claim would be advisory; the adapter has already acted |
+| policy decides before the act (ADR-0013) | policy becomes an audit log of things that already happened |
+| approval gates the action (ADR-0015) | the adapter chooses whether to wait |
+
+So the cost is accepted deliberately: **an adapter cannot bring its own tools.** A harness
+with built-in tools must either expose them as declared tools the platform executes, or
+declare `tools.platform_executed = false` and be understood as running unmediated — a
+capability the platform records rather than silently tolerates.
+
+That is a real limitation and the sharpest edge of the design. It is also the only version
+in which "the platform owns effects" is true rather than aspirational.
+
 ## What must be typed, and why
 
 An earlier version made `TOOL_CALL`, `APPROVAL_REQUEST` and `CHECKPOINT` undifferentiated
@@ -181,8 +249,8 @@ opaque bytes the control plane cannot:
 
 So the rule is narrow rather than absolute:
 
-- **Typed**, because the control plane decides on them: `ToolCall`, `ToolResult`,
-  `ApprovalRequest`, and the `Checkpoint` *envelope*.
+- **Typed**, because the control plane decides on them: `ToolCall` (inbound),
+  `ToolResult` and `ToolDenied` (outbound), and the `Checkpoint` *envelope*.
 - **Opaque**, because only the adapter and the human care: `text`, `thought`, and the
   checkpoint *payload*.
 

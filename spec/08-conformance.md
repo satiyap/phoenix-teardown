@@ -78,9 +78,23 @@ Every invariant in this spec, with its negative control. Consolidated from §01�
 | # | Invariant | Negative control |
 |---|---|---|
 | 1 | Concurrent appends produce a dense `seq` with no duplicates | remove the PK ⇒ duplicates |
+| 1a | An ordinary event carries exactly `runs.current_epoch` | let the caller pass an epoch ⇒ events invent epochs and `live()` breaks |
+| 1b | Only `run.rewound` moves the epoch, and only to `+1` | allow any epoch ⇒ non-dense history, `to_epoch` names a future epoch |
+| 1c | A run CONTINUES after a rewind | use the naive `seq >=` rule ⇒ post-rewind events vanish |
+| 1d | `seq` is monotonic across epochs, so `seq` order == `(epoch, seq)` order | reset `seq` per epoch ⇒ folding reorders history |
 | 2 | An effect executes at most once under N claimers | stub the claim ⇒ N executions |
 | 3 | A fenced worker's writes are rejected | drop the `EXISTS` fence clause ⇒ write lands |
-| 4 | An expired claim becomes `indeterminate`, never retried | make the sweeper retry ⇒ double execution |
+| 3a | Every fenced write includes `expires_at > now()` | omit it ⇒ an expired holder's write lands |
+| 3b | NFC-colliding keys are REJECTED, not merged | normalise-then-assign ⇒ one field silently overwrites another |
+| 3c | Keys sort by UTF-8 byte order, asserted with non-BMP characters | rely on the language default ⇒ UTF-16 vs code-point divergence |
+| 3d | Reordering extensions changes the definition digest | sort them ⇒ a behavioural change preserves the pin |
+| 3e | Every reject vector actually raises, in every implementation | list without executing ⇒ the fixture is decoration |
+| 3f | The vectors reproduce in a SECOND language | compare against the generator ⇒ proves only determinism |
+| 4 | An expired **claim** becomes `indeterminate`, never retried | make the sweeper retry ⇒ double execution |
+| 4a | An effect `awaiting_approval` NEVER becomes `indeterminate`, however slow the human | claim before approval ⇒ a slow approver produces `indeterminate` for an effect that never ran |
+| 4b | A denied effect is never dispatched | check approval outside the claim ⇒ read-then-act dispatches it |
+| 4c | Settlement requires owner + token + `status='claimed'` | settle by key alone ⇒ a fenced worker overwrites an `indeterminate` verdict |
+| 4d | An approval cannot gate an effect in another run | drop `run_id` from the FK ⇒ cross-run gating accepted |
 | 5 | `temp:` state cannot be persisted | drop the `CHECK` ⇒ it persists |
 | 6 | Cross-tenant FK is impossible | drop the composite FK ⇒ succeeds |
 | 7 | Terminal approval requires `decided_by` | drop the `CHECK` ⇒ anonymous approval |
@@ -98,7 +112,8 @@ Every invariant in this spec, with its negative control. Consolidated from §01�
 | 19 | NFC and NFD digests agree | remove normalisation ⇒ differ |
 | 20 | Domain separation holds | drop `kind` ⇒ collision |
 | 21 | Exactly one `End` frame | accept two ⇒ two terminal states |
-| 22 | Close without `End` ⇒ `indeterminate` | map to `failed` ⇒ false certainty |
+| 22 | Close without `End` **and an unsettled effect** ⇒ `indeterminate` | map to `failed` ⇒ false certainty |
+| 22a | Close without `End` and **no** unsettled effect ⇒ `failed`, `adapter_disconnected` | map to `indeterminate` ⇒ manufactured uncertainty, human time spent on a known outcome |
 | 23 | Unset capability reads `UNKNOWN` | treat as `FALSE` ⇒ silent degradation |
 | 24 | `ASSERTED` cannot gate a safety decision | allow it ⇒ unproven claim trusted |
 | 25 | Stable `step_id` across replay | counter-based ⇒ duplicate execution |

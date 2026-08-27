@@ -164,35 +164,123 @@ of the run is stale and it must re-read before deciding anything.
 
 ### Claiming and performing an effect — three transactions, deliberately
 
+The lifecycle has **five phases**, and the split between intent and claim is the part
+that review found missing. Naively, an effect is claimed and then approved — which breaks
+as soon as a human is involved:
+
+```
+claim (5-minute lease) -> ask a human -> human answers an hour later
+                       -> lease expired -> sweeper marks it INDETERMINATE
+                       -> a human now investigates an effect that NEVER RAN
+```
+
+An execution lease measures *execution*. It cannot measure deliberation. So:
+
+```
+1. INTENT      derive the key, evaluate policy      -> intended
+2. APPROVAL    if required, create the Approval     -> awaiting_approval
+3. CLAIM       atomic, takes the lease              -> claimed
+4. DISPATCH    perform the side effect (no txn)
+5. SETTLE      fenced                               -> succeeded | failed
+```
+
+### 1. Intent — deterministic key, no lease
+
 ```sql
--- TX1: CLAIM. Returns the token this worker must present at settlement.
 INSERT INTO effect_ledger (tenant_id, idempotency_key, run_id, kind,
-                           request_digest, claim_owner, claim_token,
-                           lease_expires_at)
-VALUES ($tenant, $key, $run, $kind, $digest, $worker,
-        COALESCE((SELECT max_claim_token FROM effect_claim_history
-                   WHERE tenant_id=$tenant AND idempotency_key=$key), 0) + 1,
-        now() + interval '5 minutes')
+                           request_digest, status)
+VALUES ($tenant, $key, $run, $kind, $digest, 'intended')
 ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
-RETURNING claim_token;
--- no row  =>  someone else owns it. STOP. Read the existing row; do NOT execute.
+RETURNING status;
+-- no row => this effect already exists. Read it and DO NOT re-derive intent.
 ```
 
-```
-(no transaction)    perform the side effect        <-- outside any transaction
-```
+The key is derived from the run, the logical step path and the canonical request digest
+(§03) — never from a message id, so intent survives message-log retention.
+
+### 2. Approval — binds to the intent, not to a claim
 
 ```sql
--- TX2: SETTLE, fenced. Must prove BOTH still-owner AND still-open.
+BEGIN;
+  UPDATE effect_ledger SET status = 'awaiting_approval'
+   WHERE tenant_id=$tenant AND idempotency_key=$key AND status='intended';
+
+  INSERT INTO approvals (tenant_id, approval_id, run_id, action_ref,
+                         request_payload, status, expires_at)
+  VALUES ($tenant, $aid, $run, $key, $shown, 'pending', now() + interval '24 hours');
+COMMIT;
+```
+
+The approval references the effect **by its deterministic key**, so no ledger row needs to
+be claimed for a human to answer. The approval carries its own, much longer expiry — the
+right timescale for a person.
+
+### 3. Claim — atomic, and only now does a lease start
+
+```sql
+UPDATE effect_ledger
+   SET status = 'claimed',
+       claim_owner = $worker,
+       claim_token = $random_128_bit,        -- OPAQUE, not a counter
+       claimed_at = now(),
+       lease_expires_at = now() + interval '5 minutes'
+ WHERE tenant_id = $tenant
+   AND idempotency_key = $key
+   AND (status = 'intended'
+        OR (status = 'awaiting_approval'
+            AND EXISTS (SELECT 1 FROM approvals a
+                         WHERE a.tenant_id = $tenant AND a.action_ref = $key
+                           AND a.run_id = $run AND a.status = 'approved')))
+RETURNING claim_token;
+-- no row => not approved, already claimed, denied, or abandoned. DO NOT DISPATCH.
+```
+
+One statement, so the approval check and the claim cannot interleave. A second worker
+finds the row already `claimed` and stops. **The approved-effect check is inside the same
+`UPDATE`** — reading approval status and then claiming would be exactly the read-then-act
+race that double-executes.
+
+### 4. Dispatch
+
+```
+(no transaction)    perform the side effect
+```
+
+### 5. Settle, fenced
+
+```sql
 UPDATE effect_ledger
    SET status = $outcome, completed_at = now(), result_ref = $ref
  WHERE tenant_id = $tenant
    AND idempotency_key = $key
    AND claim_owner = $worker      -- we still own it
-   AND claim_token = $token       -- ...under THIS claim, not a later one
+   AND claim_token = $token       -- ...under THIS claim
    AND status = 'claimed';        -- ...and nobody has already settled it
 -- 0 rows updated => WE ARE FENCED OUT. Do not retry, do not overwrite.
 ```
+
+### Denial, expiry, abandonment — none of which dispatch
+
+```sql
+-- an approver refused
+UPDATE effect_ledger SET status='denied'
+ WHERE tenant_id=$tenant AND idempotency_key=$key AND status='awaiting_approval';
+
+-- nobody answered within the approval's own (long) expiry
+UPDATE effect_ledger SET status='denied'
+ WHERE tenant_id=$tenant AND idempotency_key=$key AND status='awaiting_approval'
+   AND EXISTS (SELECT 1 FROM approvals a WHERE a.tenant_id=$tenant
+                AND a.action_ref=$key AND a.status='expired');
+
+-- the run ended, or the intent was superseded
+UPDATE effect_ledger SET status='abandoned'
+ WHERE tenant_id=$tenant AND idempotency_key=$key
+   AND status IN ('intended','awaiting_approval');
+```
+
+All three move a **never-claimed** row, so none of them can produce `indeterminate`.
+That is the point of the phase split: `indeterminate` now means only *"we took a lease,
+dispatched, and lost contact"* — real uncertainty, never bookkeeping.
 
 **Why all three predicates.** A `lease_expires_at` column alone is not fencing. The
 sequence that breaks a naive settle-by-key:

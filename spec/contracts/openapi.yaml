@@ -3,190 +3,442 @@ info:
   title: Agent Platform control-plane API (v0.1 execution spine)
   version: 0.1.0
   description: |
-    Generated companion to spec/06-api.md. The Markdown is the prose source; this file
-    is the machine-readable contract, and `make spec` asserts they do not diverge in
-    path set.
+    Machine-readable companion to spec/06-api.md. `make spec` asserts the two agree on
+    operations, security classes and the run-state enum — an earlier version matched only
+    path strings, so a GET silently becoming a POST would have passed.
 
-    Two invariants that are easy to lose in an OpenAPI file and are load-bearing here:
-      1. `tenant_id` NEVER appears in a request. It is derived from the credential.
-      2. No route sets `running`, `expired` or `indeterminate` — those are system
-         transitions only. See spec/05-state-machine.md.
+    Four invariants that are easy to lose in an OpenAPI file and are load-bearing:
+      1. `tenant_id` NEVER appears in a request. It is derived from the token.
+      2. `decided_by` is taken from the token, never from a body.
+      3. No route sets `running`, `expired`, `indeterminate` or `incompatible` — those are
+         system transitions (spec/05-state-machine.md).
+      4. Cross-tenant reads are 404, not 403: existence is not disclosed.
 servers:
   - url: https://api.example.internal
 security:
-  - userToken: []
+  - agentToken: []
+tags:
+  - name: definitions
+  - name: agents
+  - name: runs
+  - name: approvals
+  - name: policies
+    description: admin only
+  - name: adapters
+    description: admin only
 components:
   securitySchemes:
-    userToken:
+    agentToken:
       type: http
       scheme: bearer
       description: |
-        Two credential classes exist. A USER token carries a principal and may decide
-        approvals. A WORKER token may advance runs but must never decide an approval,
-        because an approver must be a nameable human (ADR-0015).
-    workerToken:
+        Class **agent**: create/submit runs it owns, read its own runs, answer its own
+        approvals. Presented to an admin route it is 403 `wrong_credential_class` — it
+        authenticated fine, it is simply not permitted.
+    adminToken:
       type: http
       scheme: bearer
+      description: "Class **admin**: everything, including policy and adapter registration."
   parameters:
-    IdempotencyKey:
+    RunId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    IdempotencyKeyRequired:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 1 }
+      description: Required on this route (spec/06-api.md Idempotency).
+    IdempotencyKeyOptional:
       name: Idempotency-Key
       in: header
       required: false
-      schema: { type: string }
-      description: Platform-wide idempotent retry (AgentCore's clientToken pattern).
+      schema: { type: string, minLength: 1 }
+  responses:
+    NotFoundOrOtherTenant:
+      description: |
+        Unknown, or belongs to another tenant. Deliberately indistinguishable.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Authenticated but not permitted for this credential class
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    IdempotencyConflict:
+      description: |
+        Same key, different body. Never replay another request's answer.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
   schemas:
     Error:
       type: object
-      required: [code, message]
+      required: [error, message]
       properties:
-        code:    { type: string }
+        error:   { type: string, description: stable machine code }
         message: { type: string }
         details: { type: object, additionalProperties: true }
     RunState:
       type: string
       description: |
-        Client-settable states only appear in transitions the API permits. `running`,
-        `expired` and `indeterminate` are system-owned and never a route's target.
-      enum: [created, queued, running, waiting_input, cancelling, cancelled,
-             succeeded, failed, expired, indeterminate, discarded]
+        Mirrors spec/05-state-machine.md exactly. `running`, `expired`, `indeterminate`
+        and `incompatible` are system-owned and never a route's target state.
+      enum: [draft, queued, running, waiting_input, cancelling, cancelled,
+             succeeded, failed, expired, indeterminate, incompatible, discarded]
+    ToolBinding:
+      type: object
+      required: [name, schema_digest, version, artifact_digest, execution_binding, approval_mode]
+      description: |
+        Every field participates in the definition digest. `artifact_digest` is required:
+        a version string pointing at mutable code preserves the pin while changing
+        behaviour.
+      properties:
+        name:              { type: string }
+        schema_digest:     { type: string }
+        version:           { type: string }
+        artifact_digest:   { type: string, minLength: 1 }
+        execution_binding: { type: string }
+        approval_mode:     { type: string, enum: [never, always, risk_based] }
+        credential_ref:    { type: [string, 'null'] }
+    ExtensionBinding:
+      type: object
+      required: [name, artifact_digest]
+      description: |
+        The `extensions` ARRAY IS ORDERED and its order is digested: extensions compose,
+        so swapping two changes behaviour. Do not sort this array.
+      properties:
+        name:            { type: string }
+        artifact_digest: { type: string, minLength: 1 }
+        config_digest:   { type: string }
+        position:        { type: string, enum: [outermost, innermost] }
     Definition:
       type: object
       required: [name, instructions]
+      additionalProperties: false
       properties:
         name:         { type: string }
         instructions: { type: string }
         tools:
           type: array
-          description: Full bindings; each REQUIRES an artifact_digest.
-          items:
-            type: object
-            required: [name, artifact_digest]
-            properties:
-              name:            { type: string }
-              artifact_digest: { type: string }
-              config_digest:   { type: string }
+          items: { $ref: '#/components/schemas/ToolBinding' }
         extensions:
           type: array
-          description: |
-            ORDERED, not sorted. Order is semantic (composition order changes
-            behaviour), and each binding pins an artifact.
-          items:
-            type: object
-            required: [name, artifact_digest]
-            properties:
-              name:            { type: string }
-              artifact_digest: { type: string }
-              config_digest:   { type: string }
-              position:        { type: string, enum: [outermost, innermost] }
+          items: { $ref: '#/components/schemas/ExtensionBinding' }
     DigestResponse:
       type: object
       required: [digest, canon_profile]
       properties:
         digest:        { type: string }
         canon_profile: { type: string, const: "nfc+intjson/v1" }
+    Agent:
+      type: object
+      required: [agent_id, name, current_digest, declared_version]
+      properties:
+        agent_id:         { type: string }
+        name:             { type: string }
+        current_digest:   { type: string }
+        declared_version: { type: integer, description: human-facing; never compared }
+    Run:
+      type: object
+      required: [run_id, state, agent_id, pinned_definition_digest]
+      properties:
+        run_id:                   { type: string }
+        state:                    { $ref: '#/components/schemas/RunState' }
+        agent_id:                 { type: string }
+        pinned_definition_digest: { type: string }
+        current_epoch:            { type: integer, minimum: 0 }
+        error_code:               { type: [string, 'null'] }
+    RunEvent:
+      type: object
+      required: [seq, epoch, event_type, payload, superseded]
+      properties:
+        seq:        { type: integer }
+        epoch:      { type: integer, minimum: 0 }
+        event_type: { type: string }
+        payload:    { type: object, additionalProperties: true }
+        superseded:
+          type: boolean
+          description: |
+            True when a later rewind supersedes it. Superseded events are RETAINED and
+            returned, because they are evidence of what was attempted.
+    Approval:
+      type: object
+      required: [approval_id, run_id, action_ref, status]
+      properties:
+        approval_id: { type: string }
+        run_id:      { type: string }
+        action_ref:  { type: string, description: the gated effect's idempotency_key }
+        status:      { type: string, enum: [pending, approved, denied, expired, superseded] }
+        decided_by:  { type: [string, 'null'], description: set from the TOKEN, never a body field }
+        rationale:   { type: [string, 'null'] }
+        expires_at:  { type: string, format: date-time }
 paths:
   /v1/definitions:
     post:
-      summary: Register a definition; content-addressed, so this is idempotent by nature
+      tags: [definitions]
+      operationId: createDefinition
+      summary: Register a definition; content-addressed, so naturally idempotent
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKeyOptional' }]
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: '#/components/schemas/Definition' }
       responses:
-        '201': { description: created,        content: { application/json: { schema: { $ref: '#/components/schemas/DigestResponse' } } } }
-        '200': { description: already existed, content: { application/json: { schema: { $ref: '#/components/schemas/DigestResponse' } } } }
-        '422': { description: not canonicalisable under nfc+intjson/v1 (e.g. a fractional number), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '201':
+          description: created
+          content: { application/json: { schema: { $ref: '#/components/schemas/DigestResponse' } } }
+        '200':
+          description: already existed, byte-identical
+          content: { application/json: { schema: { $ref: '#/components/schemas/DigestResponse' } } }
+        '422':
+          description: |
+            Not canonicalisable under nfc+intjson/v1 — e.g. a fractional number, an
+            integer above 2^53-1, or two keys colliding under NFC.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
   /v1/definitions/{digest}:
     get:
+      tags: [definitions]
+      operationId: getDefinition
       parameters: [{ name: digest, in: path, required: true, schema: { type: string } }]
       responses:
-        '200': { description: the definition body }
-        '404': { description: unknown digest }
+        '200':
+          description: the definition body
+          content: { application/json: { schema: { $ref: '#/components/schemas/Definition' } } }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
   /v1/agents:
     post:
-      summary: Create an agent pointing at a definition digest
+      tags: [agents]
+      operationId: createAgent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, digest]
+              properties:
+                name:   { type: string }
+                digest: { type: string }
       responses:
-        '201': { description: created }
+        '201':
+          description: created
+          content: { application/json: { schema: { $ref: '#/components/schemas/Agent' } } }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
   /v1/agents/{id}:
-    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
     get:
+      tags: [agents]
+      operationId: getAgent
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
       responses:
-        '200': { description: the agent }
-        '404': { description: unknown, or in another tenant (404 not 403 — see 06) }
+        '200':
+          description: the agent
+          content: { application/json: { schema: { $ref: '#/components/schemas/Agent' } } }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
     patch:
+      tags: [agents]
+      operationId: repointAgent
       summary: Repoint the agent at a different definition digest
       description: |
-        This BLOCKS resume for in-flight runs pinned to the old digest, deliberately.
-        See spec/09-decisions.md 2.
+        Affects NEW runs only. In-flight runs resume against their own pinned artifact.
+        Blocking an already-running dangerous definition is a separate, audited
+        revocation operation, which v0.1 does not ship — see spec/09-decisions.md 2.
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [digest]
+              properties:
+                digest:           { type: string }
+                declared_version: { type: integer }
       responses:
-        '200': { description: repointed }
+        '200':
+          description: repointed
+          content: { application/json: { schema: { $ref: '#/components/schemas/Agent' } } }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
   /v1/runs:
     post:
+      tags: [runs]
+      operationId: createRun
       summary: Create a run (no Task in v0.1 — runs are created directly)
-      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKeyRequired' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agent_id]
+              properties:
+                agent_id: { type: string }
+                input:    { type: object, additionalProperties: true }
       responses:
-        '201': { description: created, state=created }
+        '201':
+          description: created, state=draft
+          content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } }
+        '409': { $ref: '#/components/responses/IdempotencyConflict' }
+        '422':
+          description: missing or reused Idempotency-Key with a different body
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     get:
+      tags: [runs]
+      operationId: listRuns
       parameters:
         - { name: state,  in: query, schema: { $ref: '#/components/schemas/RunState' } }
-        - { name: limit,  in: query, schema: { type: integer, maximum: 200 } }
+        - { name: limit,  in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
         - { name: cursor, in: query, schema: { type: string } }
       responses:
-        '200': { description: page of runs }
+        '200':
+          description: a page of runs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Run' } }
+                  next_cursor: { type: [string, 'null'] }
   /v1/runs/{id}:
-    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
     get:
+      tags: [runs]
+      operationId: getRun
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
       responses:
-        '200': { description: the run }
-        '404': { description: unknown, or another tenant }
+        '200':
+          description: the run
+          content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
   /v1/runs/{id}/submit:
     post:
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      tags: [runs]
+      operationId: submitRun
+      description: draft -> queued. Never sets `running`; a worker claims the lease.
+      parameters:
+        - { $ref: '#/components/parameters/RunId' }
+        - { $ref: '#/components/parameters/IdempotencyKeyOptional' }
       responses:
-        '202': { description: state=queued }
-        '409': { description: not in a submittable state }
+        '202':
+          description: state=queued
+          content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } }
+        '409':
+          description: not in a submittable state
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
   /v1/runs/{id}/cancel:
     post:
+      tags: [runs]
+      operationId: cancelRun
       summary: Request cancellation — a request, not a fact
       description: |
         Returns state=cancelling. The run is not cancelled until the adapter
         acknowledges; cancel-request and cancel-fact are different events (AG2).
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { reason: { type: string } }
       responses:
-        '202': { description: state=cancelling }
+        '202':
+          description: state=cancelling
+          content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
   /v1/runs/{id}/discard:
     post:
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      tags: [runs]
+      operationId: discardRun
+      description: Only while unclaimed. A claimed run must be cancelled instead.
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { reason: { type: string } }
       responses:
-        '200': { description: state=discarded }
+        '200':
+          description: state=discarded
+          content: { application/json: { schema: { $ref: '#/components/schemas/Run' } } }
+        '409':
+          description: already claimed
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
   /v1/runs/{id}/events:
     get:
+      tags: [runs]
+      operationId: listRunEvents
+      description: In `seq` order, which equals `(epoch, seq)` order (spec/04-events.md).
       parameters:
-        - { name: id, in: path, required: true, schema: { type: string } }
-        - { name: since_seq, in: query, schema: { type: integer } }
+        - { $ref: '#/components/parameters/RunId' }
+        - { name: since_seq, in: query, schema: { type: integer, minimum: 0, default: 0 } }
       responses:
-        '200': { description: events in (epoch, seq) order, superseded ones flagged }
+        '200':
+          description: events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/RunEvent' } }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
   /v1/runs/{id}/stream:
     get:
+      tags: [runs]
+      operationId: streamRun
       summary: SSE stream of run events
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
       responses:
-        '200': { description: text/event-stream }
+        '200':
+          description: text/event-stream of RunEvent objects
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
   /v1/approvals:
     get:
-      parameters: [{ name: status, in: query, schema: { type: string, enum: [pending, approved, denied, expired, superseded] } }]
+      tags: [approvals]
+      operationId: listApprovals
+      description: Served from the partial index on pending (spec/01-schema.md).
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, approved, denied, expired, superseded] }
       responses:
-        '200': { description: approvals, served from the partial index on pending }
+        '200':
+          description: approvals
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Approval' } }
   /v1/approvals/{id}/decide:
     post:
-      summary: Decide an approval; requires a USER token
+      tags: [approvals]
+      operationId: decideApproval
+      summary: Decide an approval
       description: |
-        `decided_by` is taken from the token and NEVER from the request body. A worker
-        token is refused with 403: an approval must name a human approver (ADR-0015).
-        Deciding twice returns 409 with the EXISTING decision, not an error that hides it.
-      security: [{ userToken: [] }]
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+        `decided_by` comes from the token and NEVER from the body: an approval must name a
+        nameable human (ADR-0015). A worker credential is refused. Deciding twice returns
+        409 carrying the EXISTING decision rather than hiding it.
+
+        A denial does not fail the run. The worker sends the adapter
+        `ToolDenied{APPROVAL_DENIED}` and the run continues (spec/09-decisions.md 3).
+      parameters:
+        - { $ref: '#/components/parameters/RunId' }
+        - { $ref: '#/components/parameters/IdempotencyKeyRequired' }
       requestBody:
         required: true
         content:
@@ -194,54 +446,199 @@ paths:
             schema:
               type: object
               required: [decision]
+              additionalProperties: false
               properties:
                 decision:  { type: string, enum: [approved, denied] }
                 rationale: { type: string }
       responses:
-        '200': { description: decided }
-        '403': { description: a worker token may not decide an approval }
-        '409': { description: already decided; body carries the existing decision }
+        '200':
+          description: decided
+          content: { application/json: { schema: { $ref: '#/components/schemas/Approval' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: already decided; body carries the existing decision
+          content: { application/json: { schema: { $ref: '#/components/schemas/Approval' } } }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
   /v1/policies:
     post:
-      responses:
-        '201': { description: created, mode defaults to observe }
-  /v1/policies/{id}/promote:
-    post:
-      summary: observe → steer → deny, one step at a time
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      tags: [policies]
+      operationId: createPolicy
+      security: [{ adminToken: [] }]
+      description: Created in `observe` mode. Cedar source is validated before storage.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              required: [name, cedar_source]
               properties:
-                to: { type: string, enum: [steer, deny] }
+                name:         { type: string }
+                cedar_source: { type: string }
+                scope:        { type: string, enum: [tenant, agent] }
       responses:
-        '200': { description: promoted }
-        '409': { description: cannot skip a mode }
+        '201':
+          description: created, mode=observe
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [policy_id, mode]
+                properties:
+                  policy_id: { type: string }
+                  mode:      { type: string, enum: [observe, steer, deny] }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: Cedar source does not validate
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+  /v1/policies/{id}/promote:
+    post:
+      tags: [policies]
+      operationId: promotePolicy
+      security: [{ adminToken: [] }]
+      summary: observe -> steer -> deny, one step at a time
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to]
+              properties: { to: { type: string, enum: [steer, deny] } }
+      responses:
+        '200':
+          description: promoted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [policy_id, mode]
+                properties:
+                  policy_id: { type: string }
+                  mode:      { type: string, enum: [observe, steer, deny] }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: cannot skip a mode
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
   /v1/policies/{id}/decisions:
     get:
+      tags: [policies]
+      operationId: listPolicyDecisions
+      security: [{ adminToken: [] }]
+      description: With `enforced=false`, the shadow decisions used for empirical comparison.
       parameters:
-        - { name: id, in: path, required: true, schema: { type: string } }
+        - { $ref: '#/components/parameters/RunId' }
         - { name: enforced, in: query, schema: { type: boolean } }
+        - { name: since,    in: query, schema: { type: string, format: date-time } }
       responses:
-        '200': { description: shadow decisions when enforced=false }
+        '200':
+          description: decisions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [decision_id, decision, enforced]
+                      properties:
+                        decision_id:  { type: string }
+                        principal_id: { type: string }
+                        decision:     { type: string, enum: [allow, deny, steer, observe] }
+                        enforced:     { type: boolean, description: false = shadow }
+                        guidance:     { type: [string, 'null'] }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /v1/policies/{id}/stats:
     get:
+      tags: [policies]
+      operationId: getPolicyStats
+      security: [{ adminToken: [] }]
+      description: |
+        Would-deny counts over a window. This is the EMPIRICAL shadow comparison v0.1
+        ships, because static permissiveness comparison is not exposed by cedarpy.
       parameters:
-        - { name: id, in: path, required: true, schema: { type: string } }
-        - { name: window, in: query, schema: { type: string } }
+        - { $ref: '#/components/parameters/RunId' }
+        - { name: window, in: query, schema: { type: string, default: 24h } }
       responses:
-        '200': { description: would-deny counts for empirical shadow comparison }
+        '200':
+          description: counts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [window, would_deny, allow, total]
+                properties:
+                  window:     { type: string }
+                  would_deny: { type: integer }
+                  allow:      { type: integer }
+                  total:      { type: integer }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /v1/adapters:
     post:
+      tags: [adapters]
+      operationId: registerAdapter
+      security: [{ adminToken: [] }]
+      description: |
+        The digest is DERIVED from the contract, never client-supplied. A remote adapter
+        must present an mTLS certificate whose subject matches `identity` (spec/07).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identity, protocol_version, integration_mode, payload_schema_digest]
+              properties:
+                identity:              { type: string }
+                protocol_version:      { type: string }
+                integration_mode:
+                  type: string
+                  enum: [sdk_in_process, cli_subprocess, acp_subprocess, native_tui, native_server]
+                payload_schema_digest: { type: string }
+                declared_capabilities: { type: object, additionalProperties: true }
       responses:
-        '201': { description: registered }
+        '201':
+          description: registered
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [identity, digest]
+                properties:
+                  identity: { type: string }
+                  digest:   { type: string, description: DERIVED, never client-supplied }
+        '403': { $ref: '#/components/responses/Forbidden' }
     get:
+      tags: [adapters]
+      operationId: listAdapters
       summary: The capability catalogue
       description: |
-        A capability may be true, false, or UNKNOWN — and UNKNOWN is a first-class
-        answer, never degraded to false.
+        A capability is true, false, or UNKNOWN, and UNKNOWN is a first-class answer never
+        degraded to false. `confidence` distinguishes ASSERTED from VERIFIED.
       responses:
-        '200': { description: adapters with declared capabilities and confidence }
+        '200':
+          description: adapters with declared capabilities and confidence
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        identity: { type: string }
+                        digest:   { type: string }
+                        capabilities:
+                          type: object
+                          additionalProperties:
+                            type: object
+                            properties:
+                              value:      { type: string, enum: [VALUE_UNKNOWN, TRUE, FALSE] }
+                              confidence: { type: string, enum: [CONFIDENCE_UNKNOWN, ASSERTED, VERIFIED] }

@@ -139,7 +139,7 @@ The last two are what make `observe` mode usable: shadow verdicts are queryable 
 aggregable. Shadow evaluation without aggregation tells you a policy fired once, not
 that it would have fired 4,102 times.
 
-### Adapters — admin only
+### Adapters — registration is admin only, the catalogue is not
 
 ```http
 POST /v1/adapters
@@ -153,18 +153,21 @@ The digest is **derived from the contract**, never accepted from the caller — 
 caller-supplied adapter digest was a hole spike 02 closed.
 
 ```http
-GET /v1/adapters                  # the capability catalogue, public API
+GET /v1/adapters                  # the capability catalogue — ANY authenticated class
 ```
 
 Publishing capabilities is deliberate (Omnigent): a caller can degrade knowingly
-instead of discovering limits by failure.
+instead of discovering limits by failure. That only works if the callers who must degrade
+can read it, so the catalogue is readable by an **agent** token while registration stays
+admin-only. The section heading previously said "admin only" for both, which contradicted
+the line above it.
 
 ---
 
 ## Idempotency
 
-`Idempotency-Key` is **required** on `POST /v1/runs` and `POST /v1/approvals/{id}/decide`,
-optional elsewhere. Keys are scoped `(tenant_id, endpoint, key)` and retained 24h.
+`Idempotency-Key` is **required** on POST /v1/runs and POST /v1/approvals/{id}/decide.
+It is optional elsewhere. Keys are scoped `(tenant_id, endpoint, key)` and retained 24h.
 
 A replay returns the original response with `Idempotency-Replayed: true`. A key reused
 with a *different* body is `422` — silently returning the first response would hide a

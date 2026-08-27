@@ -299,15 +299,25 @@ extended to the one column the PK does not cover.
 ## Effect ledger — the atomic claim
 
 ```sql
+-- The lifecycle is: intent -> (approval) -> claim -> dispatch -> settle.
+-- `intended` exists because an effect awaiting a HUMAN cannot hold an execution
+-- lease: a 5-minute lease cannot span an hour of deliberation, and claiming
+-- early would mark an effect indeterminate that was never dispatched.
 CREATE TYPE effect_status AS ENUM
-    ('claimed', 'succeeded', 'failed', 'indeterminate');
+    ('intended',          -- key derived, policy evaluated, NOT dispatchable
+     'awaiting_approval', -- a human must answer before it may be claimed
+     'claimed',           -- lease held, about to dispatch
+     'succeeded', 'failed',
+     'denied',            -- an approver refused; never dispatched
+     'abandoned',         -- intent superseded or run ended; never dispatched
+     'indeterminate');    -- claimed, lease expired unsettled: may have happened
 
 CREATE TABLE effect_ledger (
     tenant_id      BIGINT NOT NULL,
     idempotency_key TEXT  NOT NULL,        -- deterministic; see below
     run_id         TEXT   NOT NULL,
     kind           TEXT   NOT NULL,        -- tool_call | delegation | notify | ...
-    status         effect_status NOT NULL DEFAULT 'claimed',
+    status         effect_status NOT NULL DEFAULT 'intended',
     attempt        INTEGER NOT NULL DEFAULT 1,
     request_digest TEXT   NOT NULL,
     result_ref     TEXT,
@@ -317,32 +327,44 @@ CREATE TABLE effect_ledger (
     -- stall past expiry, have the sweeper mark it indeterminate, then wake and
     -- settle it 'succeeded'. Settlement must therefore prove BOTH that it still
     -- owns the claim and that the claim is still open.
-    claim_owner    TEXT   NOT NULL,            -- worker identity
-    claim_token    BIGINT NOT NULL,            -- monotonic per key; bumped on re-claim
-    claimed_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    lease_expires_at TIMESTAMPTZ NOT NULL,
+    -- NULL until the row is claimed; an intent has no owner and no lease.
+    claim_owner    TEXT,                      -- worker identity
+    claim_token    TEXT,                      -- OPAQUE RANDOM, not a counter
+    claimed_at     TIMESTAMPTZ,
+    lease_expires_at TIMESTAMPTZ,
     completed_at   TIMESTAMPTZ,
 
-    -- THE PRIMITIVE. Claiming is an insert; losing the race is a conflict.
+    -- THE PRIMITIVE. Recording intent is an insert; losing the race is a conflict.
     PRIMARY KEY (tenant_id, idempotency_key),
     FOREIGN KEY (tenant_id, run_id) REFERENCES runs (tenant_id, run_id),
 
-    CHECK ((status IN ('succeeded','failed')) = (completed_at IS NOT NULL))
-);
+    -- lets approvals reference (key, run) TOGETHER, so an approval cannot gate
+    -- an effect belonging to a different run
+    UNIQUE (tenant_id, idempotency_key, run_id),
 
--- Monotonic claim tokens must outlive the ledger row's claim, for the same reason
--- run_lease_history exists: a re-claim after expiry must not reissue token 1.
-CREATE TABLE effect_claim_history (
-    tenant_id       BIGINT NOT NULL,
-    idempotency_key TEXT   NOT NULL,
-    max_claim_token BIGINT NOT NULL,
-    PRIMARY KEY (tenant_id, idempotency_key)
+    CHECK ((status IN ('succeeded','failed')) = (completed_at IS NOT NULL)),
+
+    -- an unclaimed row carries no lease; a dispatched row has an owner
+    CONSTRAINT effect_claim_fields_together CHECK (
+        (status IN ('intended','awaiting_approval','denied','abandoned')
+           AND claim_owner IS NULL AND claim_token IS NULL
+           AND lease_expires_at IS NULL)
+     OR (status IN ('claimed','succeeded','failed','indeterminate')
+           AND claim_owner IS NOT NULL AND claim_token IS NOT NULL
+           AND lease_expires_at IS NOT NULL)
+    )
 );
 
 -- a claim whose lease has expired and never completed is INDETERMINATE, and
 -- must surface to a human rather than being retried
 CREATE INDEX effect_ledger_stuck ON effect_ledger (tenant_id, lease_expires_at)
     WHERE status = 'claimed';
+
+-- intents awaiting a human are NOT stuck; they are waiting, on the approval's
+-- own (far longer) clock. Keeping them out of the sweeper's path is the whole
+-- reason `awaiting_approval` is a distinct status.
+CREATE INDEX effect_ledger_awaiting ON effect_ledger (tenant_id, run_id)
+    WHERE status = 'awaiting_approval';
 ```
 
 **`idempotency_key` derivation** — deterministic, and independent of message-log
@@ -440,6 +462,79 @@ A trigger is weaker than a foreign key — it does not cascade, and it can be by
 a superuser with `session_replication_role`. That is the cost of polymorphism, and it is
 why the exception is documented at the top rather than discovered here.
 
+### Effect status transitions, and why `claim_token` is random
+
+```
+            +-- policy: deny --> denied
+            |
+intended ---+-- approval required --> awaiting_approval --+-- approved --> claimed
+            |                                             +-- denied ----> denied
+            +-- policy: allow ----------------------------> claimed        (expired
+                                                                            -> denied)
+claimed --> succeeded | failed | indeterminate
+intended | awaiting_approval --> abandoned      (run ended, or intent superseded)
+```
+
+Two transitions are deliberately absent: **`intended` never becomes `succeeded`**
+directly (nothing is dispatched without a claim), and **nothing returns to `intended`**
+(a superseded intent is `abandoned` and a fresh intent gets a fresh key).
+
+An effect is only **dispatchable in `claimed`**, and only the worker holding
+`claim_token` may dispatch it.
+
+**`claim_token` is an opaque random value, not a monotonic counter.** An earlier draft
+had a `effect_claim_history` table to keep tokens monotonic across re-claims, which review
+correctly called an inconsistency: **effect rows are never deleted or re-claimed**, so
+"monotonic across reclaims" described a transition that cannot occur. Monotonicity buys
+nothing when there is never a second claim to order against; uniqueness is the whole
+requirement, and a random 128-bit token gives that with no extra table.
+
+This is the difference from the *run* lease, where reclaim is real (a dead worker's run
+must be picked up), so fence tokens there must be monotonic and do need history.
+
+`effect_claim_fields_together` (in the DDL above) makes this structural: a row that has
+never been claimed cannot carry a lease, and a dispatched row cannot lack an owner.
+
+## Idempotency records — the table §06 promises
+
+`06-api.md` requires `Idempotency-Key` on run creation and approval decisions, scoped
+`(tenant_id, endpoint, key)`, retained 24 hours, with a replay returning the original
+response and a *different* body returning `422`. None of that is possible without storage,
+and review found the table missing.
+
+```sql
+CREATE TABLE idempotency_records (
+    tenant_id     BIGINT NOT NULL,
+    endpoint      TEXT   NOT NULL,        -- 'POST /v1/runs'
+    idem_key      TEXT   NOT NULL,        -- client-supplied
+    request_digest TEXT  NOT NULL,        -- canonical (03): detects a changed body
+    response_status INTEGER NOT NULL,
+    response_body JSONB  NOT NULL,        -- replayed verbatim
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at    TIMESTAMPTZ NOT NULL,   -- created_at + 24h
+
+    PRIMARY KEY (tenant_id, endpoint, idem_key)
+);
+
+CREATE INDEX idempotency_expiry ON idempotency_records (expires_at);
+```
+
+The insert is the concurrency control, exactly as with effects:
+
+```sql
+INSERT INTO idempotency_records (...) VALUES (...)
+ON CONFLICT (tenant_id, endpoint, idem_key) DO NOTHING
+RETURNING 1;
+-- no row => a record exists. Compare request_digest:
+--   same     -> replay response_body with Idempotency-Replayed: true
+--   different-> 422 idempotency_key_reused (never replay a different request's answer)
+```
+
+Two in-flight requests with the same key mean the second waits or returns `409
+idempotency_in_flight`; it must not execute. **The digest comparison is why `request_digest`
+is canonical** — a re-serialised body with reordered keys is the same request and must not
+look like a client bug.
+
 ## Approval — with an approver
 
 ```sql
@@ -464,8 +559,11 @@ CREATE TABLE approvals (
     FOREIGN KEY (tenant_id, run_id) REFERENCES runs (tenant_id, run_id),
     FOREIGN KEY (tenant_id, decided_by)
         REFERENCES principals (tenant_id, principal_id),
-    FOREIGN KEY (tenant_id, action_ref)
-        REFERENCES effect_ledger (tenant_id, idempotency_key),
+    -- run_id is IN the FK, so an approval cannot gate an effect belonging to a
+    -- DIFFERENT run. With separate FKs, approval-for-run-B could reference
+    -- effect-of-run-A and the database would accept it.
+    FOREIGN KEY (tenant_id, action_ref, run_id)
+        REFERENCES effect_ledger (tenant_id, idempotency_key, run_id),
 
     -- a terminal decision MUST name its approver and when (invariant 8)
     CHECK ((status IN ('approved','denied'))

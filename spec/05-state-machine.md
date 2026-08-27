@@ -117,7 +117,13 @@ declare an effect indeterminate, which is a way to skip a safety check.
 **Denial resumes the run; it does not fail it.** A denied approval is an *answer*, and the
 adapter is entitled to receive it and decide what to do — retry differently, take a
 compliant path, or give up. So `waiting_input → running` accepts a denial, and the worker
-delivers `ToolResult{denied, reason}` to the adapter as the tool's outcome.
+sends the adapter a **`ToolDenied{call_id, reason: APPROVAL_DENIED, guidance}`** control
+frame (§07).
+
+`ToolDenied` is a distinct frame rather than `ToolResult{ok:false}` because "an approver
+refused" and "the tool errored" call for different adapter behaviour, and an earlier draft
+of this section named a frame the protocol could not carry at all — `ControlFrame` had only
+opaque `Input`.
 
 The run only reaches `failed` if the adapter then terminates, with
 `error_code = approval_denied`. Treating denial as an automatic run failure would be
@@ -163,11 +169,19 @@ Normative, and proven in spike 02:
 2. resolve the artifact from the registry BY DIGEST   → ArtifactMissing
 3. verify the artifact hashes to its own key          → ArtifactCorrupted
 4. compare the pin, field by field                    → Incompatible (names the field)
-5. acquire the fenced lease                           → ConcurrentResume
-6. THEN invoke the adapter, passing the RESOLVED artifact
+5. (future) check the digest against revoked_definitions → DefinitionRevoked
+6. acquire the fenced lease                           → ConcurrentResume
+7. THEN invoke the adapter, passing the RESOLVED artifact
 ```
 
-**No adapter method may be invoked before step 6.** Spike 02 tests this with a tripwire
+**The comparison in step 4 is against `run.pinned_definition_digest`, never against
+`agent.current_digest`.** Repointing an agent does not block an in-flight run: the pin is a
+statement about the artifact *this run executes*, and that artifact is still verified on
+every resume. Blocking in-flight work is a separate, audited revocation (step 5), which
+**v0.1 does not ship** — see [§09](09-decisions.md) 2. Until it does, the way to stop a run
+is to cancel it.
+
+**No adapter method may be invoked before the final step.** Spike 02 tests this with a tripwire
 adapter that raises if touched, and asserts `calls == []` on every failure path. That
 test is required in the implementation, not optional.
 

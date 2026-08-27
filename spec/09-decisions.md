@@ -28,33 +28,60 @@ writer, not a state to reconcile at runtime.
 
 ## 2. Does moving an agent pointer block a run whose pinned artifact still exists?
 
-**Yes, and this is deliberate — but it is the decision most likely to annoy users, so the
-reasoning matters.**
+**No. Reversed after review.** Ordinary pointer changes affect new runs only; existing runs
+resume against their own pinned artifact.
 
-A run pins `definition_digest`. `PATCH /v1/agents/{id}` moves `current_digest`. On resume
-the run compares its pin against **the agent's current digest**, so the run becomes
-`INCOMPATIBLE` even though its own pinned artifact is still in the registry and perfectly
-loadable.
+The earlier decision said yes, on the argument that an operator editing away a dangerous
+instruction should not have in-flight runs quietly continue with the old behaviour. Review
+pushed back on three grounds, and all three hold:
 
-The alternative — resume against the pinned artifact and ignore the pointer — is
-tempting and wrong. It means an operator who edits an agent to fix a dangerous
-instruction has *not* fixed anything for runs already in flight; they resume with the old
-behaviour, silently, and the operator has no signal. That is the LangGraph failure with
-extra steps: the platform knows the definition changed and proceeds anyway.
+1. **A pointer update and a security invalidation are different operations.** Overloading
+   one to mean the other makes pinning a *global change detector*: any edit, however
+   cosmetic, refuses resume for every in-flight run.
+2. **The suggested remedy was unsafe.** "Repoint backwards, let old runs finish, repoint
+   forward" leaves the supposedly dangerous definition live for new runs during the
+   interval — strictly worse than the problem it solved.
+3. **The LangGraph analogy did not transfer.** LangGraph silently resumes against *changed*
+   behaviour, having lost the original. Here the run possesses and verifies the exact
+   immutable artifact it started with. Resuming a verified pinned artifact is not the same
+   failure; it is the pin working.
 
-So the rule is: **a definition change is a decision point, and the platform surfaces it
-rather than choosing for you.** The remedies are explicit and both cheap:
+### What resume actually compares
 
-| Intent | Action |
-|---|---|
-| "the edit should not affect in-flight work" | repoint the agent back, let the run finish, repoint forward |
-| "in-flight runs should adopt the edit" | not supported in v0.1 — start a new run |
-| "this edit is semantically irrelevant" | OQ-037; an explicit recorded operator assertion, never a loosened default |
+```
+run.pinned_definition_digest  ==  the digest of the artifact being loaded
+```
 
-Recorded as a **known friction cost**, not an oversight. If it proves intolerable in
-practice the fix is the operator assertion, which keeps the default safe.
+Not `agent.current_digest`. The pin is a statement about *the artifact this run executes*,
+and it is still checked on every resume — a corrupted or missing artifact still yields
+`ArtifactCorrupted` / `ArtifactMissing`, and a checkpoint from a different definition still
+yields `IncompatibleCheckpoint`.
 
----
+| Operation | In-flight runs | New runs |
+|---|---|---|
+| `PATCH /v1/agents/{id}` (repoint) | unaffected; resume their pinned artifact | use the new digest |
+| digest **revocation** (below) | refuse to resume, `error_code = definition_revoked` | refuse to start |
+| explicit `POST /v1/runs/{id}/cancel` | stop, per the state machine | — |
+
+### Stopping a dangerous definition — the operation v0.1 does NOT ship
+
+Blocking in-flight work needs its own audited mechanism:
+
+```
+revoked_definitions(tenant_id, digest, revoked_by -> principals, reason, revoked_at)
+```
+
+Resume consults it; a hit refuses. It names a principal, carries a reason, and is a
+deliberate act rather than a side effect of editing a name.
+
+**v0.1 does not ship this, and that is a stated limitation rather than a silent one.**
+Until it exists, the only ways to stop in-flight work are cancelling the affected runs
+(supported, audited, and precise) or letting them finish. Overloading pointer movement as
+covert revocation would have given the *appearance* of a safety mechanism with none of its
+properties: no approver, no reason, no record, and trivially reversed.
+
+Tracked as the follow-on to ADR-0011 alongside agent-level revocation, which
+`v01-boundary.md` already defers.
 
 ## 3. What happens after approval denial, expiry, or supersession?
 

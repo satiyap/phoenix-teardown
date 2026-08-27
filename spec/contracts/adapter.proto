@@ -17,9 +17,11 @@ message DescribeRequest {
 }
 message ControlFrame {
   oneof frame {
-    Start start = 1;      // exactly one, first
-    Input input = 2;       // zero or more
-    Cancel cancel = 3;     // at most one
+    Start      start       = 1;   // exactly one, first
+    Input      input       = 2;   // zero or more
+    Cancel     cancel      = 3;   // at most one
+    ToolResult tool_result = 4;   // the platform's ANSWER to a ToolCall
+    ToolDenied tool_denied = 5;   // policy or an approver refused
   }
 }
 
@@ -37,6 +39,25 @@ message Start {
 }
 
 message Input  { bytes data = 1; }
+
+// The platform's answer to a ToolCall. It travels CONTROL PLANE -> ADAPTER,
+// because the platform executes the tool. See "Who executes a tool" below.
+message ToolResult {
+  string call_id    = 1;
+  bool   ok         = 2;
+  string content    = 3;
+  string error_code = 4;   // required when ok = false
+}
+
+// A distinct frame, not ToolResult{ok:false}, because "refused" and "failed" are
+// operationally different and an adapter should be able to branch on it.
+message ToolDenied {
+  string call_id  = 1;
+  enum Reason { REASON_UNKNOWN = 0; POLICY = 1; APPROVAL_DENIED = 2;
+                APPROVAL_EXPIRED = 3; }
+  Reason reason   = 2;
+  string guidance = 3;   // remediation text; Agent Control's `steer` payload
+}
 
 message Deadline {
   // absolute, so a slow start does not silently extend the budget
@@ -68,12 +89,10 @@ message Output {
   string step_id = 1;      // stable across replay; feeds logical_step_path
 
   oneof body {
-    Opaque          text             = 2;   // display only
-    Opaque          thought          = 3;   // display only
-    ToolCall        tool_call        = 4;   // TYPED: policy, digest, claim
-    ToolResult      tool_result      = 5;   // TYPED: settles the claim
-    ApprovalRequest approval_request = 6;   // TYPED: binds to an Approval row
-    Checkpoint      checkpoint       = 7;   // envelope typed, payload opaque
+    Opaque   text      = 2;   // display only
+    Opaque   thought   = 3;   // display only
+    ToolCall tool_call = 4;   // TYPED: a REQUEST to execute, not an execution
+    Checkpoint checkpoint = 5; // envelope typed, payload opaque
   }
 }
 
@@ -85,18 +104,13 @@ message ToolCall {
   string call_id    = 3;   // adapter-scoped; correlates the ToolResult
 }
 
-message ToolResult {
-  string call_id    = 1;
-  bool   ok         = 2;
-  string content    = 3;
-  string error_code = 4;   // required when ok = false
-}
+// ToolResult and ToolDenied are defined ABOVE, with the ControlFrame they travel
+// in — they are platform-to-adapter, not adapter output.
 
-message ApprovalRequest {
-  string call_id      = 1;   // the ToolCall being gated
-  string question     = 2;   // shown to the human, verbatim
-  string risk_summary = 3;
-}
+// NOTE: there is no ApprovalRequest frame. The adapter does not ask for approval;
+// it requests a tool call, and the PLATFORM decides whether that needs a human,
+// from the tool's approval_mode in the pinned definition and from policy. An
+// adapter that could choose when to seek approval could also choose not to.
 
 message Checkpoint {
   bytes  payload               = 1;   // OPAQUE — the adapter's own format
