@@ -454,27 +454,37 @@ def _apply_spec_ddl(dsn: str) -> list[str]:
     sql = _spec_sql_blocks()
     if not sql.strip():
         return ["no ```sql blocks found in spec/01-schema.md"]
+    # Apply into a SEPARATE DATABASE, never a schema in the one the spike uses.
+    #
+    # The first version created a `specddl` SCHEMA, set search_path to it, and dropped
+    # it afterwards -- which DESTROYED the spike's tables, because they had been
+    # created while that search_path was active. A verification step must not be able
+    # to damage the thing it verifies; isolating by database makes that structural
+    # rather than careful.
     script = (
         "import sys, psycopg\n"
         "dsn, sql = sys.argv[1], sys.stdin.read()\n"
-        "c = psycopg.connect(dsn)\n"
-        "c.autocommit = True\n"
-        "cur = c.cursor()\n"
-        "cur.execute('DROP SCHEMA IF EXISTS specddl CASCADE; CREATE SCHEMA specddl;')\n"
-        "cur.execute('SET search_path TO specddl')\n"
-        # The GRANTs are part of the normative schema -- they are how run_events and
-        # agent_definitions are append-only -- so the role must exist for the DDL to
-        # apply. Created here rather than skipping the grants, because skipping them
-        # would leave the one enforcement mechanism unexecuted.
-        "cur.execute(\"DO $$BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles "
-        "WHERE rolname='app_role') THEN CREATE ROLE app_role NOLOGIN; END IF; END$$\")\n"
+        "admin = psycopg.connect(dsn, autocommit=True)\n"
+        "acur = admin.cursor()\n"
+        "acur.execute(\"DROP DATABASE IF EXISTS specddl_check WITH (FORCE)\")\n"
+        "acur.execute('CREATE DATABASE specddl_check')\n"
+        "rc = 0\n"
         "try:\n"
-        "    cur.execute(sql)\n"
-        "except Exception as e:\n"
-        "    print(f'{type(e).__name__}: {e}'.replace(chr(10), ' ')[:300])\n"
-        "    sys.exit(1)\n"
+        "    target = dsn.rsplit('/', 1)[0] + '/specddl_check'\n"
+        "    c = psycopg.connect(target, autocommit=True)\n"
+        "    cur = c.cursor()\n"
+        "    cur.execute(\"DO $$BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles \"\n"
+        "                \"WHERE rolname='app_role') THEN CREATE ROLE app_role \"\n"
+        "                \"NOLOGIN; END IF; END$$\")\n"
+        "    try:\n"
+        "        cur.execute(sql)\n"
+        "    except Exception as e:\n"
+        "        print(f'{type(e).__name__}: {e}'.replace(chr(10), ' ')[:300])\n"
+        "        rc = 1\n"
+        "    c.close()\n"
         "finally:\n"
-        "    cur.execute('DROP SCHEMA IF EXISTS specddl CASCADE')\n"
+        "    acur.execute(\"DROP DATABASE IF EXISTS specddl_check WITH (FORCE)\")\n"
+        "sys.exit(rc)\n"
     )
     res = subprocess.run([str(py), "-c", script, dsn], input=sql,
                          capture_output=True, text=True)

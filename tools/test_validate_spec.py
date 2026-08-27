@@ -14,6 +14,7 @@ Run: make gate-tests
 from __future__ import annotations
 
 import glob
+import os
 import re
 import shutil
 import subprocess
@@ -182,6 +183,46 @@ def main() -> int:
         check("a wrong invariant count in README fails the count check",
               "invariant" in out and "999" in out, "count check did not fire")
         p.write_text(original)
+
+        # --- controls for the OTHER two gates, both proven manually in redo 4 but
+        # --- absent from this file, so the repo's reproduction command did not cover
+        # --- them. A check nobody can re-run is a check nobody has verified.
+        def run_full(tree: Path) -> str:
+            # Unlike run_gate(), this inherits the real environment: the DDL control
+            # needs psycopg importable and PHOENIX_PG_DSN visible, and a bare PATH
+            # made it skip silently -- which is the failure mode this whole file
+            # exists to prevent.
+            env = dict(os.environ)
+            env["SPEC_ALLOW_UNVERIFIED"] = "1"
+            r = subprocess.run([sys.executable, str(tree / "tools" / "validate_spec.py")],
+                               capture_output=True, text=True, cwd=str(tree), env=env)
+            return r.stdout + r.stderr
+
+        oa = base / "spec" / "contracts" / "openapi.yaml"
+        saved_oa = oa.read_text()
+        oa.write_text(saved_oa.replace("      security: [{ adminToken: [] }]\n"
+                                       "      description: |\n"
+                                       "        Requires an ADMIN credential",
+                                       "      description: |\n"
+                                       "        Requires an ADMIN credential"))
+        out = run_full(base)
+        check("removing /decide security fails the openapi check",
+              "/v1/approvals/{id}/decide" in out and "agentToken" in out,
+              "openapi security control did not fire")
+        oa.write_text(saved_oa)
+
+        sc = base / "spec" / "01-schema.md"
+        saved_sc = sc.read_text()
+        sc.write_text(saved_sc.replace("    display_name   TEXT   NOT NULL,",
+                                       "    display_name   TEXT   NOT NULL BROKEN_SYNTAX,", 1))
+        out = run_full(base)
+        # Postgres may be unreachable in this environment; distinguish the two.
+        if "no Postgres reachable" in out:
+            print("  --   normative-DDL control SKIPPED (no Postgres); run with a server")
+        else:
+            check("corrupting the normative DDL fails the postgres gate",
+                  "DDL does not apply" in out, "DDL control did not fire")
+        sc.write_text(saved_sc)
 
         # empty pattern file must not silently pass
         pf = base / "tools" / "superseded-patterns.txt"

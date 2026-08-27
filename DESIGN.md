@@ -94,8 +94,9 @@ identity is actually for — being nameable as a Cedar `principal`.
 │  (exchanger/   effect          audit ⊃ delivery                          │
 │   refresher)                                                             │
 └───────────────────────────────┬─────────────────────────────────────────┘
-                                │ SOUTHBOUND gRPC bidi
+                                │ SOUTHBOUND frame boundary
                                 │ Run(stream) + Describe()
+                                │ in-process: a function call
                                 │
                             Adapter
                         (sdk:pydantic-ai)
@@ -106,6 +107,12 @@ identity is actually for — being nameable as a Cedar `principal`.
    external:  Temporal / DBOS / Prefect   (durable workflow, sagas, compensation)
 ```
 
+> **Transport, precisely.** The southbound boundary is a **logical frame boundary**, not a
+> network hop. For the shipped `sdk_in_process` mode it **collapses to a function call**
+> (`spec/07`): the frames are real, the transport is not. gRPC is the **deferred remote**
+> transport, retained as a design commitment for the first out-of-process adapter and marked
+> not-shipped in `spec/07` §Transport.
+>
 > **Diagram amended 2026-08-27.** It showed three adapter boxes — `(ACP)`, `(in-proc)` and
 > `(native TUI)`. Only one ships: **one internal harness on Pydantic AI**, registered as
 > `sdk:pydantic-ai`, in process. The adapter boundary is retained so a **second** SDK can be

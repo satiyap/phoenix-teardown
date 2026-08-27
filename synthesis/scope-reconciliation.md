@@ -617,11 +617,25 @@ All three of the first are asserted by `validate_spec.py`, so they cannot drift 
 
 #### Closing note
 
-**Remaining verifier findings after this pass are to be filed as OQs with an owner, not
-redone.** Three redos have reached diminishing returns on wording while surfacing one real
-architectural gap (the unenforced approver kind) and three test-soundness defects. That ratio
-is the argument for stopping: the gate now catches the wording class mechanically, and further
-prose review should become an issue queue rather than another pass.
+**Retracted 2026-08-27 (redo 4).** This paragraph said *"remaining verifier findings after this
+pass are to be filed as OQs with an owner, not redone"*, and that rule was wrong. It conflates
+two different things and would have let a known defect survive behind a process rule:
+
+| Finding | Disposition |
+|---|---|
+| an **unanswered design question** — needs evidence, a spike, or a real requirement to settle | file as an **OQ** with an owner |
+| a **verified contradiction, wrong citation, or broken artifact** | **correct it**, however many passes it takes |
+
+A pass count cannot reclassify a defect. Redo 4 proved the point: it found a self-contradictory
+sentence in `spec/06`, an OpenAPI description contradicting its own operation, two wrong
+citations in ADR-0004, and two gate controls I had proven manually but never committed. Every
+one is a defect, and "we already did three passes" is not an argument against fixing any of
+them.
+
+What *is* true is the narrower claim underneath: **the wording class is now caught
+mechanically**, so it should stop consuming review passes. The gate scans prose, contract files
+and diagram blocks; the counts are asserted from source; the normative DDL is executed. When
+review finds something those gates should have caught, the gate is the defect.
 
 ### 7d. Redo 4 — harness decision and five defects (2026-08-27)
 
@@ -710,7 +724,51 @@ this pass is filed as an OQ with an owner rather than redone.** The three blocki
 `OQ-019`/`OQ-042` (SubstrATE, gating ADR-0016) and `OQ-043` (spike 06, gating the harness
 version pin and row 30c).
 
-### The gate's FINAL run, and `make check` — verbatim, 2026-08-27 (redo 4)
+### 7e. Redo 4 follow-up — six defects, one of them mine in the gate itself (2026-08-27)
+
+The verifier accepted the Pydantic AI direction and returned **six defects**, all localised. All
+six confirmed and fixed. The most useful was the last one, because it corrected my reasoning
+rather than my prose.
+
+| # | Defect | Fix |
+|---|---|---|
+| 1 | `openapi.yaml:43` said admin means "everything" while `:436-439` said an admin service principal cannot decide — the contradiction survived in the **machine** contract | admin description now states the exception explicitly and dates it |
+| 2 | `spec/06:205` read "no separation-of-duties enforcement **beyond the quorum**" — self-contradictory, and a patching artifact of my own splice | rewritten: no quorum, no m-of-n, no separation of duties, no self-approval rule; the one rule enforced is the approver's identity |
+| 3 | `DESIGN.md:96` labelled the in-process path "SOUTHBOUND gRPC bidi" while `spec/07:274` says it collapses to a function call | label → **frame boundary**, with "in-process: a function call" on the diagram and gRPC named as the **deferred remote** transport |
+| 4 | ADR-0004 cited "30 provider modules" (a file count including private helpers and wrappers) and `:2399` for `@agent.tool` (an `@overload` stub) | **16** provider model modules named individually, plus 36 files in `providers/`; the decorator implementation is `:2423`, usage `:2460`, and the miscitation is recorded |
+| 5 | `spec/00:49` implied compaction, delegation and hooks are wholly ours | corrected: Pydantic AI supplies the **seams** — `capabilities/hooks.py`, `process_history.py`, `wrapper.py`, `toolsets/`, `CapabilityPosition`. We own the **policy over them**: which strategy runs when, how a delegated agent inherits a `Principal` and a pinned bundle, which hooks write to the ledger |
+| 6 | the OpenAPI-security and normative-DDL controls were proven **manually** and never committed | both added to `tools/test_validate_spec.py` (**20 controls**). The DDL control needed the real environment, since a bare `PATH` made it skip silently |
+
+#### The defect the fix introduced, and what it cost
+
+Committing the DDL control **destroyed the spike's database**. The check created a `specddl`
+*schema*, set `search_path` to it, and dropped it afterwards — and the spike's tables had been
+created while that `search_path` was active, so `DROP SCHEMA ... CASCADE` took them too. The
+next `make spec` failed with *relation "approvals" does not exist*.
+
+Fixed by isolating into a separate **database** rather than a schema, so the check **cannot**
+touch what it verifies. Verified by running `make spec` three times and confirming the spike's
+7 tables survive each time, then re-running the suite: 42/42.
+
+That is the fourth instance in five passes of a verification step being unsound. The pattern is
+consistent enough to name: *a check that shares state with its subject will eventually damage
+it*, and the remedy is structural isolation, not care.
+
+#### Classification rule, retracted
+
+§7c ended with *"remaining verifier findings become OQs, not redone"*. **That rule was wrong**
+and is retracted in place. It conflates two things:
+
+- an **unanswered design question** → file as an OQ with an owner;
+- a **verified contradiction, wrong citation, or broken artifact** → **correct it**, whatever
+  the pass count.
+
+A pass count cannot reclassify a defect, and this pass is the proof: five of the six items were
+contradictions or bad citations that the rule would have parked. The narrower claim underneath
+does hold — the **wording class is now caught mechanically**, so when review finds something the
+gates should have caught, **the gate is the defect**.
+
+### The gate's FINAL run, and `make check` — verbatim, 2026-08-27 (redo 4 follow-up)
 
 ```
 $ make spec
@@ -751,9 +809,11 @@ self-test: superseded-claims gate
   ok   a dated retraction in the same sentence is exempt
   ok   quoting WITHOUT a date is NOT exempt
   ok   a wrong invariant count in README fails the count check
+  ok   removing /decide security fails the openapi check
+  ok   corrupting the normative DDL fails the postgres gate
   ok   an empty pattern file does not silently pass
 
-18 passed, 0 failed
+20 passed, 0 failed
 PASS — every mutation is caught and named; amendments are forgiven only when dated.
 ```
 
@@ -782,9 +842,11 @@ self-test: superseded-claims gate
   ok   a dated retraction in the same sentence is exempt
   ok   quoting WITHOUT a date is NOT exempt
   ok   a wrong invariant count in README fails the count check
+  ok   removing /decide security fails the openapi check
+  ok   corrupting the normative DDL fails the postgres gate
   ok   an empty pattern file does not silently pass
 
-18 passed, 0 failed
+20 passed, 0 failed
 PASS — every mutation is caught and named; amendments are forgiven only when dated.
 project                    depth        cov  status
 ------------------------------------------------------------

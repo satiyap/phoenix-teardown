@@ -40,7 +40,13 @@ components:
     adminToken:
       type: http
       scheme: bearer
-      description: "Class **admin**: everything, including policy and adapter registration."
+      description: |
+        Class **admin**: everything the API exposes, including policy and adapter
+        registration. It is NOT sufficient on its own for one operation: deciding an
+        approval additionally requires a principal of kind `human`, pinned by a composite
+        foreign key in spec/01-schema.md, so an admin token held by a `service` principal
+        is rejected by the database (ADR-0015). Amended 2026-08-27: this said "everything",
+        which contradicted the decideApproval description below.
   parameters:
     RunId:
       name: id
