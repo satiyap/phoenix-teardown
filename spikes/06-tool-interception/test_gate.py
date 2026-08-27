@@ -12,25 +12,41 @@ assertion is about OBSERVABLE SIDE EFFECTS, not about what the SDK reports
 having done. That distinction is the whole point: a test that trusted the SDK's
 own accounting would pass even if the SDK were lying.
 
-TESTED THROUGH THE PUBLIC BOUNDARY (rule 3): `Agent.run_sync`,
-`Agent.run_stream`, `DeferredToolRequests`, `build_results`,
-`deferred_tool_results`. No private attribute is poked to force a result.
+TESTED THROUGH THE PUBLIC BOUNDARY (rule 3): `PhoenixHarness.run`, `.resume`,
+`.stream_output`, `.resolve`, and -- for the facts being asserted ABOUT the SDK
+rather than about Phoenix -- `Agent.run_sync`, `ExternalToolset.call_tool`,
+`Agent.override`. No private attribute is poked to force a result, and the one
+place that reaches for a name-mangled attribute is a NEGATIVE CONTROL whose
+whole purpose is to show what an exposed `Agent` would allow.
 """
 from __future__ import annotations
 
+import collections.abc
+import inspect
 import json
+import os
+import subprocess
+import sys
+import types
+import typing
 from pathlib import Path
 
 import pytest
 from pydantic_ai import Agent, DeferredToolRequests
+from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.toolsets.approval_required import ApprovalRequiredToolset
 from pydantic_ai.toolsets.external import ExternalToolset
 from pydantic_ai.toolsets.function import FunctionToolset
 
-from harness import EffectLedger, LedgerRow, PhoenixHarness, UninterceptableTool
+import verify_pin
+from harness import (EffectLedger, LedgerRefused, LedgerRow, PhoenixHarness,
+                     RunLease, UninterceptableTool)
+from mutate import SPIKE_FILES, copy_spike
 
+HERE = Path(__file__).resolve().parent
 SCHEMA = {"type": "object", "properties": {"to": {"type": "string"}}, "required": ["to"]}
 
 
@@ -61,6 +77,10 @@ def led():
     return EffectLedger()
 
 
+def harness(led, model=None, **kw) -> PhoenixHarness:
+    return PhoenixHarness(ledger=led, model=model if model is not None else TestModel(), **kw)
+
+
 # ============ CONTROL 0: the oracle can detect a real effect ================
 # Rule 4, learned the hard way: assert a clean baseline AND assert the detector
 # actually fires, before trusting any green result from it.
@@ -70,27 +90,92 @@ def test_control0_side_channel_detects_execution(chan):
     assert chan.lines == ["send_email"]
 
 
+# ============ GATE 0: THE VERSION PIN ======================================
+# Every assertion below is about the behaviour of specific SDK BYTES. Review's
+# control against the first version of this spike was: edit `toolsets/external.py`,
+# run the suite, watch every gate still pass. Round 2 pinned five files -- and left
+# `native_tools/__init__.py` unpinned while gate 6 admits tools by reading it, so
+# the module that decides admission could be edited freely.
+def test_gate0_pin_holds_against_the_installed_sdk():
+    assert verify_pin.check() == [], "the installed SDK is not the pinned code"
+    assert len(verify_pin.pinned()) >= len(verify_pin.REQUIRED_PINS)
+
+
+def test_gate0_pin_covers_every_sdk_module_this_spike_imports():
+    """The oracle is the IMPORT STATEMENTS, read from source, not a list we keep.
+
+    Rule 5: if the pin's coverage were checked against a hand-kept list, the list
+    and the pin would drift together. This parses `harness.py` and `test_gate.py`
+    with `ast` and demands that every `pydantic_ai` module either one of them
+    imports from is pinned by digest.
+    """
+    imported = verify_pin.sdk_modules_imported_by(
+        [HERE / "harness.py", HERE / "test_gate.py"])
+    assert imported, "the AST scan found no pydantic_ai imports -- the oracle is inert"
+    unpinned = sorted(imported - set(verify_pin.pinned()))
+    assert not unpinned, f"the gate depends on unpinned SDK files: {unpinned}"
+
+
+def test_gate0_pin_covers_the_native_tool_admission_path():
+    """The specific hole review found: admission is decided by `native_tools`."""
+    for rel in ("native_tools/__init__.py", "native_tools/_tool_search.py",
+                "models/function.py", "models/test.py", "toolsets/__init__.py",
+                "toolsets/abstract.py"):
+        assert rel in verify_pin.pinned(), f"{rel} decides behaviour and is unpinned"
+
+
+def test_gate0_negative_control_a_fake_digest_is_caught():
+    """Rule 4 for the pin itself: plant a wrong digest, the check must object."""
+    real = verify_pin.pinned()["toolsets/external.py"]
+    problems = verify_pin.check({"files": {"toolsets/external.py": "0" * 64}})
+    assert len(problems) == 1 and "toolsets/external.py" in problems[0]
+    assert verify_pin.check({"files": {"toolsets/external.py": real}}) == []
+
+
+def test_gate0_negative_control_a_missing_file_and_an_empty_pin_are_caught():
+    assert "MISSING" in verify_pin.check({"files": {"no_such_module.py": "0" * 64}})[0]
+    assert verify_pin.check({"files": {}}) == ["the pin lists no files"]
+
+
+def test_gate0_negative_control_a_mismatched_pin_aborts_COLLECTION(tmp_path):
+    """The claim is "the session fails before any gate runs". Asserted, not stated.
+
+    Rule 7: the mutation happens in a COPY of this spike inside `tmp_path`, which
+    this test uniquely owns. The live tree is never written to, so a concurrent
+    `make spike06` is unaffected.
+    """
+    work = copy_spike(tmp_path / "spike")
+    pin = work / "pinned_digests.json"
+    spec = json.loads(pin.read_text())
+    spec["files"]["toolsets/external.py"] = "0" * 64
+    pin.write_text(json.dumps(spec))
+
+    r = subprocess.run([sys.executable, "-m", "pytest", "test_gate.py", "-q",
+                        "--collect-only"], cwd=str(work), capture_output=True, text=True)
+    assert r.returncode != 0, "a mismatched pin collected and ran anyway"
+    assert "not the code spike 06 verified" in (r.stdout + r.stderr)
+    assert "toolsets/external.py" in (r.stdout + r.stderr)
+
+
 # ============ GATE 1: zero registered tools ================================
 def test_gate1_no_tools_means_no_executable_path(chan, led):
-    h = PhoenixHarness(ledger=led)
-    agent = h.build_agent(TestModel())
-    result = agent.run_sync("do something")
-    assert not isinstance(result.output, DeferredToolRequests)
+    h = harness(led)
+    turn = h.run("do something")
+    assert not isinstance(turn.output, DeferredToolRequests)
     assert chan.lines == []
     assert led.rows == []
 
 
 # ============ GATE 2: a registered tool never runs inside the SDK ==========
 def test_gate2_run_halts_and_body_never_runs(chan, led):
-    h = PhoenixHarness(ledger=led)
+    h = harness(led)
     h.register("send_email", SCHEMA, lambda to: chan.touch(f"send_email:{to}"))
-    agent = h.build_agent(TestModel())
 
-    result = agent.run_sync("email someone")
+    turn = h.run("email someone")
 
-    assert isinstance(result.output, DeferredToolRequests), \
+    assert isinstance(turn.output, DeferredToolRequests), \
         "the run must END on the deferred call, not execute it"
-    assert [c.tool_name for c in result.output.calls] == ["send_email"]
+    assert [c.tool_name for c in turn.calls] == ["send_email"]
     # THE POINT: the SDK drove a tool call and the customer system was untouched.
     assert chan.lines == [], "SDK executed a registered tool body"
     assert led.rows == [], "nothing ledgered yet -- intent is the platform's move"
@@ -123,24 +208,23 @@ def test_gate3_ledger_row_precedes_execution(chan, led):
             super().append(row)
 
     led2 = Watched()
-    h = PhoenixHarness(ledger=led2)
+    h = harness(led2)
     h.register("send_email", SCHEMA,
                lambda to: (order.append("execute"), chan.touch(f"send_email:{to}"))[1])
-    agent = h.build_agent(TestModel())
 
-    req = agent.run_sync("email").output
-    h.resolve("run-1", req)
+    turn = h.run("email")
+    h.resolve("run-1", turn.requests)
 
     assert order == ["ledger:intended", "execute"], f"wrong order: {order}"
     assert chan.lines == ["send_email:a"]
-    rows = led2.rows_for(req.calls[0].tool_call_id)
-    assert len(rows) == 1 and rows[0].status == "settled"
+    rows = led2.rows_for(turn.calls[0].tool_call_id)
+    assert len(rows) == 1 and rows[0].status == "succeeded"
 
 
 def test_gate3_settling_an_unledgered_call_is_refused(led):
     """Mutation control: the ledger cannot be made to settle what it never intended."""
-    with pytest.raises(AssertionError, match="unledgered"):
-        led.settle("never-seen", "settled", None)
+    with pytest.raises(LedgerRefused, match="no ledger row"):
+        led.settle("never-seen", "succeeded", None, owner="w", token="t")
 
 
 # ============ GATE 4: THE RESUME PATH ======================================
@@ -149,26 +233,22 @@ def test_gate3_settling_an_unledgered_call_is_refused(led):
 # External kinds DO flow through the regular pipeline on resume. If a body could
 # run anywhere, it is here. This gate exists because the source said so.
 def test_gate4_resume_consumes_platform_result_without_executing(chan, led):
-    h = PhoenixHarness(ledger=led)
+    h = harness(led)
     h.register("send_email", SCHEMA, lambda to: chan.touch(f"send_email:{to}"))
-    agent = h.build_agent(TestModel())
 
-    r1 = agent.run_sync("email")
-    req = r1.output
-    call_id = req.calls[0].tool_call_id
+    turn = h.run("email")
+    call_id = turn.calls[0].tool_call_id
 
     # The platform dispatches, exactly once, through its own boundary.
-    results = h.resolve("run-1", req)
+    results = h.resolve("run-1", turn.requests)
     assert chan.lines == ["send_email:a"]
 
-    r2 = agent.run_sync(message_history=r1.all_messages(),
-                        deferred_tool_results=req.build_results(
-                            calls={call_id: results[call_id]}))
+    after = h.resume(turn, results={call_id: results[call_id]})
 
     # THE ASSERTION: resume did not re-run the body. One dispatch, one effect.
     assert chan.lines == ["send_email:a"], "resume re-executed the tool body"
     assert len(led.rows_for(call_id)) == 1
-    returned = [p.content for m in r2.all_messages() for p in m.parts
+    returned = [p.content for m in after.messages for p in m.parts
                 if type(p).__name__ == "ToolReturnPart"]
     assert returned == ["did:send_email:a"], \
         "the model must observe the PLATFORM's result, not the SDK's"
@@ -180,15 +260,11 @@ def test_gate4_negative_control_resume_without_platform_dispatch(chan, led):
     Proves gate 4's green result comes from the platform's dispatch and not from
     something the SDK does incidentally.
     """
-    h = PhoenixHarness(ledger=led)
+    h = harness(led)
     h.register("send_email", SCHEMA, lambda to: chan.touch(f"send_email:{to}"))
-    agent = h.build_agent(TestModel())
 
-    r1 = agent.run_sync("email")
-    req = r1.output
-    agent.run_sync(message_history=r1.all_messages(),
-                   deferred_tool_results=req.build_results(
-                       calls={req.calls[0].tool_call_id: "fabricated"}))
+    turn = h.run("email")
+    h.resume(turn, results={turn.calls[0].tool_call_id: "fabricated"})
 
     assert chan.lines == [], "a result supplied without dispatch still ran the body"
     assert led.rows == []
@@ -229,51 +305,151 @@ def test_gate5_negative_control_approval_granted_then_it_runs(chan, led):
     assert chan.lines == ["send_email:a"], "approval was granted but nothing ran"
 
 
-# ============ GATE 6: row 30c is executable, against the REAL admission path
-def test_gate6_every_native_tool_the_sdk_ships_is_refused(led):
-    """`spec/08` row 30c against Pydantic AI's ACTUAL vendor-hosted tools.
+# ==== GATE 6: row 30c, against EVERY native tool class the SDK defines =====
+# Round 2's enumeration walked `dir(native_tools)` and wrapped construction in a
+# bare `except Exception: pass`. Three real vendor-hosted tools -- `AdvisorTool`,
+# `FileSearchTool`, `MCPServerTool` -- need constructor arguments, so all three
+# were SILENTLY SKIPPED, and `ToolSearchTool` was never seen at all because it is
+# not re-exported from the package namespace. A gate that skips what it cannot
+# build is a gate that passes by not looking.
+class CannotGenerate(Exception):
+    """No minimal value could be generated for this annotation."""
 
-    An earlier version asserted only on `sdk_executable=True` -- a boolean Phoenix
-    invented. Review was right to call that mechanism-shaped evidence: it tested
-    our own flag, not the SDK's real native-tool path. This enumerates the tools
-    the installed SDK actually ships and asserts each is refused BY NAME.
+
+def _value_for(tp: object):
+    """Generate the smallest legal value for an annotation. No fallbacks."""
+    origin = typing.get_origin(tp)
+    if tp is str:
+        return "spike06"
+    if tp is int:
+        return 1
+    if tp is float:
+        return 1.0
+    if tp is bool:
+        return False
+    if origin is typing.Literal:
+        return typing.get_args(tp)[0]
+    if origin in (typing.Union, types.UnionType):
+        for arm in typing.get_args(tp):
+            if arm is type(None):
+                continue
+            try:
+                return _value_for(arm)
+            except CannotGenerate:
+                continue
+        raise CannotGenerate(tp)
+    if origin in (list, set, frozenset, tuple, collections.abc.Sequence,
+                  collections.abc.Iterable, collections.abc.Collection):
+        args = typing.get_args(tp)
+        return [_value_for(args[0])] if args else ["spike06"]
+    if origin in (dict, collections.abc.Mapping):
+        return {}
+    raise CannotGenerate(tp)
+
+
+def _minimal_args(cls) -> dict[str, object]:
+    hints = typing.get_type_hints(cls)
+    out = {}
+    for name, p in inspect.signature(cls).parameters.items():
+        if p.default is not inspect.Parameter.empty:
+            continue
+        out[name] = _value_for(hints.get(name, p.annotation))
+    return out
+
+
+def _every_native_tool_class() -> dict[str, type]:
+    """Every `AbstractNativeTool` subclass the installed SDK defines.
+
+    Source: `native_tools.NATIVE_TOOL_TYPES`, which is part of the module's
+    `__all__` and is populated by `AbstractNativeTool.__init_subclass__` at class
+    definition time -- so it holds subclasses that are NOT re-exported from the
+    package namespace (`ToolSearchTool`), which is exactly what `dir()` missed.
     """
     import pydantic_ai.native_tools as nt
+    registry = dict(nt.NATIVE_TOOL_TYPES)
+    exported = {getattr(nt, n) for n in nt.__all__
+                if isinstance(getattr(nt, n, None), type)
+                and issubclass(getattr(nt, n), nt.AbstractNativeTool)
+                and getattr(nt, n) is not nt.AbstractNativeTool}
+    missing = exported - set(registry.values())
+    assert not missing, f"__all__ exports native tools the registry lacks: {missing}"
+    # `SUPPORTED_NATIVE_TOOLS` is a frozenset SNAPSHOT taken at module import, so it
+    # can only be a subset of the live registry. Demanding equality would make the
+    # negative control below fail on the snapshot rather than on the refusal.
+    assert set(nt.SUPPORTED_NATIVE_TOOLS) <= set(registry.values()), \
+        "SUPPORTED_NATIVE_TOOLS names a class the registry does not hold"
+    return registry
 
-    shipped = {}
-    for attr in dir(nt):
-        if attr.endswith("Tool") and not attr.startswith("Abstract"):
-            try:
-                shipped[getattr(nt, attr)().kind] = attr
-            except Exception:
-                pass
-    assert shipped, "could not enumerate the SDK's native tools"
 
-    h = PhoenixHarness(ledger=led)
-    for kind, cls in shipped.items():
+def test_gate6_every_native_tool_class_is_instantiated_and_refused(led):
+    """`spec/08` row 30c against every vendor-hosted tool class, INSTANTIATED.
+
+    A class this test cannot construct is a HARD FAIL, never a skip: an
+    unconstructible class is a native tool whose refusal was not exercised.
+    """
+    h = harness(led)
+    checked = []
+    for kind, cls in sorted(_every_native_tool_class().items()):
+        try:
+            args = _minimal_args(cls)
+        except CannotGenerate as e:
+            pytest.fail(f"{cls.__name__}: cannot generate minimal args for {e.args[0]!r} "
+                        "-- the refusal for this native tool is UNTESTED")
+        try:
+            instance = cls(**args)
+        except Exception as e:  # noqa: BLE001 -- deliberately fatal, never skipped
+            pytest.fail(f"{cls.__name__}(**{args!r}) failed: {e!r} "
+                        "-- the refusal for this native tool is UNTESTED")
+        assert instance.kind == kind, f"{cls.__name__}.kind moved: {instance.kind!r}"
         with pytest.raises(UninterceptableTool, match="cannot be routed"):
-            h.register(kind, SCHEMA, lambda **k: "x")
+            h.register(instance.kind, SCHEMA, lambda **k: "x")
+        checked.append(instance.kind)
+
+    assert len(checked) == len(set(checked)) >= 10, checked
     assert led.rows == []
 
 
-def test_gate6_native_tool_list_is_complete(led):
-    """If a FUTURE SDK version adds a native tool, this fails rather than admitting it.
+def test_gate6_refusal_list_matches_the_sdk_registry_both_ways(led):
+    """Fail-closed by construction, in BOTH directions.
 
-    Fail-closed by construction: the harness's refusal list is compared against the
-    installed SDK, so a new vendor-hosted tool cannot slip through unnoticed.
+    A native tool the SDK ships that the harness would admit is the dangerous
+    direction; a name in the harness's list the SDK no longer ships means the
+    refusal for it is dead code and the list is stale. Either is a failure.
     """
-    import pydantic_ai.native_tools as nt
     from harness import NATIVE_TOOL_NAMES
 
-    shipped = set()
-    for attr in dir(nt):
-        if attr.endswith("Tool") and not attr.startswith("Abstract"):
-            try:
-                shipped.add(getattr(nt, attr)().kind)
-            except Exception:
-                pass
-    missing = shipped - NATIVE_TOOL_NAMES
-    assert not missing, f"SDK ships native tools the harness would admit: {sorted(missing)}"
+    shipped = set(_every_native_tool_class())
+    assert shipped - NATIVE_TOOL_NAMES == set(), \
+        f"SDK ships native tools the harness would ADMIT: {sorted(shipped - NATIVE_TOOL_NAMES)}"
+    assert NATIVE_TOOL_NAMES - shipped == set(), \
+        f"harness refuses names the SDK no longer ships: {sorted(NATIVE_TOOL_NAMES - shipped)}"
+
+
+def test_gate6_negative_control_a_new_native_tool_subclass_turns_the_gate_red(tmp_path):
+    """Rule 4 for the enumeration: register a NEW native tool, watch the gate fail.
+
+    The subclass is defined in a pytest plugin loaded only by a CHILD process, so
+    it registers itself through the SDK's own `__init_subclass__` -- the same
+    mechanism every shipped native tool uses -- without touching this process or
+    the installed SDK (rule 7). Copying the SDK itself would trip the digest pin
+    first, and the child would then go red for the wrong reason.
+    """
+    plugin = tmp_path / "fake_native_tool.py"
+    plugin.write_text(
+        "from dataclasses import dataclass\n"
+        "from pydantic_ai.native_tools import AbstractNativeTool\n"
+        "@dataclass(kw_only=True)\n"
+        "class FakeVendorTool(AbstractNativeTool):\n"
+        "    kind: str = 'fake_vendor_search'\n")
+    env = dict(os.environ, PYTHONPATH=str(tmp_path))
+    r = subprocess.run(
+        [sys.executable, "-m", "pytest", "test_gate.py", "-q", "-p", "fake_native_tool",
+         "-k", "instantiated_and_refused or matches_the_sdk_registry"],
+        cwd=str(HERE), capture_output=True, text=True, env=env)
+
+    assert r.returncode != 0, "a new vendor-hosted tool was admitted with the gate green"
+    assert "fake_vendor_search" in (r.stdout + r.stderr), r.stdout[-2000:]
+    assert "2 failed" in r.stdout, r.stdout[-2000:]
 
 
 def test_gate6_native_tools_never_enter_the_execution_pipeline():
@@ -285,9 +461,7 @@ def test_gate6_native_tools_never_enter_the_execution_pipeline():
     `ExternalToolset` to withhold, which is why this is a structural impossibility
     rather than a policy choice.
     """
-    import os
-    import pydantic_ai
-    src = Path(os.path.dirname(pydantic_ai.__file__)) / "_tool_execution.py"
+    src = verify_pin.sdk_root() / "_tool_execution.py"
     body = src.read_text()
     assert "NativeToolCallPart" not in body, \
         "native tools now enter the execution pipeline -- re-examine the refusal"
@@ -296,20 +470,20 @@ def test_gate6_native_tools_never_enter_the_execution_pipeline():
 
 def test_gate6_caller_declared_flag_is_also_refused(led):
     """The original assertion, kept but demoted to what it actually proves."""
-    h = PhoenixHarness(ledger=led)
+    h = harness(led)
     with pytest.raises(UninterceptableTool, match="cannot be routed"):
         h.register("send_email", SCHEMA, lambda to: None, sdk_executable=True)
-    assert h.build_agent(TestModel()) is not None
+    assert h.run("anything").output is not None
 
 
-def test_gate6_test_model_refuses_native_tools_entirely(led):
-    """Independent corroboration from the SDK: native tools are MODEL-side.
+def test_gate6_test_model_refuses_native_tools_is_a_fact_about_TestModel(led):
+    """Corroboration, and NOT the structural claim. Kept, correctly labelled.
 
     `models/test.py:252` raises `UserError('TestModel does not support built-in
-    tools')`. A tool the model must support is a tool the platform cannot
-    intercept -- the clearest possible statement that this is not our layer.
+    tools')`. Review was right that this proves only that `TestModel` lacks
+    built-in tool support; `FunctionModel` HAS it (`models/function.py:242`), so
+    the structural claim is gate 13's, not this one's.
     """
-    from pydantic_ai import Agent
     from pydantic_ai.exceptions import UserError
     from pydantic_ai.native_tools import WebSearchTool
 
@@ -339,18 +513,19 @@ def test_gate6_external_toolset_refuses_direct_invocation():
 
 # ============ GATE 7: policy denial never reaches the system ===============
 def test_gate7_denied_call_is_ledgered_and_never_executed(chan, led):
-    h = PhoenixHarness(ledger=led, policy=lambda n, a: "deny")
+    h = harness(led, policy=lambda n, a: "deny")
     h.register("send_email", SCHEMA, lambda to: chan.touch(f"send_email:{to}"))
-    agent = h.build_agent(TestModel())
 
-    req = agent.run_sync("email").output
-    out = h.resolve("run-1", req)
+    turn = h.run("email")
+    out = h.resolve("run-1", turn.requests)
 
-    assert out[req.calls[0].tool_call_id] == "DENIED by policy"
+    assert out[turn.calls[0].tool_call_id] == "DENIED by policy"
     assert chan.lines == [], "denied call still reached the customer system"
-    rows = led.rows_for(req.calls[0].tool_call_id)
+    rows = led.rows_for(turn.calls[0].tool_call_id)
     assert [r.status for r in rows] == ["denied"], \
         "a denial must be recorded, not silently dropped"
+    assert rows[0].claim_owner is None and rows[0].claim_token is None, \
+        "a denied row was never claimed (spec/01-schema.md:378)"
 
 
 # ============ GATE 8: streaming is not a side door =========================
@@ -360,28 +535,20 @@ def test_gate8_streamed_run_does_not_execute_the_body(chan, led):
     A boundary that holds only on the buffered path is not a boundary.
     """
     import asyncio
-    h = PhoenixHarness(ledger=led)
+    h = harness(led)
     h.register("send_email", SCHEMA, lambda to: chan.touch(f"send_email:{to}"))
-    agent = h.build_agent(TestModel())
 
-    async def run():
-        async with agent.run_stream("email") as stream:
-            async for _ in stream.stream_output(debounce_by=None):
-                pass
-            return await stream.get_output()
-
-    output = asyncio.run(run())
+    output = asyncio.run(h.stream_output("email"))
     assert isinstance(output, DeferredToolRequests)
     assert chan.lines == [], "the streaming path executed a registered tool body"
 
 
 # ============ GATE 9: a hallucinated tool cannot invent a path =============
 def test_gate9_unknown_tool_never_dispatches(chan, led):
-    h = PhoenixHarness(ledger=led)
+    h = harness(led)
     h.register("send_email", SCHEMA, lambda to: chan.touch("send_email"))
-    agent = h.build_agent(TestModel())
-    req = agent.run_sync("email").output
-    call = req.calls[0]
+    turn = h.run("email")
+    call = turn.calls[0]
 
     class Fake:
         tool_call_id = call.tool_call_id
@@ -392,7 +559,11 @@ def test_gate9_unknown_tool_never_dispatches(chan, led):
     with pytest.raises(UninterceptableTool, match="no platform dispatcher"):
         h.dispatch("run-1", Fake())
     assert chan.lines == []
-    assert [r.status for r in led.rows_for(call.tool_call_id)] == ["failed"]
+    row = led.rows_for(call.tool_call_id)[0]
+    # `abandoned`, NOT `failed`: nothing was ever claimed or dispatched, and
+    # `spec/01-schema.md:381` forbids a `failed` row with no claim.
+    assert row.status == "abandoned" and row.error_code == "no_dispatcher"
+    assert row.claim_owner is None and row.completed_at is None
 
 
 # ============ GATE 10: many calls in one step stay distinct ================
@@ -402,19 +573,18 @@ def test_gate10_parallel_calls_get_one_row_each(chan, led):
     If `tool_call_id`s collided, `settle()` would overwrite a sibling and one
     effect would vanish from the ledger while still having happened.
     """
-    h = PhoenixHarness(ledger=led)
+    h = harness(led)
     for n in ("send_email", "delete_row", "charge_card"):
         h.register(n, SCHEMA, lambda to, _n=n: chan.touch(f"{_n}:{to}"))
-    agent = h.build_agent(TestModel())
 
-    req = agent.run_sync("do all three").output
-    assert len(req.calls) == 3
-    h.resolve("run-1", req)
+    turn = h.run("do all three")
+    assert len(turn.calls) == 3
+    h.resolve("run-1", turn.requests)
 
     assert len(led.rows) == 3
     assert len({r.tool_call_id for r in led.rows}) == 3, "tool_call_id collision"
     assert sorted(chan.lines) == ["charge_card:a", "delete_row:a", "send_email:a"]
-    assert all(r.status == "settled" for r in led.rows)
+    assert all(r.status == "succeeded" for r in led.rows)
 
 
 # ============ GATE 11: a failing body still leaves a settled verdict =======
@@ -434,64 +604,95 @@ def test_gate11_raising_tool_becomes_indeterminate_not_intended(chan, led):
         chan.touch(f"send_email:{to}")
         raise RuntimeError("smtp exploded")
 
-    h = PhoenixHarness(ledger=led)
+    h = harness(led)
     h.register("send_email", SCHEMA, boom)
-    agent = h.build_agent(TestModel())
-    req = agent.run_sync("email").output
+    turn = h.run("email")
 
     with pytest.raises(RuntimeError, match="smtp exploded"):
-        h.resolve("run-1", req)
+        h.resolve("run-1", turn.requests)
 
     assert chan.lines == ["send_email:a"], "the body must have actually run"
-    rows = led.rows_for(req.calls[0].tool_call_id)
-    assert [r.status for r in rows] == ["indeterminate"], \
+    row = led.rows_for(turn.calls[0].tool_call_id)[0]
+    assert row.status == "indeterminate", \
         "a dispatched effect that crashed must surface, not look unstarted"
+    assert row.error_code == "dispatch_lost_contact"
+    assert row.completed_at is None, \
+        "indeterminate is not completed (spec/01-schema.md:374)"
+
+
+def test_gate11_a_raise_BEFORE_dispatch_is_failed_not_indeterminate(chan, led):
+    """The other half of the same rule, and the one round 2 did not have.
+
+    A claim taken, then a raise before the body is entered: nothing was
+    dispatched, so the outcome IS known. `failed`, with an error code -- not
+    `indeterminate`, which would send a human to investigate an effect that
+    provably never happened.
+    """
+    h = harness(led)
+    h.register("send_email", SCHEMA, lambda to: chan.touch(f"send_email:{to}"))
+
+    class Undecodable:
+        tool_call_id = "tc-bad-args"
+        tool_name = "send_email"
+        args = "{not json"
+
+    h.intend("run-1", Undecodable())
+    with pytest.raises(json.JSONDecodeError):
+        h.dispatch("run-1", Undecodable())
+
+    assert chan.lines == [], "the body must NOT have run"
+    row = led.rows_for("tc-bad-args")[0]
+    assert row.status == "failed" and row.error_code == "arguments_undecodable"
+    assert row.completed_at is not None, "a failed effect is completed"
+    assert row.claim_owner == "worker:run-1" and row.claim_token
 
 
 def test_gate11_negative_control_intended_would_hide_the_effect(chan, led):
     """Mutation control for gate 11: prove the assertion discriminates.
 
-    A ledger that keeps the row at `intended` must FAIL the gate above. Without
+    A ledger that keeps the row at `claimed` must FAIL the gate above. Without
     this control, gate 11 would pass against either behaviour.
     """
     class SloppyLedger(EffectLedger):
-        def settle(self, tool_call_id, status, result_json, *, token=None):
+        def settle(self, tool_call_id, status, result_json, **kw):
             if status == "indeterminate":
                 return  # the defect: a crash leaves the row untouched
-            super().settle(tool_call_id, status, result_json, token=token)
+            super().settle(tool_call_id, status, result_json, **kw)
 
     def boom(to):
         chan.touch(f"send_email:{to}")
         raise RuntimeError("smtp exploded")
 
     sloppy = SloppyLedger()
-    h = PhoenixHarness(ledger=sloppy)
+    h = harness(sloppy)
     h.register("send_email", SCHEMA, boom)
-    req = h.build_agent(TestModel()).run_sync("email").output
+    turn = h.run("email")
     with pytest.raises(RuntimeError):
-        h.resolve("run-1", req)
+        h.resolve("run-1", turn.requests)
 
-    statuses = [r.status for r in sloppy.rows_for(req.calls[0].tool_call_id)]
+    statuses = [r.status for r in sloppy.rows_for(turn.calls[0].tool_call_id)]
     assert statuses == ["claimed"], \
         "control is broken if the row settled; it must be left at the claim"
 
 
-# ============ GATE 12: the claim/fence lifecycle, per spec/02 ==============
-def test_gate12_indeterminate_requires_a_claimed_row(led):
-    """`spec/02-consistency.md:326`: "a never-claimed row ... cannot produce
-    `indeterminate`".
+# ==== GATE 12: the ledger IS spec/01 effect_status and spec/02's phases ====
+# Round 2's ledger used a status `'settled'` that `spec/01-schema.md:332` does not
+# define, accepted `intended -> settled` with no claim, no owner and no token, and
+# had no run-lease predicate at all. Every assertion below is one predicate from
+# `spec/02-consistency.md:196-322`.
+def test_gate12_the_status_vocabulary_is_exactly_spec_01(led):
+    """`settled` is not a status. Nor is anything else we might invent."""
+    from harness import EFFECT_STATUS
 
-    Review found the first harness moving `intended` straight to `indeterminate`,
-    which made row 30e's VERIFIED label false: the mechanism the spec describes
-    (claim, then lose contact) was not present at all. The ledger now refuses.
-    """
-    led.append(LedgerRow("run-1", "tc-1", "send_email", "{}", "intended"))
-    with pytest.raises(AssertionError, match="indeterminate requires a claimed row"):
-        led.settle("tc-1", "indeterminate", None)
+    assert EFFECT_STATUS == {
+        "intended", "awaiting_approval", "claimed", "succeeded", "failed",
+        "denied", "abandoned", "indeterminate"}, "spec/01-schema.md:332"
+    with pytest.raises(LedgerRefused, match="is not an effect_status"):
+        led.append(LedgerRow("run-1", "tc-x", "send_email", "{}", "settled"))
 
 
-def test_gate12_effect_is_claimed_before_dispatch(chan, led):
-    """The full phase order is observable: intended -> claimed -> settled."""
+def test_gate12_full_phase_order_is_observable(chan, led):
+    """intended -> claimed -> succeeded, with the claim fields set at the claim."""
     seen: list[str] = []
 
     class Traced(EffectLedger):
@@ -499,51 +700,340 @@ def test_gate12_effect_is_claimed_before_dispatch(chan, led):
             seen.append(f"append:{row.status}")
             super().append(row)
 
-        def claim(self, tool_call_id, owner, token):
+        def claim(self, tool_call_id, owner, token, **kw):
             seen.append("claim")
-            super().claim(tool_call_id, owner, token)
+            super().claim(tool_call_id, owner, token, **kw)
 
-        def settle(self, tool_call_id, status, result_json, *, token=None):
+        def settle(self, tool_call_id, status, result_json, **kw):
             seen.append(f"settle:{status}")
-            super().settle(tool_call_id, status, result_json, token=token)
+            super().settle(tool_call_id, status, result_json, **kw)
 
     traced = Traced()
-    h = PhoenixHarness(ledger=traced)
+    h = harness(traced)
     h.register("send_email", SCHEMA,
                lambda to: (seen.append("EXECUTE"), chan.touch(f"send_email:{to}"))[1])
-    req = h.build_agent(TestModel()).run_sync("email").output
-    h.resolve("run-1", req)
+    turn = h.run("email")
+    h.resolve("run-1", turn.requests)
 
-    assert seen == ["append:intended", "claim", "EXECUTE", "settle:settled"], seen
-    row = traced.rows_for(req.calls[0].tool_call_id)[0]
+    assert seen == ["append:intended", "claim", "EXECUTE", "settle:succeeded"], seen
+    row = traced.rows_for(turn.calls[0].tool_call_id)[0]
     assert row.claim_owner == "worker:run-1" and row.claim_token
+    assert row.lease_expires_at is not None and row.completed_at is not None
 
 
-def test_gate12_a_stale_worker_is_fenced_out(chan, led):
-    """A claim token that is not the holder's cannot overwrite the verdict.
+def _claimed_row(led, *, run_id="run-1", call_id="tc-1", owner="worker:run-1",
+                 token="the-real-token", clock=lambda: 1000.0):
+    led.clock = clock
+    led.append(LedgerRow(run_id, call_id, "send_email", "{}", "intended"))
+    lease = RunLease(run_id=run_id, holder=owner, fence_token="f", expires_at=clock() + 300)
+    led.claim(call_id, owner, token, lease=lease)
+    return lease
 
-    Without the fence, a stale worker could settle an effect it does not own --
-    including overwriting an `indeterminate` verdict that a human is investigating.
-    """
-    h = PhoenixHarness(ledger=led)
+
+def test_gate12_settle_of_an_INTENDED_row_is_refused(led):
+    """The exact hole review found: `intended -> settled` with no claim at all."""
+    led.append(LedgerRow("run-1", "tc-1", "send_email", "{}", "intended"))
+    for status in ("succeeded", "failed", "indeterminate"):
+        with pytest.raises(LedgerRefused, match="settle requires status 'claimed'"):
+            led.settle("tc-1", status, None, owner="worker:run-1", token="t")
+    assert led.rows_for("tc-1")[0].status == "intended"
+
+
+def test_gate12_settle_with_a_wrong_token_or_no_token_is_refused(led):
+    """`spec/02-consistency.md:301` — all three predicates, each one asserted."""
+    _claimed_row(led)
+    with pytest.raises(LedgerRefused, match="stale worker fenced out"):
+        led.settle("tc-1", "succeeded", '"forged"', owner="worker:run-1", token="a-guess")
+    with pytest.raises(LedgerRefused, match="stale worker fenced out"):
+        led.settle("tc-1", "succeeded", '"forged"', owner="someone-else",
+                   token="the-real-token")
+    with pytest.raises(LedgerRefused, match="requires the claim owner AND its token"):
+        led.settle("tc-1", "succeeded", '"forged"')
+    with pytest.raises(LedgerRefused, match="requires the claim owner AND its token"):
+        led.settle("tc-1", "succeeded", '"forged"', owner="worker:run-1")
+    assert led.rows_for("tc-1")[0].status == "claimed", "the fence must hold the row"
+    # ...and the holder still can.
+    led.settle("tc-1", "succeeded", '"real"', owner="worker:run-1", token="the-real-token")
+    assert led.rows_for("tc-1")[0].status == "succeeded"
+
+
+def test_gate12_settle_cannot_be_used_for_denial_or_abandonment(led):
+    """`denied` and `abandoned` move an UNCLAIMED row and have their own statements."""
+    _claimed_row(led)
+    for status in ("denied", "abandoned", "intended", "claimed", "settled"):
+        with pytest.raises(LedgerRefused, match="settle takes one of"):
+            led.settle("tc-1", status, None, owner="worker:run-1", token="the-real-token")
+
+
+def test_gate12_claim_without_a_run_lease_is_refused(led):
+    """`spec/02-consistency.md:246` predicate (b), which round 2 omitted entirely."""
+    led.append(LedgerRow("run-1", "tc-1", "send_email", "{}", "intended"))
+    with pytest.raises(LedgerRefused, match="requires an unexpired run lease"):
+        led.claim("tc-1", "worker:run-1", "tok", lease=None)
+    assert led.rows_for("tc-1")[0].status == "intended"
+
+
+def test_gate12_claim_with_an_expired_or_foreign_run_lease_is_refused(led):
+    led.clock = lambda: 1000.0
+    led.append(LedgerRow("run-1", "tc-1", "send_email", "{}", "intended"))
+    for bad, why in (
+            (RunLease("run-1", "worker:run-1", "f", 999.0), "expired"),
+            (RunLease("run-1", "another-worker", "f", 2000.0), "held by someone else"),
+            (RunLease("run-OTHER", "worker:run-1", "f", 2000.0), "for another run")):
+        with pytest.raises(LedgerRefused, match="does not authorise this claim"):
+            led.claim("tc-1", "worker:run-1", "tok", lease=bad)
+        assert led.rows_for("tc-1")[0].status == "intended", why
+    # ...and a good lease is accepted, so the refusals above are the predicate.
+    led.claim("tc-1", "worker:run-1", "tok",
+              lease=RunLease("run-1", "worker:run-1", "f", 2000.0))
+    assert led.rows_for("tc-1")[0].status == "claimed"
+
+
+def test_gate12_an_expired_run_lease_stops_the_whole_dispatch(chan, led):
+    """End to end, through the harness: no lease, no effect, no verdict invented."""
+    clock = lambda: 1000.0  # noqa: E731
+    led.clock = clock
+    h = harness(led, clock=clock,
+                lease=RunLease("run-1", "worker:run-1", "f", 999.0))
     h.register("send_email", SCHEMA, lambda to: chan.touch(f"send_email:{to}"))
-    req = h.build_agent(TestModel()).run_sync("email").output
-    call_id = req.calls[0].tool_call_id
+    turn = h.run("email")
 
-    led.append(LedgerRow("run-1", call_id, "send_email", "{}", "intended"))
-    led.claim(call_id, "worker:run-1", "the-real-token")
+    with pytest.raises(LedgerRefused, match="does not authorise this claim"):
+        h.resolve("run-1", turn.requests)
 
-    with pytest.raises(AssertionError, match="stale worker fenced out"):
-        led.settle(call_id, "settled", '"forged"', token="a-guess")
-    with pytest.raises(AssertionError, match="needs its claim token"):
-        led.settle(call_id, "settled", '"forged"')
-    assert led.rows_for(call_id)[0].status == "claimed", "the fence must hold the row"
+    assert chan.lines == [], "a fenced-out worker reached the customer system"
+    assert [r.status for r in led.rows] == ["intended"]
+
+
+def test_gate12_the_approval_phase_is_the_spec_one(led):
+    """intended -> awaiting_approval -> (denied | claimed-with-approval).
+
+    `awaiting_approval` is a distinct status precisely so an effect waiting on a
+    human is not holding an execution lease (`spec/01-schema.md:326`).
+    """
+    led.clock = lambda: 1000.0
+    led.append(LedgerRow("run-1", "tc-1", "send_email", "{}", "intended"))
+    led.await_approval("tc-1")
+    row = led.rows_for("tc-1")[0]
+    assert row.status == "awaiting_approval"
+    assert row.claim_owner is None and row.lease_expires_at is None, \
+        "an effect awaiting a human holds no lease"
+
+    good = RunLease("run-1", "worker:run-1", "f", 2000.0)
+    with pytest.raises(LedgerRefused, match="requires an approval"):
+        led.claim("tc-1", "worker:run-1", "tok", lease=good)
+    assert led.rows_for("tc-1")[0].status == "awaiting_approval"
+
+    led.claim("tc-1", "worker:run-1", "tok", lease=good, approved=True)
+    assert led.rows_for("tc-1")[0].status == "claimed"
+
+
+def test_gate12_denial_and_abandonment_move_only_unclaimed_rows(led):
+    """`spec/02-consistency.md:307-322`: neither can ever produce `indeterminate`."""
+    led.append(LedgerRow("run-1", "tc-a", "send_email", "{}", "intended"))
+    led.deny("tc-a", error_code="approver_refused")
+    assert led.rows_for("tc-a")[0].status == "denied"
+
+    led.append(LedgerRow("run-1", "tc-b", "send_email", "{}", "intended"))
+    led.abandon("tc-b", error_code="run_ended")
+    assert led.rows_for("tc-b")[0].status == "abandoned"
+
+    _claimed_row(led, call_id="tc-c")
+    with pytest.raises(LedgerRefused, match="requires an unclaimed row"):
+        led.deny("tc-c")
+    with pytest.raises(LedgerRefused, match="requires an unclaimed row"):
+        led.abandon("tc-c")
 
 
 def test_gate12_claim_requires_intent_first(led):
-    """Claiming a row that was never intended is refused, so the phases cannot be skipped."""
-    with pytest.raises(AssertionError, match="claim for an unledgered call"):
-        led.claim("tc-nope", "worker:x", "tok")
-    led.append(LedgerRow("run-1", "tc-2", "send_email", "{}", "settled"))
-    with pytest.raises(AssertionError, match="claim requires status 'intended'"):
-        led.claim("tc-2", "worker:x", "tok")
+    """Claiming a row that was never intended is refused, so phases cannot be skipped."""
+    good = RunLease("run-nope", "worker:x", "f", 1e18)
+    with pytest.raises(LedgerRefused, match="no ledger row"):
+        led.claim("tc-nope", "worker:x", "tok", lease=good)
+    _claimed_row(led, call_id="tc-2")
+    with pytest.raises(LedgerRefused, match="claim requires status 'intended'"):
+        led.claim("tc-2", "worker:run-1", "tok",
+                  lease=RunLease("run-1", "worker:run-1", "f", 1e18))
+
+
+def test_gate12_the_claim_field_check_constraint_is_enforced(led):
+    """`spec/01-schema.md:378` — an unclaimed row carries no owner; a claimed one does."""
+    with pytest.raises(LedgerRefused, match="must carry no owner"):
+        led.append(LedgerRow("run-1", "tc-1", "e", "{}", "intended", claim_owner="w"))
+    with pytest.raises(LedgerRefused, match="requires owner, token"):
+        led.append(LedgerRow("run-1", "tc-2", "e", "{}", "claimed"))
+    with pytest.raises(LedgerRefused, match="completed_at IS NOT NULL"):
+        led.append(LedgerRow("run-1", "tc-3", "e", "{}", "succeeded", claim_owner="w",
+                             claim_token="t", lease_expires_at=1.0))
+
+
+# ==== GATE 13: THE STRUCTURAL REFUSAL — there is no Agent to override ======
+# Review's finding, and it was correct: `build_agent()` handed back a raw `Agent`.
+# With it in hand, `agent.override(native_tools=[WebSearchTool()])` delivers a
+# vendor-hosted tool to the model with zero Phoenix involvement. The old gate
+# asserted only that `TestModel` REFUSES built-in tools -- a fact about
+# `TestModel`. `FunctionModel` supports them (`models/function.py:242`), and the
+# negative control below shows the delivery happening.
+def _recorder_model(seen: list, tool_name: str = "send_email"):
+    """A FunctionModel that records what native tools the model was handed.
+
+    Both halves are supplied, so the BUFFERED and the STREAMING request paths are
+    each observed: a boundary that leaks only when streaming is still a leak.
+    """
+    state = {"n": 0}
+
+    def f(messages, info: AgentInfo):
+        seen.append(tuple(info.model_request_parameters.native_tools))
+        state["n"] += 1
+        if state["n"] == 1 and tool_name:
+            return ModelResponse(parts=[ToolCallPart(
+                tool_name, {"to": "a"}, tool_call_id="fm-1")])
+        return ModelResponse(parts=[TextPart("done")])
+
+    async def stream(messages, info: AgentInfo):
+        seen.append(tuple(info.model_request_parameters.native_tools))
+        if tool_name:
+            yield {0: DeltaToolCall(name=tool_name, json_args='{"to": "a"}',
+                                    tool_call_id="fm-stream-1")}
+        else:
+            yield "done"
+
+    return FunctionModel(f, stream_function=stream)
+
+
+def agents_reachable_from(obj) -> list[str]:
+    """Every public name on `obj` that IS, or zero-argument-returns, an `Agent`.
+
+    Calling public zero-argument callables is deliberate: `build_agent()` was a
+    method, not an attribute, so a scan that only read values would have declared
+    the old harness clean.
+    """
+    found = []
+    for name in dir(obj):
+        if name.startswith("_"):
+            continue
+        try:
+            value = getattr(obj, name)
+        except Exception:  # noqa: BLE001
+            continue
+        if isinstance(value, Agent):
+            found.append(name)
+            continue
+        if callable(value):
+            try:
+                returned = value()
+            except Exception:  # noqa: BLE001 -- needs arguments; not an accessor
+                continue
+            if isinstance(returned, Agent):
+                found.append(f"{name}()")
+    return found
+
+
+def test_gate13_no_public_name_on_the_harness_yields_an_agent(chan, led):
+    h = harness(led, model=_recorder_model([]))
+    h.register("send_email", SCHEMA, lambda to: chan.touch(f"send_email:{to}"))
+    turn = h.run("email")
+
+    assert agents_reachable_from(h) == [], "the harness exposes an Agent"
+    assert agents_reachable_from(turn) == [], "the Turn exposes an Agent"
+    assert not any(isinstance(v, Agent) for v in vars(turn).values())
+    assert not [k for k, v in vars(h).items()
+                if isinstance(v, Agent) and not k.startswith("_")]
+    assert not hasattr(h, "build_agent"), \
+        "build_agent() is the hole review found; it must not come back"
+
+
+def test_gate13_native_tools_and_toolsets_are_refused_at_the_door(led):
+    """A caller cannot hand the harness SDK surface Phoenix would not ledger."""
+    from pydantic_ai.native_tools import WebSearchTool
+
+    with pytest.raises(UninterceptableTool, match="native_tools="):
+        PhoenixHarness(ledger=led, model=TestModel(), native_tools=[WebSearchTool()])
+    with pytest.raises(UninterceptableTool, match="toolsets="):
+        PhoenixHarness(ledger=led, model=TestModel(), toolsets=[FunctionToolset()])
+
+    h = harness(led)
+    with pytest.raises(UninterceptableTool, match="native_tools="):
+        h.register("send_email", SCHEMA, lambda to: None, native_tools=[WebSearchTool()])
+    with pytest.raises(UninterceptableTool, match="native_tools="):
+        h.register("send_email", SCHEMA, lambda to: None, native_tools=None)
+    with pytest.raises(UninterceptableTool, match="toolsets="):
+        h.register("send_email", SCHEMA, lambda to: None, toolsets=[FunctionToolset()])
+    with pytest.raises(UninterceptableTool, match="tools="):
+        h.register("send_email", SCHEMA, lambda to: None, tools=[lambda: None])
+    assert led.rows == []
+
+
+def test_gate13_a_function_model_is_never_handed_a_native_tool(chan, led):
+    """The delivery assertion, on a model that DOES support native tools.
+
+    `FunctionModel.supported_native_tools()` returns `SUPPORTED_NATIVE_TOOLS`
+    (`models/function.py:242-244`), so if any native tool could reach the model
+    through this harness, this recorder would see it -- on the first request, on
+    the resume request, and on the streaming path.
+    """
+    import asyncio
+    seen: list[tuple] = []
+    h = harness(led, model=_recorder_model(seen))
+    h.register("send_email", SCHEMA, lambda to: chan.touch(f"send_email:{to}"))
+
+    turn = h.run("email")
+    assert isinstance(turn.output, DeferredToolRequests)
+    results = h.resolve("run-1", turn.requests)
+    h.resume(turn, results=results)
+
+    streamed = harness(EffectLedger(), model=_recorder_model(seen))
+    streamed.register("send_email", SCHEMA, lambda to: chan.touch(f"send_email:{to}"))
+    assert isinstance(asyncio.run(streamed.stream_output("email")), DeferredToolRequests)
+
+    assert seen, "the recorder never ran -- the assertion below would be vacuous"
+    assert all(nt == () for nt in seen), f"a native tool reached the model: {seen}"
+
+
+def test_gate13_negative_control_exposing_the_agent_lets_the_override_through(led):
+    """RULE 4 for the structural claim: put the `Agent` back, watch it break.
+
+    This is review's own reproduction, executable. `LeakyHarness` re-exposes the
+    agent exactly as `build_agent()` used to, and the override then delivers
+    `WebSearchTool` to the model. So gate 13's green result comes from the
+    harness's shape, not from something the SDK does incidentally.
+    """
+    from pydantic_ai.native_tools import WebSearchTool
+
+    class LeakyHarness(PhoenixHarness):
+        """The defect, restored, so its consequence can be measured."""
+
+        def build_agent(self):
+            return self._PhoenixHarness__build()
+
+    seen: list[tuple] = []
+    leaky = LeakyHarness(ledger=led, model=_recorder_model(seen, tool_name=""))
+    leaky.register("send_email", SCHEMA, lambda to: None)
+
+    assert agents_reachable_from(leaky) == ["build_agent()"], \
+        "the scanner is inert if it cannot see a deliberately exposed Agent"
+
+    agent = leaky.build_agent()
+    with agent.override(native_tools=[WebSearchTool()]):
+        agent.run_sync("search the web")
+
+    assert seen and seen[-1] and isinstance(seen[-1][0], WebSearchTool), \
+        "control is broken: the override delivered nothing, so the sealed " \
+        "harness's empty recorder would prove nothing"
+    assert led.rows == [], "and not one ledger row for a vendor-hosted tool"
+
+
+# ============ RULE 7: the mutation runner owns what it mutates =============
+def test_rule7_the_mutation_runner_never_writes_to_the_live_tree(tmp_path):
+    """`mutate.py` used to rewrite `harness.py` IN PLACE.
+
+    That is a rule-7 violation: the live tree is not uniquely owned by the
+    mutation run, so a concurrent `make spike06` could import a deliberately
+    broken harness. It now copies the spike into a directory it creates. This
+    asserts the copy is complete and self-contained.
+    """
+    work = copy_spike(tmp_path / "spike")
+    for name in SPIKE_FILES:
+        assert (work / name).exists(), f"{name} missing from the copy"
+    assert (work / "harness.py").read_text() == (HERE / "harness.py").read_text()
+    assert work.resolve() != HERE

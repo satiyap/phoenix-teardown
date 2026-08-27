@@ -1,13 +1,25 @@
 {
-  "_why": "The SDK source tree uses uv-dynamic-versioning (pyproject.toml:5-6) and the read clone carries no git tags, so it cannot state its own version. `pydantic-ai-slim==2.35.0` in requirements.txt is a LABEL; these digests are the assertion. Review proved the distinction mattered: with only the version pin in place, external.py could be edited and all 18 gates still passed.",
+  "_why": "The SDK source tree uses uv-dynamic-versioning (pyproject.toml:5-6) and the read clone carries no git tags, so it cannot state its own version. `pydantic-ai-slim==2.35.0` in requirements.txt is a LABEL; these digests are the assertion. Review proved the distinction mattered TWICE: with only the version pin, external.py could be edited and all 18 gates still passed; with the five-file pin of round 2, native_tools/__init__.py -- the module that decides which tools may be ADMITTED -- was unpinned and could be edited with all 26 gates still passing.",
   "_algorithm": "sha256 of the file bytes, as installed under site-packages/pydantic_ai/",
   "_source_commit": "b48ee38",
   "_recorded": "2026-08-27",
+  "_coverage": "verify_pin.REQUIRED_PINS, plus test_gate.py's AST scan of every pydantic_ai module harness.py or test_gate.py imports from. Regenerate deliberately with `python verify_pin.py --record`.",
   "files": {
+    "__init__.py": "9dc3daef57675a0ae07c5c54cc74f60c5b4a87e0a16ac3b66909b63709bb2116",
+    "agent/__init__.py": "7106f8b82d88feaf0a1f4b46afc116230f997863cfc35dced9633fe8da2748c1",
+    "_tool_execution.py": "f5c58a7e7138cfb14a2dcfcdfdbfd2909b8e232e7072932c80cff0cfea7fcc8a",
+    "_deferred.py": "a01d33078fa25274566a8ff692d28ae10d627a6431cfb54fb8e194dfe32d8b8c",
+    "tools.py": "c08400dc9b553f0fb86f08d6fcb4be58654d3d68b0c82ca9f6d80b08e059733b",
+    "messages.py": "458910ca0c65748d96e55249c0053f111d2bd899c5e42ad7fdfdc2aa17f6d3bc",
+    "exceptions.py": "4b3f6eed89d78950ad31271a66ffdf7176d7dcd8135da1709271f34f9d73426f",
+    "toolsets/__init__.py": "fed0d8cb5f81a3164ec2afa067d27b7ecfd5a91af7b0adc56dbe5d8b593e31a1",
+    "toolsets/abstract.py": "d05c996b99d2799cf312896b6bbde8d778c491eed1be1286eafc98976752a659",
     "toolsets/external.py": "47770d0c1945391209594e73be231a36002adbdb5feb024f4c7d5a8e1e159a54",
     "toolsets/approval_required.py": "cf2606131d95aa9acb79dd7a397835416afcd6b9c00740a60334dec9027d038a",
-    "_deferred.py": "a01d33078fa25274566a8ff692d28ae10d627a6431cfb54fb8e194dfe32d8b8c",
-    "_tool_execution.py": "f5c58a7e7138cfb14a2dcfcdfdbfd2909b8e232e7072932c80cff0cfea7fcc8a",
-    "agent/__init__.py": "7106f8b82d88feaf0a1f4b46afc116230f997863cfc35dced9633fe8da2748c1"
+    "toolsets/function.py": "e9a0f9a8361a6a3d29b66471944b0a311b89a5e35fd8a2aa864b429636aa8734",
+    "native_tools/__init__.py": "f068a473190f725003ce5289e6d8c409fd802cd2ed504a15d328229bf8a3f1a7",
+    "native_tools/_tool_search.py": "ea92550a0ea021139e1be59d46c753fda5fc4ef8c0b6b0b1f1d9578ab46f11ba",
+    "models/function.py": "22b6b38bb18ee1effcad4ea24ce79856b0fa471ce93781c5b384b3c08448d90f",
+    "models/test.py": "6a15f588a97e133d0d55ec5178139e728421d416e76c7d928061f5fbcb3d1208"
   }
 }

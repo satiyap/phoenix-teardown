@@ -6,12 +6,20 @@ claimed 3. The table was written before gates 10 and 11 existed and never
 re-measured, so it was stale rather than wrong-in-principle -- but an unreproducible
 claim is not evidence (`VERIFICATION-RULES.md` rule 6). The table is now GENERATED.
 
-A STALE-BYTECODE TRAP, worth naming because it cost real time. Two of these
-mutations only REORDER lines, so the file's byte length is unchanged. Restoring it
-with `cp` can reproduce an mtime that collides with the cached entry, and CPython
-invalidates `.pyc` files on `(mtime, size)` -- so the interpreter silently keeps
-running the MUTATED bytecode. That is how a clean tree reported 6 failures. Every
-run here deletes `__pycache__` first.
+RULE 7, AND WHY THIS FILE CHANGED AGAIN (2026-08-27, round 3). The previous
+version mutated `harness.py` **in the live tree** and restored it in a `finally`.
+That is exactly the ownership violation rule 7 names: for the duration of a
+mutation run, a shared working tree contains a deliberately broken harness, so a
+concurrent `make spike06` -- or an editor, or CI -- sees code nobody wrote. It now
+copies the spike into a directory it creates under `tempfile.mkdtemp()`, mutates
+the copy, and removes the whole directory afterwards. The live tree is never
+opened for writing.
+
+That also retires the stale-bytecode trap the old version had to work around: two
+mutations only REORDER lines, leaving the file length unchanged, and CPython
+invalidates `.pyc` files on `(mtime, size)` -- so a restore with a colliding mtime
+could leave the interpreter running MUTATED bytecode. Every mutation now gets a
+fresh directory with no `__pycache__` at all, so there is nothing to invalidate.
 
     ../../.venv/bin/python mutate.py            # table
     ../../.venv/bin/python mutate.py --check    # non-zero if any mutation is survivable
@@ -22,11 +30,28 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-HARNESS = HERE / "harness.py"
 PY = HERE.parent.parent / ".venv" / "bin" / "python"
+
+# Everything a run of this spike needs. `copy_spike` is also used by `test_gate.py`
+# for its own owned-copy work, so the list lives in one place.
+SPIKE_FILES: tuple[str, ...] = (
+    "harness.py", "test_gate.py", "conftest.py", "verify_pin.py", "mutate.py",
+    "pinned_digests.json", "requirements.txt",
+)
+
+
+def copy_spike(dest: Path) -> Path:
+    """Copy the spike into `dest`, which the CALLER owns. Never writes to HERE."""
+    dest = Path(dest)
+    dest.mkdir(parents=True, exist_ok=True)
+    for name in SPIKE_FILES:
+        shutil.copy2(HERE / name, dest / name)
+    return dest
+
 
 # (label, what it removes, old, new)
 MUTATIONS: list[tuple[str, str, str, str]] = [
@@ -53,41 +78,83 @@ MUTATIONS: list[tuple[str, str, str, str]] = [
     (
         "route tools through FunctionToolset",
         "THE REAL BYPASS: the SDK gets an executable body",
-        "        toolset = ExternalToolset(self._defs) if self._defs else None\n"
-        "        return Agent(model,\n"
-        "                     output_type=[str, DeferredToolRequests],\n"
-        "                     toolsets=[toolset] if toolset else [])",
-        "        from pydantic_ai.toolsets.function import FunctionToolset\n"
-        "        fts = FunctionToolset()\n"
-        "        for _n, _impl in self._dispatch.items():\n"
-        "            fts.add_function(_impl, name=_n)\n"
-        "        return Agent(model,\n"
-        "                     output_type=[str, DeferredToolRequests],\n"
-        "                     toolsets=[fts])",
+        "            toolset = ExternalToolset(self._defs) if self._defs else None\n"
+        "            self.__agent = Agent(self.__model,\n"
+        "                                 output_type=[str, DeferredToolRequests],\n"
+        "                                 toolsets=[toolset] if toolset else [])",
+        "            from pydantic_ai.toolsets.function import FunctionToolset\n"
+        "            fts = FunctionToolset()\n"
+        "            for _n, _impl in self._dispatch.items():\n"
+        "                fts.add_function(_impl, name=_n)\n"
+        "            self.__agent = Agent(self.__model,\n"
+        "                                 output_type=[str, DeferredToolRequests],\n"
+        "                                 toolsets=[fts])",
+    ),
+    (
+        "expose the Agent",
+        "THE STRUCTURAL REFUSAL: a caller can override(native_tools=...)",
+        "    @staticmethod\n"
+        "    def __turn(result: Any) -> Turn:",
+        "    def build_agent(self) -> Agent:\n"
+        "        return self.__build()\n"
+        "\n"
+        "    @staticmethod\n"
+        "    def __turn(result: Any) -> Turn:",
+    ),
+    (
+        "accept caller-supplied native_tools",
+        "vendor-hosted tools reach the model unledgered",
+        '        _reject_sdk_surface("register()", sdk_surface)',
+        "        pass  # surface check removed",
     ),
     (
         "drop the claim before dispatch",
         "an effect is dispatched without being claimed",
-        "        self.ledger.claim(call.tool_call_id, owner, token)",
+        "        self.ledger.claim(call.tool_call_id, owner, token, lease=lease)",
         "        pass  # claim removed",
+    ),
+    (
+        "drop the run-lease predicate",
+        "a worker whose run was reclaimed can still claim and dispatch",
+        "        if lease is None:\n"
+        "            raise LedgerRefused(\n"
+        '                "claim requires an unexpired run lease "\n'
+        '                "(spec/02-consistency.md:246, predicate (b))")\n'
+        "        now = self.clock()\n"
+        "        if not lease.authorises(row.run_id, owner, now):",
+        "        now = self.clock()\n"
+        "        if False:",
+    ),
+    (
+        "drop the settle fence",
+        "a stale worker can overwrite the claim holder's verdict",
+        '        if row.status != "claimed":',
+        "        if False:",
     ),
     (
         "settle indeterminate as intended",
         "a crashed effect looks like one that never started",
-        '            self.ledger.settle(call.tool_call_id, "indeterminate", None, token=token)',
+        '            self.ledger.settle(call.tool_call_id, "indeterminate", None,\n'
+        "                               owner=owner, token=token,\n"
+        '                               error_code="dispatch_lost_contact")',
         "            pass  # verdict dropped",
+    ),
+    (
+        "call a raise after dispatch 'failed'",
+        "an effect of unknown outcome is reported as one that provably did not happen",
+        '            self.ledger.settle(call.tool_call_id, "indeterminate", None,\n'
+        "                               owner=owner, token=token,\n"
+        '                               error_code="dispatch_lost_contact")',
+        '            self.ledger.settle(call.tool_call_id, "failed", None,\n'
+        "                               owner=owner, token=token,\n"
+        '                               error_code="dispatch_lost_contact")',
     ),
 ]
 
 
-def _clean_pycache() -> None:
-    shutil.rmtree(HERE / "__pycache__", ignore_errors=True)
-
-
-def _run() -> tuple[int, int, list[str]]:
-    _clean_pycache()
+def _run(work: Path) -> tuple[int, int, list[str]]:
     r = subprocess.run([str(PY), "-m", "pytest", "test_gate.py", "-q", "--no-header"],
-                       cwd=str(HERE), capture_output=True, text=True)
+                       cwd=str(work), capture_output=True, text=True)
     out = r.stdout
     m = re.search(r"(\d+) failed, (\d+) passed", out)
     if m:
@@ -102,41 +169,43 @@ def _run() -> tuple[int, int, list[str]]:
 
 def main() -> int:
     check = "--check" in sys.argv
-    original = HARNESS.read_text()
+    original = (HERE / "harness.py").read_text()
 
-    baseline_failed, baseline_passed, _ = _run()
-    print(f"baseline: {baseline_passed} passed, {baseline_failed} failed")
-    if baseline_failed:
-        print("BASELINE IS NOT CLEAN -- fix that before trusting any mutation")
-        return 1
-
-    rows, survivable = [], []
+    root = Path(tempfile.mkdtemp(prefix="spike06-mutations-"))
     try:
-        for label, removes, old, new in MUTATIONS:
+        baseline_failed, baseline_passed, _ = _run(copy_spike(root / "baseline"))
+        print(f"baseline: {baseline_passed} passed, {baseline_failed} failed "
+              f"(in {root}, NOT the live tree)")
+        if baseline_failed:
+            print("BASELINE IS NOT CLEAN -- fix that before trusting any mutation")
+            return 1
+
+        rows, survivable = [], []
+        for i, (label, removes, old, new) in enumerate(MUTATIONS):
             if old not in original:
                 rows.append((label, removes, "PATTERN MISS", []))
                 survivable.append(label)
                 continue
-            HARNESS.write_text(original.replace(old, new, 1))
-            failed, _passed, names = _run()
+            work = copy_spike(root / f"m{i:02d}")
+            (work / "harness.py").write_text(original.replace(old, new, 1))
+            failed, _passed, names = _run(work)
             rows.append((label, removes, f"{failed} failed", names))
             if failed == 0:
                 survivable.append(label)
-            HARNESS.write_text(original)
+
+        width = max(len(r[0]) for r in rows)
+        print()
+        print(f"| {'Mutation'.ljust(width)} | Removes | Gates broken |")
+        print(f"|{'-' * (width + 2)}|---|---|")
+        for label, removes, result, names in rows:
+            short = ", ".join(n.replace("test_", "") for n in names) or "-"
+            print(f"| {label.ljust(width)} | {removes} | **{result}** — {short} |")
     finally:
-        HARNESS.write_text(original)
-        _clean_pycache()
+        shutil.rmtree(root, ignore_errors=True)
 
-    width = max(len(r[0]) for r in rows)
-    print()
-    print(f"| {'Mutation'.ljust(width)} | Removes | Gates broken |")
-    print(f"|{'-' * (width + 2)}|---|---|")
-    for label, removes, result, names in rows:
-        short = ", ".join(n.replace("test_", "") for n in names) or "-"
-        print(f"| {label.ljust(width)} | {removes} | **{result}** — {short} |")
-
-    final_failed, final_passed, _ = _run()
-    print(f"\nrestored: {final_passed} passed, {final_failed} failed")
+    assert (HERE / "harness.py").read_text() == original, \
+        "the live harness changed during a mutation run -- rule 7 violated"
+    print("\nthe live tree is byte-identical to where it started")
     if survivable:
         print("\nSURVIVABLE MUTATIONS (no gate caught them):")
         for s in survivable:

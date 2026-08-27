@@ -256,11 +256,18 @@ and confidentiality constraints — not only a mutation-pack restriction.
 ships a working tool executor and calling it is one line.
 
 **One harness, on Pydantic AI.** Pin: **`pydantic-ai-slim == 2.35.0`**, fixed by spike 06 on
-2026-08-27 (was a placeholder). The version string is a label for five file digests: the source
-tree uses `uv-dynamic-versioning` (`pyproject.toml:5-6`) and carries no git tags, so it cannot
-state its own version. Spike 06 installed 2.35.0 from PyPI and verified `agent/__init__.py`,
-`_tool_execution.py`, `toolsets/external.py`, `toolsets/approval_required.py` and `_deferred.py`
-are **byte-identical** to the read source at `b48ee38`.
+2026-08-27 (was a placeholder). The version string is a label for **sixteen** file digests: the
+source tree uses `uv-dynamic-versioning` (`pyproject.toml:5-6`) and carries no git tags, so it
+cannot state its own version. Spike 06 installed 2.35.0 from PyPI and verified every file the
+boundary's behaviour depends on is **byte-identical** to the read source at `b48ee38`:
+`__init__.py`, `agent/__init__.py`, `_tool_execution.py`, `_deferred.py`, `tools.py`,
+`messages.py`, `exceptions.py`, `toolsets/{__init__,abstract,external,approval_required,function}.py`,
+`native_tools/{__init__,_tool_search}.py` and `models/{function,test}.py`
+*(amended 2026-08-27, superseding "five file digests" naming only `agent/__init__.py`,
+`_tool_execution.py`, `toolsets/external.py`, `toolsets/approval_required.py` and `_deferred.py`:
+that pin left `native_tools/__init__.py` — the module that decides which vendor-hosted tools may
+be admitted — unpinned, so it could be edited with every gate still green)*. The digests are
+checked before the gate suite is collected; see `spikes/06-tool-interception/verify_pin.py`.
 
 **The boundary is a TOOLSET, not a decorator** *(corrected 2026-08-27 by spike 06; the earlier
 text said "the `ToolCall → ledger` boundary is a **decorator** rather than a fork", naming
@@ -272,6 +279,16 @@ declares tools through `ExternalToolset`, whose `call_tool` raises
 `kind='external'` (`:36`). **The SDK is never given an executable body**, so there is no executor
 to disable and no wrapper for a future version to route around. `@agent.tool` is not used by
 Phoenix at all; spike 06's negative control shows it *is* the bypass.
+
+**Declaring the tool is necessary and not sufficient** *(added 2026-08-27, round 3)*. An
+adapter must additionally expose **no `Agent` object** to its caller. `Agent.override` accepts
+`native_tools=` (`agent/__init__.py:1969`), and `FunctionModel.supported_native_tools()` returns
+every native tool the SDK ships (`models/function.py:242-244`) — so a caller holding the agent
+can deliver a vendor-hosted tool to the model with no adapter involvement at all. The v0.1
+harness therefore exposes only `register` / `run` / `resume` / `stream_output` / `resolve`, and
+refuses `native_tools=`, `toolsets=` and `tools=` at registration. Spike 06 asserts this by
+scanning every public name for one that is, or returns, an `Agent`, with a negative control that
+re-exposes it and shows the override succeeding.
 
 The adapter boundary is retained so a **second** SDK can be added later without touching the
 control plane.

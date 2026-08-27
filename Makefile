@@ -47,7 +47,7 @@ spec:
 gate-tests:
 	@$(PY) tools/test_validate_spec.py
 
-# Spike 06's 26 assertions were NOT executed by any repository target, so a green
+# Spike 06's assertions (47 as of 2026-08-27) were NOT executed by any repository target, so a green
 # `make check` was being presented as evidence for them. It now runs them, pin first:
 # the digest check must fail the session if the installed SDK is not the code the
 # gates were written against.
