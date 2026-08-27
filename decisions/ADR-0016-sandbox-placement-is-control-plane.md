@@ -1,6 +1,6 @@
 # ADR-0016 — Sandbox lifecycle and placement are a control-plane concern; isolation is a provider's
 
-- **Status:** **Proposed** (2026-08-27) — raised by the SaaS repositioning. **Not Accepted:** it depends on spike 05 and on OQ-019, which is still open.
+- **Status:** **Proposed** (2026-08-27) — raised by the SaaS repositioning. **Not Accepted:** it depends on spike 05. *(Amended 2026-08-27: OQ-019 no longer blocks; the v0.1 provider is decided below and SubstrATE is an upgrade path.)*
 - **Date:** 2026-08-27
 - **Supersedes:** —
 - **Superseded by:** —
@@ -62,9 +62,23 @@ continue?" inside a component that cannot name the tenant asking.
   specified in ADR-0009.
 - `spec/09` (or a successor) must state that sandbox identity is **not** run identity, so a
   recycled sandbox cannot be mistaken for a resumed run.
-- We may adopt SubstrATE, another provider, or a plain container runtime behind this
-  interface. That choice is deliberately **not** made here.
-- Eviction semantics are unknown and load-bearing: see OQ-019.
+- **v0.1 provider decided 2026-08-27 (amended; this bullet previously left the choice open):
+  Kubernetes with a gVisor `RuntimeClass`, and *suspend* implemented as checkpoint-and-kill** —
+  the pod is deleted when a run enters `waiting_input` past a configurable warm window and
+  rebuilt from the run log and the adapter checkpoint on resume. Chosen because it needs no
+  KVM (runs on any customer's nodes), no second control plane, and no pre-1.0 dependency;
+  idle cost is zero and resume is seconds, which is invisible behind a human wait. Warm-tier
+  policy (keep the pod for short waits), a small warm pool, and pre-pull are scheduler
+  configuration under this ADR, never visible to the harness.
+- **Named upgrade paths, same four verbs:** `runsc checkpoint/restore` (sub-second resume,
+  same provider); self-hosted `e2b-dev/infra` (Firecracker, Apache-2.0, production today, but a
+  Nomad/Postgres/Redis footprint per customer and a KVM requirement); Kata `RuntimeClass` for a
+  hardware boundary on KVM nodes; SubstrATE when it ships eviction, authN and tenancy
+  boundaries (`docs/architecture.md` calls itself "aspirational", read 2026-08-27). None is a
+  v0.1 dependency. **The rule that keeps them swappable: the harness never relies on process
+  memory surviving; the log and the adapter checkpoint are the only durability.**
+- Eviction semantics of SubstrATE (OQ-019/OQ-042) therefore no longer block this ADR; they
+  gate the *upgrade*, not v0.1.
 
 ## Falsification criteria
 
@@ -78,20 +92,37 @@ This ADR is wrong if any of the following turn out to be true:
 
 ## Spike 05 — the gate before this becomes Accepted
 
-**Invariant, stated first:** *an agent's run survives the destruction of the sandbox it was
-executing in, with no weakening of the resume gates and no loss of tool interception.*
+*(Reshaped 2026-08-27: runs on the decided v0.1 provider, sequenced after spike 06, and
+gains the fallback and cost gates. The earlier text targeted an unnamed provider and repeated
+spike 06's interception claim.)*
 
-1. Start an SDK-backed agent in sandbox A; let it emit one `ToolCall` and settle the effect.
-2. Checkpoint. **Kill sandbox A.**
-3. Resume on a **fresh** sandbox B.
-4. **Gate 1 — the resume gates still hold.** Use the `TripwireAdapter` from spike 02:
-   assert `calls == []` on every failure path (artifact missing, artifact corrupted, pin
-   mismatch, concurrent resume). Sandbox replacement must not become a way to skip a gate.
-5. **Gate 2 — tool calls remain platform-intercepted on this path.** The post-resume tool
-   call produces an `effect_ledger` row. Negative control: let the SDK execute a tool
-   directly on the fresh sandbox and assert **no row appears**.
-6. **Negative control for the invariant itself:** resume with a *changed* definition digest
-   and confirm `IncompatibleCheckpoint`, so the test cannot pass by ignoring the pin.
+**Invariant, stated first:** *an agent's run survives the destruction of the sandbox it was
+executing in — and of its checkpoint artefact — with no weakening of the resume gates, no
+loss of tool interception, and no compute consumed while it waits.*
+
+Provider under test: Kubernetes + gVisor `RuntimeClass`, checkpoint-and-kill. Harness: the
+Pydantic AI adapter from spike 06, with its boundary reused, not re-proven.
+
+1. Start the harness in pod A; let it emit one `ToolCall` and settle the effect; drive the run
+   to `waiting_input` on an approval.
+2. **Gate 1 — idle costs nothing.** After the warm window, pod A is gone (`kubectl get pod`
+   returns nothing for the run); the run row is still `waiting_input` with no lease.
+3. Approve. Resume lands in a **fresh** pod B on a different node (taint A's node).
+4. **Gate 2 — the resume gates still hold.** `TripwireAdapter` from spike 02: `calls == []` on
+   every failure path (artifact missing, corrupted, pin mismatch, concurrent resume). Sandbox
+   replacement must not become a way to skip a gate.
+5. **Gate 3 — sandbox identity is not run identity.** Recreate a pod with A's name and
+   labels; assert it cannot be mistaken for a resumed run (no lease, no adapter call).
+6. **Gate 4 — the fallback.** Delete the adapter checkpoint artefact *and* any provider
+   snapshot; resume; assert the run rebuilds from the log alone and continues — or fails
+   loudly as `artifact_missing`, never silently as a fresh run. This is the test that keeps
+   every upgrade provider swappable.
+7. **Negative controls:** resume with a changed definition digest ⇒ `IncompatibleCheckpoint`;
+   let the harness keep state in process memory only ⇒ gate 4 goes red; shorten the warm
+   window to zero and skip pod deletion ⇒ gate 1 goes red.
+
+Tool interception after resume is covered by spike 06's boundary running unchanged in pod B;
+one assertion that its ledger row appears is enough here.
 
 ## Evidence log
 
