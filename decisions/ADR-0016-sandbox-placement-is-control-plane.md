@@ -98,7 +98,7 @@ executing in — and of its checkpoint artefact — with no weakening of the res
 loss of tool interception, and no compute consumed while it waits.*
 
 Provider under test: Kubernetes + gVisor `RuntimeClass`, checkpoint-and-kill. Harness: the
-Pydantic AI adapter from spike 06 (**complete 2026-08-28, PASS, 53 assertions** *(corrected 2026-08-28 from `spikes/06-tool-interception/RESULT.md`; was "2026-08-27, 18 assertions", the round-1 count)*), with its
+Pydantic AI adapter from spike 06 (**complete 2026-08-28, PASS, 57 assertions** *(corrected 2026-08-28 from `spikes/06-tool-interception/RESULT.md`; was "2026-08-27, 18 assertions", the round-1 count, then "53", the round-4 count)*), with its
 boundary reused, not re-proven.
 
 1. Start the harness in pod A; let it emit one `ToolCall` and settle the effect; drive the run

@@ -28,6 +28,23 @@ import executes, so it returned a strict SUBSET of the hand-written list. It now
 adds them, and `frontier()` records the one-level transitive edge of the pin so a
 new import out of a pinned file is a decision rather than a silent widening.
 
+WHY IT WAS REVISED A THIRD TIME (2026-08-28, round 5). Round 4's nineteen files
+omitted `tool_manager.py`, and the reason is the same shape one level further out:
+`_tool_execution.py` does not run tool bodies. It imports `ToolManager`
+(`_tool_execution.py:15`) and delegates (`:671`, `:958`); the body is invoked at
+`tool_manager.py:1008` -- `await self.toolset.call_tool(...)` inside `_raw_execute`
+(`:994`) -- which is where `ExternalToolset.call_tool`'s unconditional
+`NotImplementedError` (`toolsets/external.py:46`) either propagates or does not.
+It sat in `_coverage_frontier`, whose justification called the frontier modules ones
+"none of which any assertion here touches"; in a scratch SDK copy, wrapping that call
+in `except NotImplementedError: tool_result = 'SILENTLY FABRICATED BY THE SDK'` turned
+the fail-closed refusal fail-OPEN inside the pipeline and this file still printed
+"pin holds: 19 files" with all 53 gates green. `capabilities/_tool_search.py` and
+`toolsets/_tool_search.py` joined the pin at the same time: `Agent.__init__`
+auto-injects `ToolSearch`, which ALWAYS wraps the boundary toolset in
+`ToolSearchToolset`, so gate 13c's claim about what the agent runs is a claim about
+those bytes.
+
 `requirements.txt` pins `pydantic-ai-slim==2.35.0`, but that string is only a
 label -- the source tree uses `uv-dynamic-versioning` (`pyproject.toml:5-6`) and
 the read clone has no git tags, so it cannot state its own version. These digests
@@ -78,8 +95,10 @@ REQUIRED_PINS: tuple[str, ...] = (
     # `native_tools/`: `models/__init__.py:179` defines
     # `ModelRequestParameters.native_tools` -- the exact object gate 13's recorder
     # asserts is empty -- and `resolve_request_tools` (`models/__init__.py:1812-1930`)
-    # is the function that filters native tools against `supported_native_tools` and
-    # raises `UserError('Native tool(s) ... not supported by this model')` at `:1849`.
+    # is the function that filters native tools against `supported_native_tools` at
+    # `:1849`, and raises `UserError('Native tool(s) ... not supported by this
+    # model')` at `:1861-1862` (citation corrected 2026-08-28: `:1849` was cited for
+    # the raise; `:1849` is the `supported_natives` filter line).
     # Round 3's pin covered sixteen files and omitted both of these, so the admission
     # filter could be replaced with `supported_natives = list(params.native_tools)`
     # and `verify_pin.py` still printed "pin holds" with all 47 gates green.
@@ -89,6 +108,27 @@ REQUIRED_PINS: tuple[str, ...] = (
     # carries both native tools and executable LOCAL bodies. Gate 13 asserts the
     # harness refuses it, so these bytes are load-bearing too.
     "capabilities/__init__.py",
+    # ADDED 2026-08-28 (round 5). `_tool_execution.py` ORCHESTRATES tool execution;
+    # it does not invoke the body. It imports `ToolManager` (`_tool_execution.py:15`)
+    # and delegates at `:671`/`:958`, and the actual invocation is
+    # `tool_manager.py:1008` -- `tool_result = await self.toolset.call_tool(...)`
+    # inside `_raw_execute` (`tool_manager.py:994`). That is where
+    # `ExternalToolset.call_tool`'s unconditional `NotImplementedError`
+    # (`toolsets/external.py:46`, this spike's first cited claim) either propagates or
+    # does not. It was in `_coverage_frontier`, justified as a module "no assertion
+    # here touches" -- false for this one: in a scratch SDK copy, wrapping that call
+    # in `except NotImplementedError: tool_result = 'SILENTLY FABRICATED BY THE SDK'`
+    # turned the fail-closed refusal fail-OPEN inside the pipeline, and this file
+    # still printed "pin holds: 19 files" with all 53 gates green.
+    "tool_manager.py",
+    # ADDED 2026-08-28 (round 5). `Agent.__init__` AUTO-INJECTS `ToolSearch`
+    # (`agent/__init__.py:630`, `:3955-3958`), which ALWAYS wraps the harness's
+    # `ExternalToolset` in `ToolSearchToolset` (`capabilities/_tool_search.py:191-196`)
+    # whose `call_tool` has a LOCAL branch (`toolsets/_tool_search.py:435-437`). Gate
+    # 13's `..._the_agent_runs_only_the_delegating_wrapper` asserts the wrapping and
+    # the fail-closed behaviour, so these bytes are load-bearing.
+    "capabilities/_tool_search.py",
+    "toolsets/_tool_search.py",
 )
 
 

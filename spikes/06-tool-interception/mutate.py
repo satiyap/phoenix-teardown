@@ -163,9 +163,8 @@ MUTATIONS: list[tuple[str, str, str, str]] = [
     (
         "drop the intent conflict guard",
         "the ledger has no primary key: one call, two rows",
-        "        if any(r.tool_call_id == row.tool_call_id and r.run_id == row.run_id\n"
-        "               for r in self._rows):\n"
-        "            return  # ON CONFLICT ... DO NOTHING (spec/02-consistency.md:202)\n",
+        "        if any(r.tool_call_id == row.tool_call_id for r in self._rows):\n"
+        "            return  # ON CONFLICT (tenant_id, idempotency_key) DO NOTHING (spec/02:202)\n",
         "",
     ),
     (
@@ -173,6 +172,51 @@ MUTATIONS: list[tuple[str, str, str, str]] = [
         "a worker holding a superseded fence token can still claim",
         "                and fence is not None and self.fence_token == fence\n",
         "",
+    ),
+    (
+        "drop the intent/dispatch identity check",
+        "a body runs against a ledger row naming a DIFFERENT tool and arguments",
+        "        if row.tool_name != call.tool_name or row.args_json != args_json_of(call.args):\n"
+        "            raise LedgerRefused(\n"
+        '                f"the ledger row for {call.tool_call_id!r} describes "\n'
+        '                f"{row.tool_name!r}{row.args_json}, not {call.tool_name!r}"\n'
+        '                f"{args_json_of(call.args)}; a differing request_digest is a "\n'
+        '                "DIFFERENT effect, not this one (spec/01-schema.md:403)")\n',
+        "",
+    ),
+    (
+        "drop the dispatch run check",
+        "one run dispatches and settles an effect recorded against another run",
+        "        if row.run_id != run_id:\n"
+        "            raise LedgerRefused(\n"
+        '                f"{call.tool_call_id!r} is an effect of run {row.run_id!r}, not "\n'
+        '                f"{run_id!r}; the run is part of the key "\n'
+        '                "(spec/01-schema.md:372, spec/01-schema.md:403)")\n',
+        "",
+    ),
+    (
+        "make the intent guard the SECONDARY unique constraint",
+        "one idempotency_key spans two runs: two rows, the second unreachable",
+        "        if any(r.tool_call_id == row.tool_call_id for r in self._rows):\n"
+        "            return  # ON CONFLICT (tenant_id, idempotency_key) DO NOTHING (spec/02:202)\n",
+        "        if any(r.tool_call_id == row.tool_call_id and r.run_id == row.run_id\n"
+        "               for r in self._rows):\n"
+        "            return  # the round-4 defect, restored\n",
+    ),
+    (
+        "allow a duplicate registration",
+        "a second register() silently replaces the body a ledger row names",
+        "        if name in self._dispatch:\n"
+        "            raise UninterceptableTool(\n"
+        '                f"{name!r} is already registered; a second registration would "\n'
+        '                "silently replace the body a ledger row names")\n',
+        "",
+    ),
+    (
+        "mint the run lease on the harness clock",
+        "the lease is minted on one clock and judged on another (spec/02:249)",
+        "                             expires_at=self.ledger.clock() + RUN_LEASE_SECONDS)",
+        "                             expires_at=self.clock() + RUN_LEASE_SECONDS)",
     ),
     (
         "call a raise after dispatch 'failed'",

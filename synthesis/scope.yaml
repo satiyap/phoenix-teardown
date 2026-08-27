@@ -91,7 +91,7 @@ counts:
     proposed: 1
   spec_docs: 10
   invariant_rows: 52
-  spike_assertions: 170
+  spike_assertions: 174
 
 # The "Not yet specified" rows of spec/00-overview.md: the part of the v0.1 shipment
 # the spine documents do not yet cover.

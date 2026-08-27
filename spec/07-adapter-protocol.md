@@ -256,7 +256,7 @@ and confidentiality constraints — not only a mutation-pack restriction.
 ships a working tool executor and calling it is one line.
 
 **One harness, on Pydantic AI.** Pin: **`pydantic-ai-slim == 2.35.0`**, fixed by spike 06 on
-2026-08-27 (was a placeholder). The version string is a label for **nineteen** file digests *(amended 2026-08-28, superseding "sixteen": that pin omitted `models/__init__.py`, where native-tool ADMISSION is decided — `resolve_request_tools` at `models/__init__.py:1812-1930` filters native tools against `supported_native_tools` — so the filter could be neutered with all 47 gates green; `profiles/__init__.py` and `capabilities/__init__.py` were added for the same reason)*: the
+2026-08-27 (was a placeholder). The version string is a label for **twenty-two** file digests *(amended 2026-08-28, superseding "nineteen", which superseded "sixteen": round 5 added `tool_manager.py` — where the tool body is actually invoked, `await self.toolset.call_tool(...)` at `:1008` inside `_raw_execute` — plus `capabilities/_tool_search.py` and `toolsets/_tool_search.py`, after a scratch-copy edit at that line turned `ExternalToolset`'s fail-closed refusal fail-OPEN with `pin holds: 19 files` and all 53 gates green. The round-4 note it supersedes, kept rather than erased, said: that pin omitted `models/__init__.py`, where native-tool ADMISSION is decided — `resolve_request_tools` at `models/__init__.py:1812-1930` filters native tools against `supported_native_tools` — so the filter could be neutered with all 47 gates green; `profiles/__init__.py` and `capabilities/__init__.py` were added for the same reason)*: the
 source tree uses `uv-dynamic-versioning` (`pyproject.toml:5-6`) and carries no git tags, so it
 cannot state its own version. Spike 06 installed 2.35.0 from PyPI and verified every file the
 boundary's behaviour depends on is **byte-identical** to the read source at `b48ee38`:
@@ -298,7 +298,7 @@ executor MUST be disabled", was superseded 2026-08-27 by spike 06. An in-process
 same typed boundary as a remote one, and Pydantic AI supplies both halves natively:
 `DeferredToolRequests` as an `output_type` **ends the run** and returns the pending calls
 (`_deferred.py:27,37`), and `deferred_tool_results=` supplies the platform's results on resume
-(`agent/__init__.py:1139`):
+(`agent/__init__.py:1189` *(citation corrected 2026-08-28: `:1139` is inside the first `@overload` stub of `Agent.iter` — `@overload` at `:1132`, `def iter(` at `:1133`, body `...`; the implementation is `@asynccontextmanager async def iter(` at `:1183`, whose `deferred_tool_results` parameter is at `:1189`. This is the `@overload`-stub error OQ-043's own row records correcting for `:2399`.)*):
 
 ```
 SDK asks for a tool
@@ -323,7 +323,7 @@ version of this paragraph (superseded 2026-08-27) claimed the restriction was fr
 the entire guarantee — the guarantee is real, the zero cost was not.
 
 **Required by §08 inventory rows 30a–30e.** **VERIFIED 2026-08-27 by
-`spikes/06-tool-interception/` — 53 gate assertions** *(amended 2026-08-28: was "18", the round-1 count; rounds 2, 3 and 4 took it 18 → 26 → 47 → 53, and nothing in `tools/` reads this number)*, whose negative control runs the same
+`spikes/06-tool-interception/` — 57 gate assertions** *(amended 2026-08-28: was "18", the round-1 count; rounds 2 to 5 took it 18 → 26 → 47 → 53 → 57, and nothing in `tools/` reads this number)*, whose negative control runs the same
 function through `FunctionToolset` and observes the body execute with **zero ledger rows**. Its
 oracle is a filesystem side channel the harness never touches, so the assertions are about
 observable effects rather than the SDK's own accounting.

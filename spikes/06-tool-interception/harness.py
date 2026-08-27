@@ -137,6 +137,18 @@ class RunLease:
                 and self.expires_at > now)
 
 
+def args_json_of(args: Any) -> str:
+    """The `request_digest` stand-in (`LedgerRow.args_json`), computed exactly ONE way.
+
+    ADDED 2026-08-28 (round 5). `intend()` WRITES this string onto the row and
+    `dispatch()` now COMPARES the call it is about to execute against it, so the two
+    must not be able to disagree about the same arguments. A second, slightly
+    different expression at the comparison site (`json.dumps(call.args or {}, ...)`)
+    would make `args=None` and `args={}` collide.
+    """
+    return json.dumps(args, sort_keys=True)
+
+
 @dataclass(frozen=True)
 class LedgerRow:
     """One row of the effect ledger. Mirrors `spec/01-schema.md.effect_ledger`.
@@ -222,11 +234,25 @@ class EffectLedger:
         sweep is meant to never see. DO NOTHING is chosen over raising to match the
         spec's statement, which is a no-op and not an error; the caller's next read
         finds the existing row.
+
+        CORRECTED 2026-08-28 (round 5). The round-4 guard read
+        `r.tool_call_id == row.tool_call_id and r.run_id == row.run_id`, which is the
+        SECONDARY constraint `UNIQUE (tenant_id, idempotency_key, run_id)`
+        (`spec/01-schema.md:372`), not the `PRIMARY KEY (tenant_id, idempotency_key)`
+        (`spec/01-schema.md:367`) this docstring quotes, and not the conflict target of
+        `ON CONFLICT (tenant_id, idempotency_key) DO NOTHING`
+        (`spec/02-consistency.md:202`), which does NOT contain `run_id`. Measured at
+        that commit through the public surface: `resolve('run-1', ...)` then
+        `resolve('run-2', ...)` for one call left TWO rows for one key —
+        `[('run-1', ..., 'succeeded'), ('run-2', ..., 'intended')]` — and because
+        `_index()` returns the FIRST match the run-2 row was permanently unreachable
+        and sat at `intended` forever. The `run_id` conjunct is gone; which run a
+        surviving row belongs to is now checked explicitly by
+        `PhoenixHarness.dispatch`, which refuses to execute another run's effect.
         """
         self._check(row)
-        if any(r.tool_call_id == row.tool_call_id and r.run_id == row.run_id
-               for r in self._rows):
-            return  # ON CONFLICT ... DO NOTHING (spec/02-consistency.md:202)
+        if any(r.tool_call_id == row.tool_call_id for r in self._rows):
+            return  # ON CONFLICT (tenant_id, idempotency_key) DO NOTHING (spec/02:202)
         self._rows.append(row)
 
     # ---- phase 2: approval --------------------------------------------------
@@ -344,6 +370,17 @@ class EffectLedger:
 
     def rows_for(self, tool_call_id: str) -> list[LedgerRow]:
         return [r for r in self._rows if r.tool_call_id == tool_call_id]
+
+    def row_for(self, tool_call_id: str) -> LedgerRow:
+        """THE row a `tool_call_id` names, or `LedgerRefused` if there is none.
+
+        ADDED 2026-08-28 (round 5). `PRIMARY KEY (tenant_id, idempotency_key)`
+        (`spec/01-schema.md:367`) makes the row singular, so a caller that wants to
+        compare a call against its intent should not have to index a list and guess
+        what an empty one meant. `_index()` raises for the empty case, which is the
+        zero-row `UPDATE ... WHERE idempotency_key = $1` result.
+        """
+        return self._rows[self._index(tool_call_id)]
 
     def names(self) -> list[str]:
         return [r.tool_name for r in self._rows]
@@ -472,6 +509,17 @@ class PhoenixHarness:
         if self.__agent is not None:
             raise UninterceptableTool(
                 "the agent is already built; tools cannot be added behind its back")
+        # ADDED 2026-08-28 (round 5). This accepted the same name twice, appending a
+        # SECOND `ToolDefinition` and replacing the dispatcher: measured,
+        # `defs: ['send_email', 'send_email']` and the SECOND impl ran, while the
+        # single ledger row read `('send_email', 'succeeded')` -- so the ledger could
+        # not say which body executed. That is the key-uniqueness hole round 4 closed
+        # in `EffectLedger.append`, left open one layer up, in the registry the row's
+        # `tool_name` refers to.
+        if name in self._dispatch:
+            raise UninterceptableTool(
+                f"{name!r} is already registered; a second registration would "
+                "silently replace the body a ledger row names")
         self._defs.append(ToolDefinition(name=name, parameters_json_schema=schema))
         self._dispatch[name] = impl
 
@@ -481,6 +529,26 @@ class PhoenixHarness:
 
         Private, and name-mangled. Nothing in the public surface returns it; the
         gate asserts that by scanning every public attribute.
+
+        AMENDED 2026-08-28 (round 5), superseding — not erasing — the flat claim
+        above. The agent does not run this `ExternalToolset` directly.
+        `Agent.__init__` auto-injects `ToolSearch` and `PendingMessageDrainCapability`
+        (`agent/__init__.py:630`, `_AUTO_INJECT_CAPABILITY_TYPES` at `:3955-3958`,
+        `_inject_auto_capabilities` at `:3962-3970`) and `ToolSearch` ALWAYS wraps the
+        toolset in `ToolSearchToolset` (`capabilities/_tool_search.py:191-196`), whose
+        `call_tool` (`toolsets/_tool_search.py:435-437`) executes `search_tools`
+        LOCALLY rather than delegating to the wrapped toolset. Measured by patching
+        `ToolManager.for_run_step` and reading `r.toolset`: the toolset running inside
+        this agent is `ToolSearchToolset`, wrapping
+        `PreparedToolset -> CombinedToolset -> _AgentFunctionToolset -> ExternalToolset`,
+        and `[type(c).__name__ for c in agent._root_capability.capabilities]` is
+        `['ToolSearch', 'PendingMessageDrainCapability']` — two capabilities this
+        harness never asked for, while `_reject_sdk_surface` refuses `capabilities=`
+        by name. It emits no local tool here because no `ToolDefinition` we build sets
+        `defer_loading`, which is a fact about the SDK's bytes rather than about this
+        harness — so `capabilities/_tool_search.py` and `toolsets/_tool_search.py` are
+        now pinned, and `test_gate13_the_agent_runs_only_the_delegating_wrapper`
+        asserts both the wrapping and the fail-closed behaviour.
         """
         if self.__agent is None:
             toolset = ExternalToolset(self._defs) if self._defs else None
@@ -532,16 +600,25 @@ class PhoenixHarness:
             return self.lease
         lease = self._minted.get(run_id)
         if lease is None:
+            # CORRECTED 2026-08-28 (round 5): `expires_at` was minted from
+            # `self.clock()` -- the HARNESS's clock -- while `EffectLedger.claim`
+            # judges `l.expires_at > now()` against the LEDGER's clock.
+            # `spec/02-consistency.md:249` is one predicate evaluated inside one
+            # statement, so the mint and the check cannot disagree; with two
+            # independent clocks a harness whose only unusual argument was
+            # `clock=lambda: 1000.0` minted `expires_at=1060.0` against a ledger
+            # reading `time.monotonic()`, and every effect on it was refused
+            # forever. One clock now decides both halves.
             lease = RunLease(run_id=run_id, holder=f"worker:{run_id}",
                              fence_token=secrets.token_hex(8),
-                             expires_at=self.clock() + RUN_LEASE_SECONDS)
+                             expires_at=self.ledger.clock() + RUN_LEASE_SECONDS)
             self._minted[run_id] = lease
         return lease
 
     def intend(self, run_id: str, call: Any) -> None:
         """Phase 1: record intent BEFORE any dispatch decision."""
         self.ledger.append(LedgerRow(run_id, call.tool_call_id, call.tool_name,
-                                     json.dumps(call.args, sort_keys=True), "intended"))
+                                     args_json_of(call.args), "intended"))
 
     def dispatch(self, run_id: str, call: Any) -> Any:
         """Phases 2-5. Nothing reaches the impl except through here.
@@ -553,7 +630,41 @@ class PhoenixHarness:
             Nothing was dispatched, so the outcome is known.
           * a raise AFTER the body is entered   -> `indeterminate`. The customer
             system may or may not have been touched, and no one can tell.
+
+        ADDED 2026-08-28 (round 5) — THE IDENTITY CHECK, and the reason it is first.
+        Nothing here compared the call being executed against the row the ledger
+        holds for it. `intend()` writes `tool_name` and `args_json` from ITS `call`;
+        this method then looked the impl up by `call.tool_name` and claimed and
+        settled by `call.tool_call_id` from a DIFFERENT object. Reproduced at the
+        round-4 commit through this same public surface — `register('read_doc')`,
+        `register('charge_card')`, `intend('run-1', Call('tc-1','read_doc',
+        {'to':'benign'}))`, `dispatch('run-1', Call('tc-1','charge_card',
+        {'to':'victim'}))` — the CHARGE body executed (`['CHARGE:victim']`) and the
+        one ledger row settled `tc-1 read_doc {"to": "benign"} succeeded`. There WAS
+        a row; it was a row for a different effect, which is exactly what
+        `RESULT.md`'s "for that exact call" excludes. `spec/01-schema.md:403` settles
+        it: `idempotency_key = sha256_hex(canon({tenant, run, logical_step_path,
+        request_digest}))` puts the digest INSIDE the key, so a differing request is
+        a different effect, not the same one — and the run is in the key too, which
+        is why the run is checked here as well (`spec/01-schema.md:372`).
+
+        It runs BEFORE the policy verdict deliberately: a call the row does not
+        describe must not be able to move that row to `denied` or `abandoned`
+        either.
         """
+        row = self.ledger.row_for(call.tool_call_id)
+        if row.run_id != run_id:
+            raise LedgerRefused(
+                f"{call.tool_call_id!r} is an effect of run {row.run_id!r}, not "
+                f"{run_id!r}; the run is part of the key "
+                "(spec/01-schema.md:372, spec/01-schema.md:403)")
+        if row.tool_name != call.tool_name or row.args_json != args_json_of(call.args):
+            raise LedgerRefused(
+                f"the ledger row for {call.tool_call_id!r} describes "
+                f"{row.tool_name!r}{row.args_json}, not {call.tool_name!r}"
+                f"{args_json_of(call.args)}; a differing request_digest is a "
+                "DIFFERENT effect, not this one (spec/01-schema.md:403)")
+
         verdict = self.policy(call.tool_name, call.args or {})
         if verdict == "deny":
             self.ledger.deny(call.tool_call_id, error_code="policy_denied")

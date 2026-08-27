@@ -140,7 +140,19 @@ def test_gate0_pin_covers_the_native_tool_admission_path():
                 # from. Round 3 pinned sixteen files and neither of these, so the
                 # admission filter could be replaced wholesale with the pin still
                 # reporting "pin holds" and all 47 gates green.
-                "models/__init__.py", "profiles/__init__.py"):
+                "models/__init__.py", "profiles/__init__.py",
+                # ADDED 2026-08-28 (round 5). `_tool_execution.py` does not run tool
+                # bodies -- it imports `ToolManager` (`_tool_execution.py:15`) and
+                # delegates (`:671`, `:958`). The body is invoked one level down, at
+                # `tool_manager.py:1008` inside `_raw_execute` (`:994`), which is
+                # where `ExternalToolset.call_tool`'s unconditional
+                # `NotImplementedError` (`toolsets/external.py:46`) either propagates
+                # or does not. It sat in `_coverage_frontier`, whose justification
+                # ("none of which any assertion here touches") was false for it: in a
+                # scratch SDK copy, `except NotImplementedError: tool_result = '...'`
+                # at that line turned the refusal fail-OPEN and the pin still printed
+                # "pin holds: 19 files" with 53 gates green.
+                "tool_manager.py"):
         assert rel in verify_pin.pinned(), f"{rel} decides behaviour and is unpinned"
 
 
@@ -265,6 +277,37 @@ def test_gate2_negative_control_sdk_owned_tool_executes_unledgered(chan, led):
     assert led.rows == [], "and the ledger never saw the effect -- the bypass, shown"
 
 
+def test_gate2_a_duplicate_registration_is_refused(chan, led):
+    """One name, one body -- because the ledger row names only the NAME.
+
+    ADDED 2026-08-28 (round 5). `register()` accepted the same name twice with no key
+    check, appending a second `ToolDefinition` and replacing the dispatcher.
+    Measured at the round-4 commit: `defs: ['send_email', 'send_email']` and, on
+    `run()` + `resolve()`, `fired: ['B']` -- the SECOND impl ran, the first was
+    discarded silently, and the row read `('send_email', 'succeeded')`, so the ledger
+    could not say which body executed. That is the key-uniqueness defect round 4
+    closed inside `EffectLedger.append`, one layer up in the registry the row's
+    `tool_name` refers to.
+    """
+    h = harness(led)
+    h.register("send_email", SCHEMA, lambda to: chan.touch(f"A:{to}"))
+    with pytest.raises(UninterceptableTool, match="already registered"):
+        h.register("send_email", SCHEMA, lambda to: chan.touch(f"B:{to}"))
+
+    assert [d.name for d in h._defs] == ["send_email"], \
+        "the refused registration still declared a second tool to the model"
+
+    # VACUITY CONTROL: a DIFFERENT name still registers, so the refusal above is a
+    # key comparison and not a blanket refusal to register a second tool.
+    h.register("delete_row", SCHEMA, lambda to: chan.touch(f"C:{to}"))
+    assert [d.name for d in h._defs] == ["send_email", "delete_row"]
+
+    # ...and the body that runs is the one that was accepted.
+    turn = h.run("email")
+    h.resolve("run-1", turn.requests)
+    assert sorted(chan.lines) == ["A:a", "C:a"]
+
+
 # ============ GATE 3: exactly one ledger row per call, intent before act ===
 def test_gate3_ledger_row_precedes_execution(chan, led):
     order: list[str] = []
@@ -286,6 +329,62 @@ def test_gate3_ledger_row_precedes_execution(chan, led):
     assert chan.lines == ["send_email:a"]
     rows = led2.rows_for(turn.calls[0].tool_call_id)
     assert len(rows) == 1 and rows[0].status == "succeeded"
+
+
+class Call:
+    """A pending call, the shape `DeferredToolRequests.calls` yields.
+
+    Used where a gate must drive `intend()` and `dispatch()` with DIFFERENT calls,
+    which the SDK's own object cannot express (it is one object, reused).
+    """
+
+    def __init__(self, tool_call_id, tool_name, args):
+        self.tool_call_id = tool_call_id
+        self.tool_name = tool_name
+        self.args = args
+
+
+def test_gate3_dispatch_of_a_call_the_row_does_not_describe_is_refused(chan, led):
+    """The invariant says "for that exact call". This asserts the word *exact*.
+
+    ADDED 2026-08-28 (round 5). `dispatch()` never compared the call it was about to
+    execute against the row the ledger holds for it: it looked the impl up by
+    `call.tool_name` and claimed and settled by `call.tool_call_id`, from an object
+    `intend()` had never seen. Reproduced at the round-4 commit through these same
+    three public methods -- the ones gates 9 and 11 drive directly -- the CHARGE body
+    executed and the single row settled `tc-1 read_doc {"to": "benign"} succeeded`.
+    There was a row, and it was a row for a DIFFERENT effect.
+
+    `spec/01-schema.md:403` is why that is not a technicality:
+    `idempotency_key = sha256_hex(canon({tenant, run, logical_step_path,
+    request_digest}))` puts the digest INSIDE the key, so a differing request is a
+    different effect and cannot be settled under this one's key.
+    """
+    h = harness(led)
+    h.register("read_doc", SCHEMA, lambda to: chan.touch(f"READ:{to}"))
+    h.register("charge_card", SCHEMA, lambda to: chan.touch(f"CHARGE:{to}"))
+
+    h.intend("run-1", Call("tc-1", "read_doc", {"to": "benign"}))
+
+    # A different TOOL under the same call id.
+    with pytest.raises(LedgerRefused, match="describes 'read_doc'"):
+        h.dispatch("run-1", Call("tc-1", "charge_card", {"to": "victim"}))
+    assert chan.lines == [], "a body ran against a row naming another effect"
+    assert led.rows_for("tc-1")[0].status == "intended", \
+        "the row must not be claimed or settled by a call it does not describe"
+
+    # The same tool with different ARGUMENTS is equally a different effect.
+    with pytest.raises(LedgerRefused, match="DIFFERENT effect"):
+        h.dispatch("run-1", Call("tc-1", "read_doc", {"to": "somewhere-else"}))
+    assert chan.lines == []
+    assert led.rows_for("tc-1")[0].status == "intended"
+
+    # VACUITY CONTROL: the MATCHING call still dispatches, so the two refusals
+    # above are the identity comparison and not a blanket refusal to dispatch.
+    assert h.dispatch("run-1", Call("tc-1", "read_doc", {"to": "benign"})) == \
+        "did:READ:benign"
+    assert chan.lines == ["READ:benign"]
+    assert led.rows_for("tc-1")[0].status == "succeeded"
 
 
 def test_gate3_settling_an_unledgered_call_is_refused(led):
@@ -531,17 +630,36 @@ def test_gate6_negative_control_a_new_native_tool_subclass_turns_the_gate_red(tm
 def test_gate6_native_tools_never_enter_the_execution_pipeline():
     """WHY the refusal is structural, asserted against the SDK's own source.
 
-    `_tool_execution.py` -- the only module that runs tool bodies -- contains no
-    reference to `NativeToolCallPart`. Native tools arrive as transcript parts from
-    the provider; they are never dispatched locally. So there is no local body for
-    `ExternalToolset` to withhold, which is why this is a structural impossibility
-    rather than a policy choice.
+    `_tool_execution.py` contains no reference to `NativeToolCallPart`. Native tools
+    arrive as transcript parts from the provider; they are never dispatched locally.
+    So there is no local body for `ExternalToolset` to withhold, which is why this is
+    a structural impossibility rather than a policy choice.
+
+    AMENDED 2026-08-28 (round 5), superseding — not erasing — the premise this
+    docstring carried, which called `_tool_execution.py` "the only module that runs
+    tool bodies". It is not: it ORCHESTRATES tool execution and the body is invoked
+    one level down, at `tool_manager.py:1008` (`await self.toolset.call_tool(...)`
+    inside `_raw_execute`, `:994`), which `_tool_execution.py:15` imports and
+    `:671`/`:958` delegate to. Round 4 pinned neither that module nor this
+    assertion's scope: in a scratch copy of the SDK (live site-packages untouched,
+    rule 7), wrapping that call in
+    `except NotImplementedError: tool_result = 'SILENTLY FABRICATED BY THE SDK'`
+    turned `ExternalToolset`'s fail-closed refusal fail-OPEN inside the pipeline, and
+    `verify_pin.py` still printed "pin holds: 19 files" while `pytest test_gate.py -q`
+    printed "53 passed". Both modules are now pinned and both are grepped here.
     """
-    src = verify_pin.sdk_root() / "_tool_execution.py"
-    body = src.read_text()
-    assert "NativeToolCallPart" not in body, \
-        "native tools now enter the execution pipeline -- re-examine the refusal"
-    assert "'external'" in body, "sanity: external kinds ARE handled here"
+    bodies = {}
+    for rel in ("_tool_execution.py", "tool_manager.py"):
+        assert rel in verify_pin.pinned(), \
+            f"{rel} is grepped by this gate and must be pinned by digest"
+        bodies[rel] = (verify_pin.sdk_root() / rel).read_text()
+    for rel, body in bodies.items():
+        assert "NativeToolCallPart" not in body, \
+            f"native tools now enter {rel} -- re-examine the refusal"
+    assert "'external'" in bodies["_tool_execution.py"], \
+        "sanity: external kinds ARE handled here"
+    assert "self.toolset.call_tool(" in bodies["tool_manager.py"], \
+        "sanity: tool_manager.py is still where the body is invoked"
 
 
 def test_gate6_caller_declared_flag_is_also_refused(led):
@@ -970,6 +1088,44 @@ def test_gate12_a_second_intent_for_the_same_call_is_a_no_op(chan, led):
     assert len(led.rows_for("tc-other")) == 1
 
 
+def test_gate12_one_key_spans_two_runs_and_the_second_run_cannot_dispatch(chan, led):
+    """The PRIMARY KEY has no `run_id` in it, and the dispatch says so out loud.
+
+    ADDED 2026-08-28 (round 5). The round-4 conflict guard was
+    `r.tool_call_id == row.tool_call_id AND r.run_id == row.run_id`, i.e.
+    `UNIQUE (tenant_id, idempotency_key, run_id)` (`spec/01-schema.md:372`) -- not the
+    `PRIMARY KEY (tenant_id, idempotency_key)` (`spec/01:367`) its own docstring
+    quoted, and not the `ON CONFLICT (tenant_id, idempotency_key) DO NOTHING`
+    conflict target of `spec/02-consistency.md:202`, which contains no `run_id`.
+    Measured at that commit: intending one call under two runs left TWO rows for one
+    key, the second permanently unreachable at `intended`; and with a caller-supplied
+    lease, `dispatch('run-2', call)` EXECUTED the effect and recorded it against
+    run-1's row, leaving run-2 executed-but-`intended` (`spec/01:509`: "nothing
+    returns to `intended`").
+    """
+    h = harness(led)
+    h.register("send_email", SCHEMA, lambda to: chan.touch(f"send_email:{to}"))
+    call = Call("tc-1", "send_email", {"to": "a"})
+
+    h.intend("run-1", call)
+    h.intend("run-2", call)
+    rows = led.rows_for("tc-1")
+    assert len(rows) == 1, f"one idempotency_key, two rows (spec/01:367): {rows}"
+    assert rows[0].run_id == "run-1", "DO NOTHING kept the first row, as specified"
+
+    # The surviving row belongs to another run, so run-2 may not execute against it.
+    with pytest.raises(LedgerRefused, match="is an effect of run 'run-1'"):
+        h.dispatch("run-2", call)
+    assert chan.lines == [], "run-2 executed an effect recorded against run-1"
+    assert [(r.run_id, r.status) for r in led.rows] == [("run-1", "intended")], \
+        "the wrong run's row was claimed or settled"
+
+    # VACUITY CONTROL: the run that owns the row still dispatches.
+    assert h.dispatch("run-1", call) == "did:send_email:a"
+    assert [(r.run_id, r.status) for r in led.rows] == [("run-1", "succeeded")]
+    assert chan.lines == ["send_email:a"]
+
+
 def test_gate12_an_expired_run_lease_stops_the_whole_dispatch(chan, led):
     """End to end, through the harness: no lease, no effect, no verdict invented."""
     clock = lambda: 1000.0  # noqa: E731
@@ -984,6 +1140,24 @@ def test_gate12_an_expired_run_lease_stops_the_whole_dispatch(chan, led):
 
     assert chan.lines == [], "a fenced-out worker reached the customer system"
     assert [r.status for r in led.rows] == ["intended"]
+
+    # ADDED 2026-08-28 (round 5). The two clocks above are pinned to the SAME lambda
+    # by hand, which was the symptom: `_lease_for()` minted `expires_at` from
+    # `PhoenixHarness.clock` while `claim()` judged it against `EffectLedger.clock`,
+    # two independent attributes where `spec/02-consistency.md:249` has one `now()`
+    # inside one statement. Measured before the fix: a harness whose only unusual
+    # argument was `clock=lambda: 1000.0`, against a ledger reading
+    # `time.monotonic()`, minted `expires_at=1060.0` and every dispatch raised
+    # "the run lease does not authorise this claim". So: pin ONLY the harness clock,
+    # leave the ledger on real time, and the mint must still authorise the claim.
+    unpinned = EffectLedger()          # real `time.monotonic()`
+    h2 = harness(unpinned, clock=lambda: 1000.0)
+    h2.register("send_email", SCHEMA, lambda to: chan.touch(f"second:{to}"))
+    turn2 = h2.run("email")
+    h2.resolve("run-1", turn2.requests)
+    assert [r.status for r in unpinned.rows] == ["succeeded"], \
+        "the lease was minted on one clock and judged on another"
+    assert chan.lines == ["second:a"]
 
 
 def test_gate12_the_approval_phase_is_the_spec_one(led):
@@ -1261,6 +1435,109 @@ def test_gate13_negative_control_exposing_the_agent_lets_the_override_through(le
         "control is broken: the override delivered nothing, so the sealed " \
         "harness's empty recorder would prove nothing"
     assert led.rows == [], "and not one ledger row for a vendor-hosted tool"
+
+
+def test_gate13_the_agent_runs_only_the_delegating_wrapper(chan, led, monkeypatch):
+    """The toolset the SDK RUNS is not the one the harness built.
+
+    ADDED 2026-08-28 (round 5). `__build`'s docstring said "an agent whose tools are
+    all external, so the SDK cannot execute any" and `RESULT.md` said "the SDK is
+    given no way to run it" -- both true of the `ExternalToolset` the harness
+    constructs, and neither a statement about what the SDK puts around it.
+    `Agent.__init__` AUTO-INJECTS `ToolSearch` and `PendingMessageDrainCapability`
+    (`agent/__init__.py:630`, `_AUTO_INJECT_CAPABILITY_TYPES` at `:3955-3958`), and
+    `ToolSearch` ALWAYS wraps the toolset in `ToolSearchToolset`
+    (`capabilities/_tool_search.py:191-196`) whose `call_tool`
+    (`toolsets/_tool_search.py:435-437`) runs `search_tools` LOCALLY instead of
+    delegating -- while `_reject_sdk_surface` refuses a caller's `capabilities=` by
+    name, on the stated ground that it delivers executable LOCAL bodies.
+
+    It fails closed here, and the reason is a fact about the SDK's bytes rather than
+    about this harness: no `ToolDefinition` the harness builds sets `defer_loading`,
+    so the wrapper emits no `search_tools` tool. That is why both deciding modules
+    are now pinned -- asserted first, so this gate cannot be green against bytes
+    nobody checked.
+
+    Rule 7: `ToolManager.for_run_step` is patched through `monkeypatch`, which
+    restores it, and nothing outside this test's own objects is written.
+    """
+    from pydantic_ai.tool_manager import ToolManager
+
+    for rel in ("capabilities/_tool_search.py", "toolsets/_tool_search.py"):
+        assert rel in verify_pin.pinned(), \
+            f"{rel} decides what wraps the boundary toolset and is unpinned"
+
+    seen_toolsets: list[object] = []
+    original = ToolManager.for_run_step
+
+    async def recording(self, ctx):
+        manager = await original(self, ctx)
+        seen_toolsets.append(manager.toolset)
+        return manager
+
+    monkeypatch.setattr(ToolManager, "for_run_step", recording)
+
+    seen_native: list[tuple] = []
+    seen_fn: list[list[str]] = []
+
+    def recorder(messages, info: AgentInfo):
+        seen_native.append(tuple(info.model_request_parameters.native_tools))
+        seen_fn.append([t.name for t in info.function_tools])
+        return ModelResponse(parts=[TextPart("done")])
+
+    h = harness(led, model=FunctionModel(recorder))
+    h.register("send_email", SCHEMA, lambda to: chan.touch(f"send_email:{to}"))
+    h.run("email")
+
+    assert seen_toolsets, "the recorder never ran -- everything below would be vacuous"
+    outer = seen_toolsets[0]
+    assert type(outer).__name__ == "ToolSearchToolset", \
+        f"the SDK's wrapping changed: it now runs {type(outer).__name__}"
+
+    # ...and the wrapper chain bottoms out in the toolset THIS harness built, which
+    # is identified by the very `_defs` list object it was constructed from.
+    def flatten(ts, out):
+        out.append(ts)
+        wrapped = getattr(ts, "wrapped", None)
+        if wrapped is not None:
+            flatten(wrapped, out)
+        for sub in getattr(ts, "toolsets", []) or []:
+            flatten(sub, out)
+        return out
+
+    externals = [t for t in flatten(outer, []) if isinstance(t, ExternalToolset)]
+    assert len(externals) == 1, f"expected one ExternalToolset, got {externals}"
+    assert externals[0].tool_defs is h._defs, \
+        "the ExternalToolset at the bottom is not the one the harness built"
+
+    # The wrapper emits no tool of its own, so the model is shown only ours.
+    assert seen_fn and all(names == ["send_email"] for names in seen_fn), \
+        f"the SDK's wrapper added a tool the harness never declared: {seen_fn}"
+    assert all(nt == () for nt in seen_native)
+
+    # FAIL-CLOSED CONTROL: a model that CALLS the wrapper's local tool gets nowhere.
+    # `ToolSearchToolset.call_tool` would run `_search_tools` in-SDK if the tool were
+    # emitted; it is not, so the call cannot be routed at all.
+    led2 = EffectLedger()
+
+    def calls_search_tools(messages, info: AgentInfo):
+        if not any(isinstance(pt, ToolCallPart) for m in messages
+                   for pt in getattr(m, "parts", [])):
+            return ModelResponse(parts=[ToolCallPart(
+                "search_tools", {"query": "email"}, tool_call_id="ts-1")])
+        return ModelResponse(parts=[TextPart("done")])
+
+    h2 = harness(led2, model=FunctionModel(calls_search_tools))
+    h2.register("send_email", SCHEMA, lambda to: chan.touch(f"send_email:{to}"))
+    turn2 = h2.run("find a tool")
+
+    # Vacuity control for the control: the model really did call it and was refused,
+    # so the empty side channel is a refusal rather than a call that never happened.
+    transcript = [str(pt) for m in turn2.messages for pt in getattr(m, "parts", [])]
+    assert any("Unknown tool name: 'search_tools'" in t for t in transcript), \
+        f"the wrapper's local tool was never actually called: {transcript}"
+    assert chan.lines == [], "the SDK-chosen wrapper reached a customer system"
+    assert led2.rows == [], "an in-SDK tool ran with no ledger row"
 
 
 # ============ RULE 7: the mutation runner owns what it mutates =============

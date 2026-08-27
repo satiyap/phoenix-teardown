@@ -1,6 +1,6 @@
 # Spike 06 — tool interception on Pydantic AI
 
-**Gate assertions: 53** — the number `README.md` sums. Counts only tests that assert THIS spike's claims through its public boundary; vendored upstream suites are evidence, not our verdict (`VERIFICATION-RULES.md` rule 6).
+**Gate assertions: 57** — the number `README.md` sums. Counts only tests that assert THIS spike's claims through its public boundary; vendored upstream suites are evidence, not our verdict (`VERIFICATION-RULES.md` rule 6).
 
 **Verdict: PASS — OQ-043 is answered, and the mechanism is stronger than the one specified.**
 The PASS covers the tool boundary and the effect lifecycle only. Nested agents (S9),
@@ -48,9 +48,33 @@ in-process caller requires the process split of **OQ-056**.
 > plus stale counts and a wrong `external.py` line number propagated across nine sites.
 > Assertions 47 → **53**. Mutations 11 → **14**. Pin 16 → **19** files.
 
+> **Revised 2026-08-28 (round 5) after review returned FAIL a fourth time.** Eleven defects, all
+> closed: **(1)** `dispatch()` never compared the call it was executing against the ledger row —
+> intending `read_doc {"to":"benign"}` and dispatching `charge_card {"to":"victim"}` under one
+> `tool_call_id` ran the **charge** and settled the **read** row, so "for that exact call" was
+> not what the code meant; **(2)** the pin covered nineteen files while the tool body is invoked
+> at `tool_manager.py:1008`, which was **unpinned** and justified as a frontier module "no
+> assertion here touches" — a scratch-copy edit turning `ExternalToolset`'s refusal fail-OPEN
+> there left `pin holds: 19 files` and 53 gates green; **(3)** the agent does not run the
+> harness's `ExternalToolset` directly — `Agent.__init__` auto-injects `ToolSearch`, which
+> **always** wraps it in `ToolSearchToolset`, a toolset with a local execution branch, from two
+> unpinned modules; **(4)** `register()` accepted the same name twice, replacing the body a
+> ledger row names; **(5)** the round-4 intent guard implemented `UNIQUE (tenant_id,
+> idempotency_key, run_id)` while quoting the `PRIMARY KEY` — one key could span two runs, and
+> with a caller-supplied lease run-2's dispatch executed and settled **run-1's** row;
+> **(6)** the run lease was minted on `PhoenixHarness.clock` and judged on `EffectLedger.clock`,
+> two clocks where `spec/02:249` has one; **(7)** `agent/__init__.py:1139` — an `@overload` stub
+> — was cited for `deferred_tool_results=` at four sites; **(8)** `:1849` was cited for a
+> `UserError` raise that is at `:1861-1862`; **(9-11)** `claimed_at`, the fence token's
+> integer-monotonicity and the SDK's wrapper were undisclosed simplifications, plus a stale
+> assertion count in `Makefile:50`.
+> Assertions 53 → **57**. Mutations 14 → **19**. Pin 19 → **22** files.
+
 **Date:** 2026-08-28 · **SDK:** `pydantic-ai-slim == 2.35.0` (PyPI), verified byte-identical to
-the read source at `b48ee38` across **19** files *(amended 2026-08-28: was "16"; round 4 added
-`models/__init__.py`, `profiles/__init__.py` and `capabilities/__init__.py`)*.
+the read source at `b48ee38` across **22** files *(amended 2026-08-28: was "16", then "19";
+round 4 added `models/__init__.py`, `profiles/__init__.py` and `capabilities/__init__.py`, and
+round 5 added `tool_manager.py` — where the body is actually invoked — plus
+`capabilities/_tool_search.py` and `toolsets/_tool_search.py`)*.
 
 ## Invariant, stated first
 
@@ -87,7 +111,7 @@ shape Phoenix needs, as a first-class supported mechanism:
 | `ExternalToolset.call_tool` raises `NotImplementedError('External tools cannot be called directly')` **unconditionally** | `toolsets/external.py:46` | a registered tool with **no executable body inside the SDK** |
 | `get_tools` stamps `kind='external'` | `toolsets/external.py:36` | the model still sees the tool, so behaviour is unchanged |
 | `DeferredToolRequests` as an `output_type` **ends the run** and returns pending `ToolCallPart`s | `_deferred.py:27,37` | the `ToolCall` frame of `spec/07`, natively |
-| `deferred_tool_results=` supplies platform results on resume | `agent/__init__.py:1139` | the `ToolResult` frame, natively |
+| `deferred_tool_results=` supplies platform results on resume | `agent/__init__.py:1189` *(citation corrected 2026-08-28: `:1139` is inside the first `@overload` stub of `Agent.iter` — `@overload` at `:1132`, `def iter(` at `:1133`, body `...`; the implementation is `@asynccontextmanager async def iter(` at `:1183`, whose `deferred_tool_results` parameter is at `:1189`. Same `@overload`-stub error OQ-043 records correcting for `:2399`.)* | the `ToolResult` frame, natively |
 | `ApprovalRequiredToolset` raises `ApprovalRequired` **before** `super().call_tool` | `toolsets/approval_required.py:29` | fail-closed approval, natively |
 
 **So the boundary is a TOOLSET, not a decorator.** Nothing is disabled, wrapped, forked or
@@ -136,10 +160,12 @@ side channel stays empty — but that was not safe to assume.
 | # | Gate | Result |
 |---|---|---|
 | 0 | the side-channel oracle detects a real effect | control |
-| 0 | **the pin**: 19 SDK digests *(amended 2026-08-28: was 16)*, including `models/__init__.py` and `profiles/__init__.py` — where native-tool **admission** is decided — and `capabilities/__init__.py`; coverage derived from the spike's own imports by `ast`, **ancestor package `__init__.py` files included**; the one-level transitive frontier is recorded and compared, so a pinned file growing a new import fails rather than widening the unexamined surface; a planted digest, a missing file, an empty pin, a doctored frontier and a mismatched pin aborting **collection** are each asserted | PASS |
+| 0 | **the pin**: 22 SDK digests *(amended 2026-08-28: was 16, then 19)*, including `models/__init__.py` and `profiles/__init__.py` — where native-tool **admission** is decided — , `capabilities/__init__.py`, and *(added 2026-08-28, round 5)* `tool_manager.py` — the module that actually invokes the body, `await self.toolset.call_tool(...)` at `:1008` inside `_raw_execute` — plus `capabilities/_tool_search.py` and `toolsets/_tool_search.py`, which decide what wraps the boundary toolset; coverage derived from the spike's own imports by `ast`, **ancestor package `__init__.py` files included**; the one-level transitive frontier is recorded and compared, so a pinned file growing a new import fails rather than widening the unexamined surface; a planted digest, a missing file, an empty pin, a doctored frontier and a mismatched pin aborting **collection** are each asserted | PASS |
 | 1 | zero registered tools ⇒ no executable path, no ledger rows | PASS |
 | 2 | a registered tool ⇒ run **ends** on the deferred call, body never runs | PASS |
+| 2b | *(added 2026-08-28)* a **duplicate `register()`** is refused: one name, one body, because the ledger row names only the name | PASS |
 | 3 | the ledger row is written **before** execution, exactly one per call | PASS |
+| 3b | *(added 2026-08-28)* **the word *exact***: `dispatch()` refuses a call the row does not describe — a different `tool_name`, or different arguments, under the same `tool_call_id` — because `spec/01-schema.md:403` puts the `request_digest` inside the key | PASS |
 | 4 | **resume** consumes the platform result without re-executing the body | PASS |
 | 5 | `ApprovalRequired` halts before execution | PASS |
 | 6 | row 30c is executable: **every `AbstractNativeTool` subclass the SDK defines** is instantiated with generated minimal arguments and refused by name; a class that cannot be built is a HARD FAIL; the refusal list is compared to the SDK registry **in both directions** | PASS |
@@ -148,8 +174,9 @@ side channel stays empty — but that was not safe to assume.
 | 9 | a hallucinated tool name finds no dispatcher ⇒ `abandoned`, never `failed` | PASS |
 | 10 | three calls in one step ⇒ three distinct rows, no `tool_call_id` collision | PASS |
 | 11 | a raise **after** dispatch ⇒ `indeterminate`; a raise **before** dispatch ⇒ `failed` with an error code — including *(added 2026-08-28)* arguments that do not **bind** to the impl, the branch a model actually reaches | PASS |
-| 12 | **the ledger is `spec/01` `effect_status` and `spec/02`'s phases**: eight statuses and no others; settle requires `claimed` **and** owner **and** token; claim requires an unexpired **run lease** *and, added 2026-08-28, the **fence token** that lease carries (`spec/02:248`)*; a duplicate intent is `ON CONFLICT DO NOTHING`, never a second row *(added 2026-08-28)*; approval, denial and abandonment move only unclaimed rows; the `effect_claim_fields_together` CHECK holds | PASS |
+| 12 | **the ledger is `spec/01` `effect_status` and `spec/02`'s phases**: eight statuses and no others; settle requires `claimed` **and** owner **and** token; claim requires an unexpired **run lease** *and, added 2026-08-28, the **fence token** that lease carries (`spec/02:248`)*; a duplicate intent is `ON CONFLICT DO NOTHING`, never a second row *(added 2026-08-28; **corrected 2026-08-28, round 5** — that guard was written as `UNIQUE (tenant_id, idempotency_key, run_id)` (`spec/01:372`), not the `PRIMARY KEY (tenant_id, idempotency_key)` (`spec/01:367`) it quoted, so the claim was false ACROSS runs: one key left two rows, the second permanently unreachable at `intended`. The guard is now the primary key exactly, and `dispatch()` refuses to execute an effect recorded against another run)*; approval, denial and abandonment move only unclaimed rows; the `effect_claim_fields_together` CHECK holds | PASS |
 | 13 | **the structural refusal**: no public name on the harness or its `Turn` is, or returns, an `Agent`; `native_tools=`/`toolsets=`/`tools=`/`capabilities=` are refused at the door *(`capabilities=` added 2026-08-28 — the third such surface, and the one that also carries executable **local** bodies)*; a `FunctionModel` recorder is handed an **empty** native-tool list on the buffered, resume and streaming paths | PASS |
+| 13c | *(added 2026-08-28)* **the agent runs only the delegating wrapper**: the toolset the SDK runs is `ToolSearchToolset` (auto-injected `ToolSearch`, `agent/__init__.py:630`), whose chain bottoms out in the harness's own `ExternalToolset`; the model is shown `['send_email']` and nothing else, and a `FunctionModel` that calls `search_tools` is refused with an empty side channel and an empty ledger | PASS |
 | 13b | **the stated limitation**, asserted rather than left absent *(added 2026-08-28)*: `h._PhoenixHarness__build()` **does** return the `Agent`, and `override(toolsets=[...])` on it runs a body with zero ledger rows. Name mangling is not access control | PASS (as a limitation) |
 
 ## The oracle is independent (rule 5)
@@ -192,12 +219,15 @@ drift together; import statements cannot.
 | a second `resolve()` of the same call ⇒ **one** row, still `succeeded`, body not re-run; a different key still appends | `spec/02:202`'s `ON CONFLICT ... DO NOTHING`, and the guard is a key comparison rather than a blanket refusal |
 | `h._PhoenixHarness__build()` + `override(toolsets=[...])` ⇒ the body **runs**, `led.rows == []` | the in-process limitation is real and recorded, not assumed away |
 | a `SloppyLedger` that skips `indeterminate` ⇒ gate 11 fails | gate 11 discriminates between the two behaviours |
+| *(added 2026-08-28)* intend `read_doc {"to":"benign"}`, dispatch `charge_card {"to":"victim"}` under one call id ⇒ refused, row still `intended`, side channel empty; **and the matching call still dispatches** | the identity check is a comparison, not a blanket refusal |
+| *(added 2026-08-28)* one key intended under two runs ⇒ **one** row; `dispatch('run-2', ...)` refused, nothing executed; **and `run-1` still dispatches** | `spec/01:367`'s PRIMARY KEY, and the run checked where the key does not carry it |
+| *(added 2026-08-28)* a `FunctionModel` that calls the auto-injected wrapper's `search_tools` ⇒ `RetryPromptPart: "Unknown tool name"`, `chan.lines == []`, `led.rows == []` | the SDK's own wrapper is fail-closed here, asserted rather than assumed |
 
 ### Harness mutations — GENERATED, not asserted
 
 ```
 $ ../../.venv/bin/python mutate.py --check
-baseline: 53 passed, 0 failed (in /var/folders/.../spike06-mutations-aaqbmpjs, NOT the live tree)
+baseline: 57 passed, 0 failed (in /var/folders/.../spike06-mutations-aaqbmpjs, NOT the live tree)
 ...
 the live tree is byte-identical to where it started
 every mutation is caught by at least one gate
@@ -205,19 +235,24 @@ every mutation is caught by at least one gate
 
 | Mutation | Removes | Gates broken |
 |---|---|---|
-| dispatch before ledgering | intent no longer precedes the effect | **10** |
+| dispatch before ledgering | intent no longer precedes the effect | **11** |
 | ignore the policy verdict | a denied call executes anyway | **1** |
 | allow uninterceptable registration | `spec/08` row 30c is unenforced | **2** |
-| **route tools through `FunctionToolset`** | **the real bypass: the SDK gets an executable body** | **14** |
+| **route tools through `FunctionToolset`** | **the real bypass: the SDK gets an executable body** | **16** |
 | **expose the `Agent`** | **the structural refusal: a caller can `override(native_tools=...)`** | **1** |
 | accept caller-supplied `native_tools` | vendor-hosted tools reach the model unledgered | **1** |
-| drop the claim before dispatch | an effect is dispatched unclaimed | **11** |
+| drop the claim before dispatch | an effect is dispatched unclaimed | **14** |
 | **drop the run-lease predicate** | a worker whose run was reclaimed can still claim and dispatch | **4** |
 | drop the settle fence | a stale worker can overwrite the claim holder's verdict | **1** |
 | settle `indeterminate` as `intended` | a crashed effect looks like one that never started | **1** |
 | **bind arguments inside the dispatch `try`** *(added 2026-08-28)* | a call that never dispatched is reported as uncertain | **1** |
-| **drop the intent conflict guard** *(added 2026-08-28)* | the ledger has no primary key: one call, two rows | **1** |
+| **drop the intent conflict guard** *(added 2026-08-28)* | the ledger has no primary key: one call, two rows | **2** |
 | **drop the fence-token comparison** *(added 2026-08-28)* | a worker holding a superseded fence token can still claim | **1** |
+| **drop the intent/dispatch identity check** *(added 2026-08-28, round 5)* | a body runs against a ledger row naming a **different** tool and arguments | **1** |
+| **drop the dispatch run check** *(added 2026-08-28, round 5)* | one run dispatches and settles an effect recorded against another run | **1** |
+| **make the intent guard the SECONDARY unique constraint** *(added 2026-08-28, round 5)* | one `idempotency_key` spans two runs: two rows, the second unreachable | **1** |
+| **allow a duplicate registration** *(added 2026-08-28, round 5)* | a second `register()` silently replaces the body a ledger row names | **1** |
+| **mint the run lease on the harness clock** *(added 2026-08-28, round 5)* | the lease is minted on one clock and judged on another (`spec/02:249`) | **1** |
 | call a raise **after** dispatch `failed` | an effect of unknown outcome is reported as one that provably did not happen | **2** |
 
 `--check` exits non-zero if any mutation survives.
@@ -236,7 +271,7 @@ Proved, not asserted — mutations and six gate runs, concurrently:
 
 ```
 $ (python mutate.py --check &) ; for i in 1..6; do make spike06; done
-GATE1..6_EXIT=0   (53 passed each)
+GATE1..6_EXIT=0   (57 passed each)
 MUT_EXIT=0        (every mutation caught; live tree unchanged)
 ```
 
@@ -256,13 +291,15 @@ remaining gap, so none of it is discovered later as a surprise:
 | 6 | policy denial moves `intended → denied` | `denied` moves an `awaiting_approval` row — an approver refused, or the approval expired (`spec/02:311`) | a deliberate divergence: Phoenix's synchronous policy verdict has no human, so the row never reaches `awaiting_approval`. Both routes end at a never-claimed `denied` row, which is what the invariant needs. |
 | 7 | no sweeper | `effect_ledger_stuck` indexes `status='claimed'` by `lease_expires_at`, so an expired claim becomes `indeterminate` (`spec/01:389`) | `indeterminate` is only ever written **by the dispatch path** here. The lease-expiry route to `indeterminate` is unverified. |
 | 8 | `abandoned` is written only for "no platform dispatcher" | also for "the run ended, or the intent was superseded" (`spec/02:321`) | the other route has no code and no test. |
-| 9 | `completed_at` is `time.monotonic()`; no `attempt`, `request_digest`, `result_ref` indirection | `spec/01:344-364` | the CHECK relating `completed_at` to `succeeded`/`failed` **is** enforced; the columns themselves are stand-ins. |
+| 9 | `completed_at` is `time.monotonic()`; no `claimed_at`, `attempt`, `request_digest`, `result_ref` indirection | `spec/01:344-364` | the CHECK relating `completed_at` to `succeeded`/`failed` **is** enforced; the columns themselves are stand-ins. *(added 2026-08-28: `claimed_at` (`spec/01:362`) is absent entirely — `LedgerRow` does not carry it and `claim()` writes only `lease_expires_at` — so the `effect.indeterminate` payload of `spec/04-events.md:87`, `{idempotency_key, claimed_at}`, cannot be emitted from this ledger.)* |
 | 10 | `LedgerRefused` is raised | the real refusal is a **zero-row `UPDATE`** | a caller that ignored the SQL row count would proceed; here it cannot. The in-process version is **stricter** than the deployed one, which is the direction that hides bugs rather than creating them. |
 | 11 | single-threaded | — | no two workers ever race for one claim. |
 | 12 | the run lease is **minted by the claimant** on the default dispatch route (`_lease_for`) | a `run_leases` row written by whoever won the run | *(added 2026-08-28)* on that route predicate (b) cannot fail: `dispatch` sets `owner = lease.holder` and passes `fence = lease.fence_token` from the lease it just minted, so run-id, holder and fence all hold **by construction**. The predicate is load-bearing only for a caller that volunteers a lease — which is what every negative control does, explicitly. Proposed **OQ-057**. |
 | 13 | the boundary is enforced against a **cooperating** in-process caller | — | *(added 2026-08-28)* `h._PhoenixHarness__build()` returns the `Agent` through the ordinary name-mangling idiom — the same one `LeakyHarness` and `mutate.py` use — and `override(native_tools=...)` / `override(toolsets=...)` on it deliver a native tool to the model, or run a registered body, with **zero** ledger rows. `agents_reachable_from` skips every `_`-prefixed name, so gate 13's scan is a statement about PUBLIC names only. Name mangling is not access control. Asserted as a limitation by `test_gate13_the_mangled_accessor_is_a_known_limitation`; a hostile-caller boundary needs the process split of **OQ-056**. |
+| 14 | the fence token is a random opaque string (`secrets.token_hex(8)`, `harness.py._lease_for`) | `fence_token BIGINT NOT NULL -- monotonic` (`spec/01:702`), with `run_lease_history` keeping the high-water mark across reclaims (`spec/01:715-722`) | *(added 2026-08-28)* the claim predicate needs only equality (`spec/02:248`), which is implemented; **monotonicity across reclaims is unverified here** — `'FENCE-1'` / `'FENCE-2'` in `test_gate12_claim_under_a_SUPERSEDED_fence_token_is_refused` is a fixture convention, not an order this ledger can compare. The reissue-after-reclaim case of `spec/01:712-714` belongs to spike 02/03. |
+| 15 | the boundary toolset the harness builds is **not** the toolset the SDK runs | — | *(added 2026-08-28)* `Agent.__init__` auto-injects `ToolSearch` and `PendingMessageDrainCapability` (`agent/__init__.py:630`, `:3955-3958`), and `ToolSearch` **always** wraps the toolset in `ToolSearchToolset` (`capabilities/_tool_search.py:191-196`) whose `call_tool` has a LOCAL branch (`toolsets/_tool_search.py:435-437`) — SDK-chosen machinery this harness never asked for, while `_reject_sdk_surface` refuses a caller's `capabilities=` by name. It fails closed **because no `ToolDefinition` we build sets `defer_loading`**, a fact about the SDK's bytes; those two modules are therefore pinned and gate 13c asserts the wrapping, the tool list and the refusal. |
 
-## The version pin — 19 files, and the holes review found
+## The version pin — 22 files, and the holes review found
 
 `pyproject.toml:5-6` uses `uv-dynamic-versioning` and the clone carries **no git tags**, so the
 source tree **cannot state its own version**. The version label is `pydantic-ai-slim==2.35.0`;
@@ -278,6 +315,7 @@ __init__.py  agent/__init__.py  _tool_execution.py  _deferred.py  tools.py  mess
 exceptions.py  toolsets/{__init__,abstract,external,approval_required,function}.py
 native_tools/{__init__,_tool_search}.py  models/{__init__,function,test}.py
 profiles/__init__.py  capabilities/__init__.py
+tool_manager.py  capabilities/_tool_search.py  toolsets/_tool_search.py
 ```
 
 and `test_gate.py` additionally requires that **every SDK module `harness.py` or `test_gate.py`
@@ -289,8 +327,10 @@ that this is the same installed SDK.
 > `models/__init__.py`, which is where native-tool **admission** is actually decided:
 > `ModelRequestParameters.native_tools` (`models/__init__.py:179`) is the exact object gate 13's
 > recorder asserts is empty, and `resolve_request_tools` (`:1812-1930`) is what filters native
-> tools against `supported_native_tools` and raises
-> `UserError('Native tool(s) ... not supported by this model')` at `:1849`. Review reproduced
+> tools against `supported_native_tools` at `:1849`, and raises
+> `UserError('Native tool(s) ... not supported by this model')` at `:1861-1862`
+> *(citation corrected 2026-08-28: `:1849` was cited for the raise; `:1849` is the
+> `supported_natives` filter line)*. Review reproduced
 > the round-2 defect verbatim, in a **scratch copy** of the SDK (live `site-packages` untouched,
 > rule 7): replace the admission filter with `supported_natives = list(params.native_tools)` and
 > `verify_pin.py` still printed *"pin holds: 16 files"* while `pytest test_gate.py -q` printed
@@ -298,18 +338,35 @@ that this is the same installed SDK.
 > `capabilities/__init__.py` (the third tool-delivering surface, gate 13) are pinned for the
 > same reason.
 >
+> **Round 5 found it one level further out, 2026-08-28.** Nineteen files still omitted
+> `tool_manager.py`. `_tool_execution.py` does not run tool bodies — it imports `ToolManager`
+> (`_tool_execution.py:15`) and delegates (`:671`, `:958`); the body is invoked at
+> `tool_manager.py:1008`, `await self.toolset.call_tool(...)` inside `_raw_execute` (`:994`),
+> which is where `ExternalToolset.call_tool`'s unconditional `NotImplementedError` either
+> propagates or does not. In a scratch copy of the SDK (live `site-packages` untouched, rule 7),
+> wrapping that call in `except NotImplementedError: tool_result = 'SILENTLY FABRICATED BY THE
+> SDK'` turned the fail-closed refusal **fail-OPEN inside the pipeline**, and `verify_pin.py`
+> still printed *"pin holds: 19 files"* while `pytest test_gate.py -q` printed *"53 passed"*.
+> `capabilities/_tool_search.py` and `toolsets/_tool_search.py` joined it because gate 13c's
+> claim about what wraps the boundary toolset is a claim about their bytes.
+>
 > **What is deliberately OUT of the pin is now stated and checked.** A one-level transitive walk
-> from the pinned files reaches 106 further modules; the full closure is effectively the whole
+> from the pinned files reaches 105 further modules *(amended 2026-08-28: was 106 — three moved
+> into the pin)*; the full closure is effectively the whole
 > distribution (284 modules, including every vendor model adapter — `models/anthropic.py`,
-> `models/bedrock.py` and the rest — reached only because `models/__init__.py` names them, and
-> none of which any assertion here touches). Pinning those would turn the gate red for edits
+> `models/bedrock.py` and the rest — reached only because `models/__init__.py` names them).
+> Pinning those would turn the gate red for edits
 > that cannot affect the boundary. Instead `pinned_digests.json:_coverage_frontier` records that
 > edge and `check()` compares it on every run, so a **pinned file growing a new import** into a
 > module nobody has examined is a decision someone has to make rather than a silent widening.
+> *(Corrected 2026-08-28, round 5: the recorded justification also said those modules were ones
+> "none of which any assertion here touches" — **false** for the three now pinned. The frontier
+> is the set nobody has LOOKED at; writing "not looked at" down as "not depended on" is what let
+> the hole sit for a round.)*
 
 ```
 $ ../../.venv/bin/python verify_pin.py
-pin holds: 19 files byte-identical to the verified SDK
+pin holds: 22 files byte-identical to the verified SDK
 ```
 
 `conftest.py` fails the **whole session** before any gate runs on any mismatch, and
@@ -336,9 +393,11 @@ to investigate an effect that provably did not happen is its own failure.
 | external tools have no executable body | `toolsets/external.py:46 @ b48ee38` |
 | external tools are still advertised to the model | `toolsets/external.py:36 @ b48ee38` |
 | a deferred run ends and returns pending calls | `_deferred.py:27,37 @ b48ee38` |
-| results are supplied back on resume | `agent/__init__.py:1139 @ b48ee38` |
+| results are supplied back on resume | `agent/__init__.py:1189 @ b48ee38` *(corrected 2026-08-28 from `:1139`, an `@overload` stub)* |
 | approval is checked before delegation | `toolsets/approval_required.py:29 @ b48ee38` |
 | **external kinds execute on the resume path** | `_tool_execution.py:399 @ b48ee38` |
+| **the tool body is invoked one level below `_tool_execution.py`** | `_tool_execution.py:15` imports `ToolManager` and delegates at `:671`/`:958`; the invocation is `tool_manager.py:1008` inside `_raw_execute` (`:994`) `@ b48ee38` |
+| **`ToolSearch` is auto-injected and ALWAYS wraps the toolset** | `agent/__init__.py:630`, `_AUTO_INJECT_CAPABILITY_TYPES` `:3955-3958`, `_inject_auto_capabilities` `:3962-3970`; `capabilities/_tool_search.py:191-196`; the local branch at `toolsets/_tool_search.py:435-437` `@ b48ee38` |
 | `native_tools=` is admitted by `override` | `agent/__init__.py:1969 @ b48ee38` |
 | **native-tool ADMISSION is decided in `models/`, not `native_tools/`** | `models/__init__.py:179` (the `native_tools` parameter) and `:1812-1930` / `:1849` (`resolve_request_tools`) `@ b48ee38` |
 | **`capabilities=` is a third public route that delivers tools** | `agent/__init__.py:618-631`, auto-injection at `:630` / `_inject_auto_capabilities` `@ b48ee38` |
@@ -355,8 +414,8 @@ to investigate an effect that provably did not happen is its own failure.
 ## Reproduce
 
 ```bash
-make spike06              # verify_pin.py, then 53 assertions -- part of `make check`
-make spike06-mutations    # all fourteen mutations; non-zero if any survives
+make spike06              # verify_pin.py, then 57 assertions -- part of `make check`
+make spike06-mutations    # all nineteen mutations; non-zero if any survives
 ```
 
 Or directly:
@@ -364,8 +423,8 @@ Or directly:
 ```bash
 cd spikes/06-tool-interception
 ../../.venv/bin/pip install -r requirements.txt
-../../.venv/bin/python verify_pin.py                 # pin holds: 19 files
-../../.venv/bin/python -m pytest test_gate.py -q     # 53 passed
+../../.venv/bin/python verify_pin.py                 # pin holds: 22 files
+../../.venv/bin/python -m pytest test_gate.py -q     # 57 passed
 ../../.venv/bin/python mutate.py --check             # every mutation caught
 ```
 
@@ -409,8 +468,12 @@ Stated as unverified, not as "probably fine" (`VERIFICATION-RULES.md`, verdict v
 - **The lease-expiry route to `indeterminate`.** No sweeper (simplification 7).
 - **Vendor-hosted tools** remain **unsupported**, and the refusal is now tested against every
   `AbstractNativeTool` subclass the SDK defines, each one instantiated. Three findings make it
-  structural: **`_tool_execution.py` contains no reference to `NativeToolCallPart`** — native
-  tools never enter the module that runs tool bodies; support is a **model** property
+  structural: **neither `_tool_execution.py` nor `tool_manager.py` contains any reference to
+  `NativeToolCallPart`** — native tools never enter the tool-execution pipeline; support is a
+  **model** property *(corrected 2026-08-28, round 5, superseding "the module that runs tool
+  bodies": `_tool_execution.py` ORCHESTRATES execution and the body is invoked one level down at
+  `tool_manager.py:1008` (`_raw_execute`), which `_tool_execution.py:15` imports. Round 4 pinned
+  and grepped only the outer module; both are now pinned and both are grepped.)*
   (`models/{test,function}.py`); and so there is no local body for `ExternalToolset` to
   withhold. Any future admission is still *provider-reported use* needing a durable receipt.
 - **Native `@agent.tool` functions are never used by Phoenix.** This spike proves they are the
