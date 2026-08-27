@@ -32,7 +32,8 @@ customer's own knowledge, connectors and data.**
 
 The customer onboards knowledge as **signed bundles** (OKF v0.2 profile) plus connectors to
 their systems. **They never bring agent code.** We build and run the agents on a thin
-internal harness over the vendor SDKs (Claude Agent SDK, LangGraph, OpenAI Agents SDK).
+internal harness on **Pydantic AI** (amended 2026-08-27: a two-SDK plan over the Claude Agent
+SDK and OpenAI Agents SDK is superseded — one harness, five reasons in ADR-0004).
 Deployment is a multi-tenant SaaS control plane plus a **per-customer VPC data plane**; only
 metadata, schedules and approvals cross that boundary.
 
@@ -95,15 +96,21 @@ identity is actually for — being nameable as a Cedar `principal`.
 └───────────────────────────────┬─────────────────────────────────────────┘
                                 │ SOUTHBOUND gRPC bidi
                                 │ Run(stream) + Describe()
-                    ┌───────────┼───────────┐
-                 Adapter     Adapter     Adapter
-                 (ACP)       (in-proc)   (native TUI)
-                    └───────────┼───────────┘
+                                │
+                            Adapter
+                        (sdk:pydantic-ai)
+                                │
                                 ▼
                        SANDBOX  process │ egress │ storage
 
    external:  Temporal / DBOS / Prefect   (durable workflow, sagas, compensation)
 ```
+
+> **Diagram amended 2026-08-27.** It showed three adapter boxes — `(ACP)`, `(in-proc)` and
+> `(native TUI)`. Only one ships: **one internal harness on Pydantic AI**, registered as
+> `sdk:pydantic-ai`, in process. The adapter boundary is retained so a **second** SDK can be
+> added later without touching the control plane; ACP and terminal-scraping are superseded as
+> shipped paths.
 
 Full component reasoning in
 [`synthesis/reference-architecture.md`](synthesis/reference-architecture.md).
@@ -384,7 +391,7 @@ Three tiers, ordered by dependency. Detail and deferral triggers in
 
 **Tier 1 — the spine.** Tenant/Principal/Credential → agent identity and versioned
 definition → run engine (single writer, log-derived state) → adapter contract with
-one Claude SDK adapter → version-and-pin on resume → effect ledger.
+one Pydantic AI adapter → version-and-pin on resume → effect ledger.
 
 **Tier 2 — the platform.** Cedar policy with three-way decisions → `Approval` with
 `decided_by` → three-boundary sandbox → knowledge and four state scopes → `Task`/routines

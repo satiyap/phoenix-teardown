@@ -143,7 +143,7 @@ CREATE TABLE approvals (
     decided_by  TEXT,
     decided_by_kind principal_kind
         CHECK (decided_by_kind IS NULL OR decided_by_kind = 'human'),
-    responded_at TIMESTAMPTZ,
+    decided_at  TIMESTAMPTZ,   -- spec/01 name; `responded_at` was the spike's own drift
     expires_at  TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (tenant_id, approval_id),
     FOREIGN KEY (tenant_id, run_id) REFERENCES runs (tenant_id, run_id),
@@ -152,7 +152,8 @@ CREATE TABLE approvals (
     FOREIGN KEY (tenant_id, action_ref, run_id)
         REFERENCES effect_ledger (tenant_id, idempotency_key, run_id),
     CHECK ((status IN ('approved','denied'))
-           = (decided_by IS NOT NULL AND decided_by_kind IS NOT NULL))
+           = (decided_by IS NOT NULL AND decided_by_kind IS NOT NULL
+              AND decided_at IS NOT NULL))
 );
 CREATE UNIQUE INDEX approvals_pending_one ON approvals (tenant_id, action_ref)
     WHERE status = 'pending';

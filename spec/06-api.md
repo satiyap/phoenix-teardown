@@ -14,7 +14,7 @@ whole point of a control plane.
 | Class | May | May not |
 |---|---|---|
 | **agent** | create/submit runs it owns, read them, and **read** approvals on them | **decide any approval**; touch policies, adapters, tenants, or other principals' runs |
-| **admin** | everything, including policy and adapter registration | — |
+| **admin** | everything the API exposes, including policy and adapter registration | — |
 
 Separate header, separate key material: `Authorization: Bearer <token>` where the token
 carries its class. An agent token presented to a policy endpoint is `403`, not `401` —
@@ -32,9 +32,10 @@ paragraph made it:
   `approvals.decided_by` must reference a principal of kind **`human`** — enforced in the
   schema by a composite foreign key (§01), not merely by this route.
 
-So an admin token is *necessary* but not *sufficient*: it must also carry a human principal.
-A service account with admin rights cannot decide an approval, which is the whole point of
-ADR-0015.
+**Deciding an approval requires an admin credential AND a principal of kind `human`.** The
+credential class is checked by the route; the kind is pinned by a composite foreign key in
+§01, so an admin token held by a `service` principal is rejected **by the database** rather
+than by convention. That is the whole point of ADR-0015.
 
 > **Retracted 2026-08-27 (redo 3).** Two wordings stood here in turn, and both are gone.
 > The first (superseded 2026-08-27) let an agent answer approvals on its own runs, which reads
@@ -203,7 +204,9 @@ the line above it.
 
 `POST /v1/approvals/{id}/decide` records **one** attributable terminal decision. There is no
 quorum, no m-of-n, no role requirement and no separation-of-duties enforcement beyond the
-self-approval prohibition above. That is a deliberate refusal on the evidence, recorded 2026-08-27 — see
+quorum. There is **no self-approval prohibition in v0.1** — §09 7 defers it with the
+multi-party question, and an earlier version of this sentence referred to a rule that does not
+exist. That is a deliberate refusal on the evidence, recorded 2026-08-27 — see
 [§09](09-decisions.md) 7 — and workloads requiring more must delegate authorization to an
 external governed system.
 

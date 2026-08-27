@@ -340,6 +340,29 @@ def check_openapi() -> list[str]:
             errs.append(f"{verb.upper()} {path} must REQUIRE Idempotency-Key "
                         f"(06-api.md), but openapi.yaml does not")
 
+    # --- 5b. an operation 06 marks admin-only must not be reachable by an agent token
+    for verb, path in sorted(admin_paths):
+        op = doc.get("paths", {}).get(path, {}).get(verb)
+        if not isinstance(op, dict):
+            continue
+        schemes = {k for entry in op.get("security", []) for k in entry}
+        if "agentToken" in schemes or (not schemes and "agentToken" in
+                                      {k for e in doc.get("security", []) for k in e}):
+            errs.append(f"{verb.upper()} {path} is admin-only in 06-api.md but inherits "
+                        f"or declares agentToken, so an agent credential could reach it")
+
+    # Deciding an approval is not an "admin-only section" in 06, but D-A forbids an
+    # agent token, so it needs the same treatment stated explicitly.
+    decide = doc.get("paths", {}).get("/v1/approvals/{id}/decide", {}).get("post")
+    if isinstance(decide, dict):
+        schemes = {k for entry in decide.get("security", []) for k in entry}
+        if not schemes:
+            errs.append("POST /v1/approvals/{id}/decide inherits the global security "
+                        "(agentToken); D-A requires an explicit non-agent requirement")
+        elif "agentToken" in schemes:
+            errs.append("POST /v1/approvals/{id}/decide accepts agentToken; agents do "
+                        "not decide approvals in v0.1 (D-A)")
+
     # --- 6. no operation may be schema-less
     for path, item in doc.get("paths", {}).items():
         for verb, op in item.items():
@@ -406,6 +429,62 @@ def check_effect_lifecycle() -> list[str]:
     return errs
 
 
+def _spec_sql_blocks() -> str:
+    """Every ```sql fence in spec/01, concatenated in document order.
+
+    Skips fences that are illustrative rather than schema: a fence containing
+    INSERT/UPDATE/SELECT-only statements belongs to a worked example, not the DDL.
+    """
+    body = (SPEC / "01-schema.md").read_text()
+    out = []
+    for block in re.findall(r"```sql\n(.*?)```", body, re.DOTALL):
+        stripped = block.strip()
+        if not stripped:
+            continue
+        if re.match(r"^(INSERT|UPDATE|SELECT|BEGIN|--)\b", stripped, re.IGNORECASE):
+            continue
+        out.append(block)
+    return "\n".join(out)
+
+
+def _apply_spec_ddl(dsn: str) -> list[str]:
+    """Apply spec/01's DDL to a scratch schema and report any SQL error."""
+    py = ROOT / ".venv" / "bin" / "python"
+    py = py if py.exists() else Path(sys.executable)
+    sql = _spec_sql_blocks()
+    if not sql.strip():
+        return ["no ```sql blocks found in spec/01-schema.md"]
+    script = (
+        "import sys, psycopg\n"
+        "dsn, sql = sys.argv[1], sys.stdin.read()\n"
+        "c = psycopg.connect(dsn)\n"
+        "c.autocommit = True\n"
+        "cur = c.cursor()\n"
+        "cur.execute('DROP SCHEMA IF EXISTS specddl CASCADE; CREATE SCHEMA specddl;')\n"
+        "cur.execute('SET search_path TO specddl')\n"
+        # The GRANTs are part of the normative schema -- they are how run_events and
+        # agent_definitions are append-only -- so the role must exist for the DDL to
+        # apply. Created here rather than skipping the grants, because skipping them
+        # would leave the one enforcement mechanism unexecuted.
+        "cur.execute(\"DO $$BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles "
+        "WHERE rolname='app_role') THEN CREATE ROLE app_role NOLOGIN; END IF; END$$\")\n"
+        "try:\n"
+        "    cur.execute(sql)\n"
+        "except Exception as e:\n"
+        "    print(f'{type(e).__name__}: {e}'.replace(chr(10), ' ')[:300])\n"
+        "    sys.exit(1)\n"
+        "finally:\n"
+        "    cur.execute('DROP SCHEMA IF EXISTS specddl CASCADE')\n"
+    )
+    res = subprocess.run([str(py), "-c", script, dsn], input=sql,
+                         capture_output=True, text=True)
+    if res.returncode != 0:
+        detail = (res.stdout + res.stderr).strip().splitlines()
+        return [f"spec/01-schema.md DDL does not apply to Postgres: "
+                f"{detail[0] if detail else 'unknown error'}"]
+    return []
+
+
 def check_postgres_gate() -> list[str]:
     """Run the Postgres scenarios when a server is reachable.
 
@@ -436,6 +515,14 @@ def check_postgres_gate() -> list[str]:
         return ["no Postgres reachable, so the eight concurrency scenarios are "
                 "UNVERIFIED. See spikes/03-postgres/RESULT.md for the one-line "
                 "docker command."]
+    # FIRST: apply spec/01's own SQL to the disposable server. The normative DDL
+    # carried a missing comma for a full pass (redo 3 -> redo 4) because nothing ever
+    # executed it -- only the spike's hand-maintained copy was run. A spec whose
+    # schema has never been applied is a schema nobody has checked.
+    ddl_errs = _apply_spec_ddl(dsn)
+    if ddl_errs:
+        return ddl_errs
+
     res = subprocess.run([str(py), str(script)], capture_output=True, text=True,
                          cwd=str(spike), env={**os.environ, "PHOENIX_PG_DSN": dsn})
     if res.returncode != 0:
@@ -499,7 +586,11 @@ def _scanned_files() -> list[Path]:
     match our business model."""
     files: list[Path] = []
     files += sorted(SPEC.glob("*.md"))
-    files += sorted((SPEC / "contracts").glob("*")) if (SPEC / "contracts").is_dir() else []
+    # The contract files are NOT markdown, and skipping them is how "answer its own
+    # approvals" survived in openapi.yaml through three passes of this gate.
+    if (SPEC / "contracts").is_dir():
+        files += [f for f in sorted((SPEC / "contracts").glob("*"))
+                  if f.suffix in {".yaml", ".yml", ".proto", ".json"}]
     files += sorted((ROOT / "synthesis").glob("*.md"))
     files += sorted((ROOT / "decisions").glob("*.md"))
     for name in ("DESIGN.md", "README.md", "open-questions.md"):
@@ -507,6 +598,27 @@ def _scanned_files() -> list[Path]:
         if p.exists():
             files.append(p)
     return [f for f in files if f.is_file()]
+
+
+# Fenced blocks are skipped by the sentence splitter for good reason -- SQL and
+# protobuf are not prose -- but `text` diagrams ARE claims: an `Adapter (ACP)` box
+# says we ship ACP. Scan those, and leave sql/protobuf/python/bash alone.
+_SCANNED_FENCE_LANGS = {"text", "", "http", "yaml"}
+
+
+def _fence_spans(body: str) -> list[tuple[int, int, bool]]:
+    """(start_line, end_line, scan?) for each fenced block, 1-based inclusive."""
+    spans, open_at, lang = [], None, ""
+    for n, line in enumerate(body.splitlines(), start=1):
+        m = re.match(r"^\s*```(\w*)", line)
+        if not m:
+            continue
+        if open_at is None:
+            open_at, lang = n, m.group(1).lower()
+        else:
+            spans.append((open_at, n, lang in _SCANNED_FENCE_LANGS))
+            open_at, lang = None, ""
+    return spans
 
 
 def _sentences(body: str) -> list[tuple[int, str]]:
@@ -517,13 +629,17 @@ def _sentences(body: str) -> list[tuple[int, str]]:
     cell and an amended one.
     """
     out: list[tuple[int, str]] = []
-    line_no = 1
-    for line in body.splitlines():
+    skip = set()
+    for start, end, scan in _fence_spans(body):
+        if not scan:
+            skip.update(range(start, end + 1))
+    for line_no, line in enumerate(body.splitlines(), start=1):
+        if line_no in skip:
+            continue
         for piece in re.split(r"(?<=\.)\s+|\|", line):
             piece = piece.strip()
             if piece:
                 out.append((line_no, piece))
-        line_no += 1
     return out
 
 
@@ -580,7 +696,14 @@ def check_superseded_claims() -> list[str]:
             if re.search(r"'[a-z_]*(acp_subprocess|native_tui|cli_subprocess"
                          r"|native_server)[a-z_]*'", sentence):
                 continue
-            if is_sql_ish and sentence.lstrip().startswith(("//", "#")):
+            # NOTE: comments in a contract file are NOT exempt. An earlier version
+            # skipped any `#`/`//` line in .yaml/.proto, which is how a mutation
+            # reading "# agents answer its own approvals here" passed the gate --
+            # and YAML descriptions are mostly comments, so the exemption hid the
+            # very class the gate was extended to catch. Only a LICENCE/codegen
+            # banner is skipped, matched narrowly.
+            if is_sql_ish and re.match(r"^\s*(//|#)\s*(Code generated|Copyright|"
+                                       r"SPDX-|DO NOT EDIT)", sentence):
                 continue
             for rx, date, why in compiled:
                 if rx.search(sentence):

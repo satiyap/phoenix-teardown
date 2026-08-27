@@ -8,6 +8,7 @@
 
 - **Status:** Accepted (2026-08-26, Phase 5) — 13 projects. Narrowed to two RPCs with durability in the control plane (amended 2026-08-27; four methods was AX's shape); extended to every stateful concern shipping an in-memory sibling.
 - **Amended:** 2026-08-27 — `sdk_in_process` only; boundary retained for SDK swappability, not third-party adoption. See `synthesis/scope-reconciliation.md` §7.
+- **Amended:** 2026-08-27 (redo 4) — **one harness, on Pydantic AI 2.35.0**; the two-SDK plan is superseded. See §7d.
 - **Date:** 2025-08-26
 - **Supersedes:** —
 - **Superseded by:** —
@@ -101,7 +102,7 @@ With two supporting rules taken from AX:
 2. **Specify the stream contract precisely.** AX documents that the server streams
    "zero or more `HarnessResponse{outputs}` frames terminated by exactly one
    `HarnessResponse{end}`". Stating the terminator count is what makes a
-   third-party adapter implementable without reading the reference
+   a second adapter implementable from the contract alone (2026-08-27) without reading the reference
    implementation.
 
 Checkpoint/restore may still exist as a *declared optional capability*
@@ -128,6 +129,7 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | Microsoft Agent Framework | neutral | `python/packages/ @ e34bf48` | Not an adapter contract for agents — `Executor` is the node abstraction and agents are written against the framework. The wide provider surface (anthropic, gemini, bedrock, ollama, mistral, copilotstudio…) adapts *models*, not agents. |
 | Agent Control | confirms | `README.md @ 7cb21af` | The adapter thesis applied to *policy* rather than execution: framework adapters for LangChain, CrewAI, Google ADK and AWS Strands mean it governs runtimes it did not author, via a `@control()` decorator. **The only project in the study built on the assumption that it is not the whole platform** — which is exactly why it is integrable. |
 | **Product decision 2026-08-27** | amends | `synthesis/scope-reconciliation.md` §7 | SaaS repositioning: we build and operate the agents on a thin internal harness over the vendor SDKs, so `integration_mode` narrows to `sdk_in_process` and the other four modes are reserved-not-shipped. Recorded as **amends, not challenges**: the adapter boundary is *kept*, because its remaining job is to keep the SDK underneath swappable (Claude Agent SDK → OpenAI Agents SDK) rather than to admit foreign agents. The Cloudflare objection — ambient durability costs you the ability to run others' agents — no longer binds, since running others' agents is no longer a requirement. |
+| **Product decision 2026-08-27 (redo 4)** | amends | `projects/pydantic-ai/teardown.md:45-50,58,218,245 @ b48ee38`; `pydantic_ai_slim/pydantic_ai/agent/__init__.py:2399`; 30 modules in `models/` | **One harness, on Pydantic AI 2.35.0**, replacing "Claude Agent SDK then OpenAI Agents SDK". Five reasons, each checked against the source rather than the recon: (1) one harness to build, spec and adapt instead of two; (2) **model-agnostic** — 30 provider modules — so model choice is a tenant/bundle setting and the "no model gateway" boundary holds because we do not own the abstraction; (3) **no durable-state authority of its own** — it integrates Temporal, DBOS and Prefect as "first-class compatibility targets, not peripheral adapters", so it cannot compete with our run log. LangGraph was rejected for the opposite reason: its checkpointer *is* a second authority, and its silent resume across a changed graph is the failure I verified by running it, which ADR-0011 exists to prevent; (4) tools are **registered Python functions** (`@agent.tool`), so the `ToolCall → ledger` boundary is a decorator — to be verified by spike 06; (5) three of its patterns are **already ported**: `TestModel` as the in-memory sibling, the `_ssrf.py` guard, and `CapabilityPosition`. **Cost, stated:** compaction, subagent orchestration and hooks are ours to build, so the harness is a **component**, not a thin shim (spec 12). The adapter boundary is retained so a second SDK can be added later. |
 
 ## Open questions
 

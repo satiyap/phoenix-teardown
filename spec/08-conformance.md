@@ -14,8 +14,8 @@ What CI must enforce, and why the bench is split in two.
 
 > **Purpose note (2026-08-27).** We build and operate every adapter, so this bench is no
 > longer about third-party honesty — nobody else declares capabilities to us. Its purpose is
-> **SDK-version drift**: the Claude Agent SDK or OpenAI Agents SDK changes behaviour under a
-> version bump and a declaration silently becomes false. That is a weaker, slower risk than
+> **SDK-version drift**: Pydantic AI changes behaviour under a version bump and a declaration
+> silently becomes false (amended 2026-08-27: named two SDKs; there is one). That is a weaker, slower risk than
 > an untrusted declaration, which is why the bench moves from Tier 2 to **Tier 3**
 > (`v01-boundary.md`). ADR-0012 is unaffected: declarations still beat discovery, and
 > `UNKNOWN` still never degrades to `false`.
@@ -120,7 +120,8 @@ Every invariant in this spec, with its negative control. Consolidated from §01�
 | 19 | NFC and NFD digests agree | remove normalisation ⇒ differ |
 | 20 | Domain separation holds | drop `kind` ⇒ collision |
 | 21 | Exactly one `End` frame | accept two ⇒ two terminal states |
-| 29a | An **agent** token on `POST /v1/approvals/{id}/decide` is refused `403 wrong_credential_class` | drop the credential-class check ⇒ an agent decides an approval, and the `decided_by` on record is not a human |
+| 29a | An **agent** token on `POST /v1/approvals/{id}/decide` is refused `403 wrong_credential_class` | drop the credential-class check ⇒ the response is no longer `403`. **NOT YET EXECUTABLE — no server exists**; this is an HTTP-boundary test owed by the first API implementation, listed rather than pretended |
+| 29b | A non-`human` `decided_by` is rejected **by the schema** | drop the kind from the FK ⇒ an agent principal is stored as the approver. **Executed** — spike 03 scenario 9, with that exact negative control |
 | 30a | An in-process SDK adapter's tool call produces an `effect_ledger` row | let the SDK's native executor run the tool ⇒ **no ledger row**, so the effect is unclaimed, unpoliced and unattested |
 | 30b | The SDK's native tool executor is disabled at adapter construction | leave it enabled ⇒ two execution paths, one ungoverned |
 | 30c | An adapter that cannot disable native execution for a tool **cannot register that tool** | allow registration ⇒ an effect path the ledger never sees. *Vendor-hosted tools are unsupported in v0.1 (retracted 2026-08-27); whether a provider-reported-use class is admissible is spike 06's decision.* **NOT VERIFIED — spike 06** |

@@ -60,7 +60,8 @@ unmediated	2026-08-27	retracted: the platform cannot keep an `observed` guarante
 effect leaves a `?pending`? row	2026-08-27	the ledger status is `claimed`
 two pending rows for one effect	2026-08-27	the ledger status is `claimed`
 one gets a unique violation and rolls back	2026-08-27	spike 03: the loser BLOCKS, then raises 23505 after the winner commits
-answer its own approvals	2026-08-27	a principal may never decide an approval gating its own effect
+answer its own approvals	2026-08-27	agents do not decide approvals in v0.1 (D-A); there is no assignee model and no self-approval rule
+third[- ]party adapter	2026-08-27	no third party writes adapters for us; the contract exists so a SECOND adapter is implementable
 
 # --- counts that drifted ---
 all 15 adrs are accepted	2026-08-27	16 ADRs: 15 Accepted, 1 Proposed

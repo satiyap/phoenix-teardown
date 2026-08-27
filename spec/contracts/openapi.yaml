@@ -32,9 +32,11 @@ components:
       type: http
       scheme: bearer
       description: |
-        Class **agent**: create/submit runs it owns, read its own runs, answer its own
-        approvals. Presented to an admin route it is 403 `wrong_credential_class` — it
-        authenticated fine, it is simply not permitted.
+        Class **agent**: create/submit runs it owns, read them, and READ approvals on them.
+        It MAY NOT decide an approval (superseded 2026-08-27: this said "answer its own
+        approvals", which read as the requester deciding). Presented to an admin route, or to
+        POST /v1/approvals/{id}/decide, it is 403 `wrong_credential_class` — it authenticated
+        fine, it is simply not permitted.
     adminToken:
       type: http
       scheme: bearer
@@ -429,9 +431,14 @@ paths:
       tags: [approvals]
       operationId: decideApproval
       summary: Decide an approval
+      security: [{ adminToken: [] }]
       description: |
-        `decided_by` comes from the token and NEVER from the body: an approval must name a
-        nameable human (ADR-0015). A worker credential is refused. Deciding twice returns
+        Requires an ADMIN credential, and additionally a principal of kind `human`:
+        `approvals.decided_by` is pinned to a human by a composite foreign key in
+        spec/01-schema.md, so an admin token held by a service account cannot decide
+        (ADR-0015). An AGENT token is 403 `wrong_credential_class`.
+
+        `decided_by` comes from the token and NEVER from the body. Deciding twice returns
         409 carrying the EXISTING decision rather than hiding it.
 
         A denial does not fail the run. The worker sends the adapter

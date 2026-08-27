@@ -623,7 +623,94 @@ architectural gap (the unenforced approver kind) and three test-soundness defect
 is the argument for stopping: the gate now catches the wording class mechanically, and further
 prose review should become an issue queue rather than another pass.
 
-### The gate's FINAL run, and `make check` — verbatim, 2026-08-27 (redo 3)
+### 7d. Redo 4 — harness decision and five defects (2026-08-27)
+
+Five defects, one gate gap, and one decision. Every reason for the decision was **checked
+against the source before being written down**, because a decision justified by wrong citations
+is worse than one with no justification.
+
+#### The decision: one harness, on Pydantic AI 2.35.0
+
+Replaces "Claude Agent SDK then OpenAI Agents SDK". Recorded in ADR-0004's evidence log as
+`amends` — the adapter boundary is unchanged, its occupant is.
+
+| Reason | Verified how |
+|---|---|
+| one harness to build, spec and adapt instead of two | — |
+| **model-agnostic**, so model choice is a tenant/bundle setting and "no model gateway" holds because we do not own the abstraction | counted **30 modules** in `pydantic_ai_slim/pydantic_ai/models/` |
+| **no durable-state authority of its own** — Temporal, DBOS and Prefect are "first-class compatibility targets… not peripheral adapters" | `projects/pydantic-ai/teardown.md:45-50 @ b48ee38` |
+| tools are **registered Python functions**, so the `ToolCall → ledger` boundary is a decorator | `pydantic_ai_slim/pydantic_ai/agent/__init__.py:2399` (`@agent.tool`) |
+| three patterns **already ported** | `TestModel`, `_ssrf.py:101-118`, `CapabilityPosition` — `teardown.md:58,218,245` |
+
+**LangGraph was rejected for the mirror reason**: its checkpointer *is* a second durable
+authority, and its silent resume across a changed graph — returning `[]` with no error — is the
+failure I reproduced by running it, and the reason ADR-0011 exists.
+
+**Cost, stated rather than buried:** compaction, subagent orchestration and hooks are ours to
+build. The harness is therefore a **component, not a thin shim**, and now has its own row in
+`spec/00` "Not yet specified" (owner: spec 12). The pinned version is a **placeholder until
+spike 06 fixes it**.
+
+Propagated to: `spec/01` identity comment (`sdk:pydantic-ai`), `spec/07` in-process subsection,
+`spec/00` adapter + harness rows, `spec/08` drift note, `v01-boundary.md` Tier 1 row 4,
+`DESIGN.md` §1 and sequencing, `README.md`, and OQ-043 (rescoped from three SDKs to one, with
+spike 06's scope written out). The retention of the adapter boundary "so a second SDK can be
+added later" is stated once, dated.
+
+#### The five defects
+
+| # | Defect | Fix |
+|---|---|---|
+| 1 | OpenAPI contradicted D-A: the agent-token description still said "answer its own approvals", and `decideApproval` inherited the global `agentToken` | description rewritten; `security: [{ adminToken: [] }]` added; **new consistency check** — an operation `spec/06` marks admin-only, and `/decide` specifically, must not accept `agentToken`. Negative control: remove the requirement ⇒ gate fails |
+| 2 | Approval semantics overstated | `admin` → "everything **the API exposes**"; the "necessary but not sufficient" sentence now states the D-A rule exactly (admin credential **and** a `human` principal, the kind pinned by an FK); the reference to a "self-approval prohibition above" is **removed** — no such rule exists in v0.1, §09 7 defers it |
+| 3 | Row 29a conflated an HTTP check with a DB check | split: **29a** = agent token on `/decide` ⇒ `403`, marked **NOT YET EXECUTABLE — no server exists**; **29b** = non-`human` `decided_by` rejected by the schema, **executed** in spike 03 scenario 9 with that exact negative control |
+| 4 | Normative DDL had a missing comma and had **never been executed** | comma fixed at `spec/01:52-56` — my own redo-3 insertion left the preceding FK without one. More importantly the postgres gate now **extracts every ```sql block from `spec/01` and applies it to a scratch schema** on the disposable server. Negative control: inject a syntax error ⇒ gate names the line. `responded_at` reconciled to the spec's `decided_at` |
+| 5 | Remaining ACP / TUI / third-party | `DESIGN.md:96` diagram: three adapter boxes → one `(sdk:pydantic-ai)`, with a dated note **below** the fence; `reference-architecture.md:178` and `ADR-0004:104` "third-party adapter implementable" → "a **second** adapter implementable from the contract alone" |
+
+Defect 4 is the one worth dwelling on. The spec's schema carried a **syntax error for a full
+pass** because nothing ever ran it — only the spike's hand-maintained copy was executed, and
+the two had drifted (`responded_at` vs `decided_at`). Applying the spec's own DDL immediately
+surfaced a second issue: the `GRANT`s reference `app_role`, which did not exist, so the gate
+creates the role rather than skipping the grants — skipping them would leave the **one
+mechanism that makes `run_events` append-only** unexecuted.
+
+#### The gate gap
+
+The scan covered markdown prose only, so three classes were invisible:
+
+| Extension | Why it mattered |
+|---|---|
+| `spec/contracts/*.yaml`, `*.proto` | "answer its own approvals" sat in `openapi.yaml` through **three** passes of this gate |
+| ```text / ```http / ```yaml fences | an `Adapter (ACP)` box in a diagram *is* a claim that we ship ACP |
+| `third[- ]party adapter` pattern | did not exist |
+
+Three self-test mutations added (18 controls total), each failing before the fix.
+
+**And the extension immediately caught a fault in itself.** My first version skipped any
+`#`/`//` line in a contract file as a comment — but **YAML descriptions are mostly comments**,
+so the exemption hid the exact class the extension was added to catch. Now only a
+licence/codegen banner is skipped, matched narrowly. A second fault: the self-test's
+"was the sentence quoted?" assertion compared raw substrings, so an indented YAML line
+reported *"caught but sentence not quoted"* for a genuine catch; it now compares a normalised
+core.
+
+#### Counts
+
+| Number | Source | Value |
+|---|---|---|
+| gate assertions | four `RESULT.md` headlines | **116** = 12 + 35 + 42 + 27 |
+| required invariant tests | `spec/08` rows | **50** (29b added) |
+| gate self-test controls | `tools/test_validate_spec.py` | **18** |
+| ADRs | `decisions/` | **16 — 15 Accepted, 1 Proposed** |
+
+#### Leftovers
+
+None outstanding from this list. Per §7c's closing note, **anything the verifier finds after
+this pass is filed as an OQ with an owner rather than redone.** The three blocking OQs are
+`OQ-019`/`OQ-042` (SubstrATE, gating ADR-0016) and `OQ-043` (spike 06, gating the harness
+version pin and row 30c).
+
+### The gate's FINAL run, and `make check` — verbatim, 2026-08-27 (redo 4)
 
 ```
 $ make spec
@@ -658,12 +745,15 @@ self-test: superseded-claims gate
   ok   'can tell you whether the effect happened'
   ok   'the restriction costs nothing'
   ok   'Spike the storage swap before committing'
+  ok   'answer its own approvals' in openapi.yaml
+  ok   'Adapter (ACP)' inside a DESIGN `text` diagram block
+  ok   'third-party adapter' in ADR-0004
   ok   a dated retraction in the same sentence is exempt
   ok   quoting WITHOUT a date is NOT exempt
   ok   a wrong invariant count in README fails the count check
   ok   an empty pattern file does not silently pass
 
-15 passed, 0 failed
+18 passed, 0 failed
 PASS — every mutation is caught and named; amendments are forgiven only when dated.
 ```
 
@@ -686,12 +776,15 @@ self-test: superseded-claims gate
   ok   'can tell you whether the effect happened'
   ok   'the restriction costs nothing'
   ok   'Spike the storage swap before committing'
+  ok   'answer its own approvals' in openapi.yaml
+  ok   'Adapter (ACP)' inside a DESIGN `text` diagram block
+  ok   'third-party adapter' in ADR-0004
   ok   a dated retraction in the same sentence is exempt
   ok   quoting WITHOUT a date is NOT exempt
   ok   a wrong invariant count in README fails the count check
   ok   an empty pattern file does not silently pass
 
-15 passed, 0 failed
+18 passed, 0 failed
 PASS — every mutation is caught and named; amendments are forgiven only when dated.
 project                    depth        cov  status
 ------------------------------------------------------------

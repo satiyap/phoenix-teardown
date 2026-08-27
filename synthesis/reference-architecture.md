@@ -175,8 +175,9 @@ ADR-0012).
 
 Adapter config is **opaque bytes** the control plane refuses to parse (AX). The
 stream contract specifies its terminator exactly — "zero or more output frames
-terminated by exactly one end frame" — which is what makes a third-party adapter
-implementable without reading our source.
+terminated by exactly one end frame" — which is what makes **a second adapter implementable
+from the contract alone** (amended 2026-08-27: this said "a third-party adapter", and no third
+party writes adapters for us).
 
 Transport is gRPC bidirectional streaming, so a remote adapter needs no
 co-location. The integration-mode taxonomy comes from Omnigent: `SDK_IN_PROCESS`,

@@ -111,7 +111,7 @@ answered, all six synthesis deliverables final.
 | 5 Synthesis | domain model, reference architecture, build/reuse map, v0.1 boundary |
 | 6 Handoff | `DESIGN.md` + developer journey |
 | 7 Spikes | AG2 storage swap, definition pin, **Postgres concurrency**, **work-bundle generality** — 4 spikes, **116 gate assertions**, verification rules |
-| 8 Spec | **10 documents** + compiling `.proto` and OpenAPI contracts; 49 required invariant tests with negative controls |
+| 8 Spec | **10 documents** + compiling `.proto` and OpenAPI contracts; 50 required invariant tests with negative controls |
 
 **How the 116 is counted.** 12 (spike 01) + 35 (02) + 42 (03) + 27 (04), read from the
 `**Gate assertions: n**` line each `RESULT.md` declares. **`make check` asserts this sum**, so
@@ -212,8 +212,7 @@ teardown replaced its own hypothesis, which is what it was for.
 
 > Phoenix is a **SaaS platform an enterprise buys**. The customer onboards their
 > knowledge as **signed bundles** (OKF v0.2 profile) plus connectors to their systems,
-> and **we build and operate the agents** on a thin internal harness over the vendor
-> SDKs. Customers bring knowledge, connectors and data — **never agent code**.
+> and **we build and operate the agents** on **one internal harness, on Pydantic AI**. Customers bring knowledge, connectors and data — **never agent code**.
 > Deployment is a multi-tenant SaaS control plane plus a **per-customer VPC data
 > plane**; only metadata, schedules and approvals cross the boundary.
 >

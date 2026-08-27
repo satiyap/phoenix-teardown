@@ -43,9 +43,10 @@ them is the difference between an incomplete spec and a spec that pretends other
 | Knowledge (filesystem skills) | 2 | layout, resolution order, digest participation |
 | Messaging (`ag2.network`) | 3 | the compatibility layer's public surface, channel-lease integration |
 | Cost measurement (`genai-prices`) | 3 | usage capture, the fail-closed-on-unpriced rule |
-| **Claude SDK adapter**, then OpenAI SDK adapter | 1 | the concrete mapping from §07 frames onto each vendor SDK, with its native tool executor disabled |
+| **Pydantic AI adapter** | 1 | the concrete mapping from §07 frames onto Pydantic AI, with its native tool executor disabled. One harness, not two (amended 2026-08-27) |
 | OTel semantics | 2 | span names, attribute namespace, semconv version |
 | **`tasks` / `routines`** | 2 | schedule *or* trigger → Run. The unit customers buy, un-deferred 2026-08-27. Owner: spec 10 or 11. Needs the resource, the trigger taxonomy, and the rule that a routine creates Runs but never becomes one |
+| **Agent harness (Pydantic AI)** (spec 12) | 1 | the loop, context assembly from the compiled bundle, delegation, **compaction**, and hooks. These are **ours to build**: Pydantic AI supplies the model-agnostic loop and tool registration, not compaction or subagent orchestration. The harness is a **component**, not a thin shim |
 | **Work bundles** (`10-work-bundles.md`) | 1–2 | `WorkBundle`, `Resource`, `Action`, `ActionReceipt`, `Verifier`, and `effect_class ∈ {observation, idempotent_mutation, non_idempotent_mutation, long_running_operation}`. The domain-`type` → behavioural-role table is **bundle-supplied**, never core. A verifier must be pinned by a **different publisher** than the bundle it verifies (spike 04 finding 1). Freshness is **evidence**, not bundle state (finding 2). `indeterminate` retains `external_operation_id` as a recovery handle and inspection is a **separate Action** (finding 4) |
 
 **Sequencing note.** Documents 01–08 are the spine because everything above depends on

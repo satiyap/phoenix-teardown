@@ -50,7 +50,7 @@ CREATE TABLE principals (
 
     PRIMARY KEY (tenant_id, principal_id),
     FOREIGN KEY (tenant_id, on_behalf_of)
-        REFERENCES principals (tenant_id, principal_id)
+        REFERENCES principals (tenant_id, principal_id),
 
     -- lets approvals.decided_by pin the kind in its FK (see `approvals`)
     CONSTRAINT principals_id_kind UNIQUE (tenant_id, principal_id, kind)
@@ -115,8 +115,10 @@ column later is a migration, and the identity model is cheap to get right up fro
 ```sql
 CREATE TABLE adapter_contracts (
     tenant_id      BIGINT NOT NULL,
-    identity       TEXT   NOT NULL,       -- 'sdk:claude-agent'
-                                          -- (an acp: identity was superseded 2026-08-27)
+    identity       TEXT   NOT NULL,       -- 'sdk:pydantic-ai'
+                                          -- (an acp: identity was superseded 2026-08-27;
+                                          --  a per-vendor sdk: identity likewise, when the
+                                          --  two-SDK plan was superseded in redo 4)
     digest         TEXT   NOT NULL,       -- DERIVED from the contract, not supplied
     protocol_version TEXT NOT NULL,
     -- The enum is Omnigent's full taxonomy and is kept so the column never needs a

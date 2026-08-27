@@ -98,6 +98,16 @@ MUTATIONS = [
      "spec/07-adapter-protocol.md", "And the restriction costs nothing."),
     ("'Spike the storage swap before committing'",
      "synthesis/v01-boundary.md", "Mitigation: spike the storage swap before committing."),
+    # Redo 4 gate gap: the scan covered markdown prose only, so a claim inside a
+    # contract file or a `text` diagram block was invisible. All three of these
+    # passed the gate on 82fbc6b.
+    ("'answer its own approvals' in openapi.yaml",
+     "spec/contracts/openapi.yaml", "        # agents answer its own approvals here"),
+    ("'Adapter (ACP)' inside a DESIGN `text` diagram block",
+     "DESIGN.md", "DIAGRAM_MUTATION"),
+    ("'third-party adapter' in ADR-0004",
+     "decisions/ADR-0004-runtime-is-adapter-based.md",
+     "This makes a third-party adapter implementable."),
 ]
 
 
@@ -119,6 +129,16 @@ def main() -> int:
                 continue
             target = Path(matches[0])
             original = target.read_text()
+            if sentence == "DIAGRAM_MUTATION":
+                # inject INSIDE the first ```text fence, which is the point of the test
+                marker = "```text\n"
+                idx = original.index(marker) + len(marker)
+                target.write_text(original[:idx] + "   Adapter (ACP)\n" + original[idx:])
+                ok, hits = run_gate(base)
+                named = [h for h in hits if h.startswith(target.name + ":")]
+                check(label, bool(named), "not caught inside the fence")
+                target.write_text(original)
+                continue
             if "## Evidence log" in original:
                 head, sep, tail = original.partition("## Evidence log")
                 target.write_text(head + "\n" + sentence + "\n\n" + sep + tail)
@@ -126,9 +146,14 @@ def main() -> int:
                 target.write_text(original + "\n\n" + sentence + "\n")
             ok, hits = run_gate(base)
             named = [h for h in hits if h.startswith(target.name + ":")]
-            quoted = [h for h in named if sentence.rstrip(".") in h]
+            # Compare on a normalised core: the gate truncates its snippet at 90
+            # chars and strips indentation, so an exact substring test fails for an
+            # indented YAML line even when the hit is correct. The earlier version
+            # reported "caught but sentence not quoted" for a genuine catch.
+            core = " ".join(sentence.strip().rstrip(".").split())[:40]
+            quoted = [h for h in named if core[:25] in " ".join(h.split())]
             check(label, bool(named) and bool(quoted),
-                  "not caught" if not named else "caught but sentence not quoted")
+                  "not caught" if not named else f"caught but snippet lacks {core[:25]!r}")
             target.write_text(original)
 
         # a dated retraction IS exempt; a bare quote is NOT

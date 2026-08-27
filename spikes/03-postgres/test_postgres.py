@@ -286,7 +286,7 @@ def s4_claim_vs_denial():
     # deny, then attempt a claim
     with conn.cursor() as c:
         c.execute("UPDATE approvals SET status='denied', decided_by='alice',"
-                  " decided_by_kind='human', responded_at=now()"
+                  " decided_by_kind='human', decided_at=now()"
                   " WHERE tenant_id=1 AND approval_id='a4'")
         c.execute("UPDATE effect_ledger SET status='denied' WHERE tenant_id=1"
                   " AND idempotency_key='k4' AND status='awaiting_approval'")
@@ -308,7 +308,7 @@ def s4_claim_vs_denial():
                   " request_digest, status) VALUES "
                   "(1,'k4b','r1','tool_call','d','awaiting_approval')")
         c.execute("INSERT INTO approvals (tenant_id, approval_id, run_id, action_ref,"
-                  " status, decided_by, decided_by_kind, responded_at, expires_at)"
+                  " status, decided_by, decided_by_kind, decided_at, expires_at)"
                   " VALUES (1,'a4b','r1','k4b','approved','alice','human',now(),"
                   " now() + interval '24 hours')")
     conn.commit()
@@ -627,8 +627,9 @@ def s9_approver_must_be_human():
         try:
             with conn.cursor() as c:
                 c.execute("INSERT INTO approvals (tenant_id, approval_id, run_id,"
-                          " action_ref, status, decided_by, decided_by_kind, expires_at)"
-                          " VALUES (1,%s,'r1','k1','approved',%s,%s,"
+                          " action_ref, status, decided_by, decided_by_kind,"
+                          " decided_at, expires_at)"
+                          " VALUES (1,%s,'r1','k1','approved',%s,%s, now(),"
                           " now() + interval '1 hour')",
                           (f"a-{who}-{kind}", who, kind))
             conn.commit()
@@ -645,8 +646,9 @@ def s9_approver_must_be_human():
     try:
         with conn.cursor() as c:
             c.execute("INSERT INTO approvals (tenant_id, approval_id, run_id, action_ref,"
-                      " status, decided_by, expires_at) VALUES (1,'a-nokind','r1','k1',"
-                      "'approved','alice', now() + interval '1 hour')")
+                      " status, decided_by, decided_at, expires_at) VALUES "
+                      "(1,'a-nokind','r1','k1','approved','alice', now(),"
+                      " now() + interval '1 hour')")
         conn.commit()
         check("a terminal approval without decided_by_kind is refused", False)
     except psycopg.errors.Error:
@@ -666,8 +668,8 @@ def s9_approver_must_be_human():
             c.execute("ALTER TABLE approvals DROP CONSTRAINT "
                       "approvals_decided_by_kind_check")
             c.execute("INSERT INTO approvals (tenant_id, approval_id, run_id, action_ref,"
-                      " status, decided_by, decided_by_kind, expires_at) VALUES "
-                      "(1,'a-nc','r1','k1','approved','bot','agent',"
+                      " status, decided_by, decided_by_kind, decided_at, expires_at)"
+                      " VALUES (1,'a-nc','r1','k1','approved','bot','agent', now(),"
                       " now() + interval '1 hour')")
             c.execute("SELECT decided_by, decided_by_kind FROM approvals"
                       " WHERE approval_id='a-nc'")
