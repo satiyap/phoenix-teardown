@@ -256,13 +256,13 @@ and confidentiality constraints — not only a mutation-pack restriction.
 ships a working tool executor and calling it is one line.
 
 **One harness, on Pydantic AI.** Pin: **`pydantic-ai-slim == 2.35.0`**, fixed by spike 06 on
-2026-08-27 (was a placeholder). The version string is a label for **sixteen** file digests: the
+2026-08-27 (was a placeholder). The version string is a label for **nineteen** file digests *(amended 2026-08-28, superseding "sixteen": that pin omitted `models/__init__.py`, where native-tool ADMISSION is decided — `resolve_request_tools` at `models/__init__.py:1812-1930` filters native tools against `supported_native_tools` — so the filter could be neutered with all 47 gates green; `profiles/__init__.py` and `capabilities/__init__.py` were added for the same reason)*: the
 source tree uses `uv-dynamic-versioning` (`pyproject.toml:5-6`) and carries no git tags, so it
 cannot state its own version. Spike 06 installed 2.35.0 from PyPI and verified every file the
 boundary's behaviour depends on is **byte-identical** to the read source at `b48ee38`:
 `__init__.py`, `agent/__init__.py`, `_tool_execution.py`, `_deferred.py`, `tools.py`,
 `messages.py`, `exceptions.py`, `toolsets/{__init__,abstract,external,approval_required,function}.py`,
-`native_tools/{__init__,_tool_search}.py` and `models/{function,test}.py`
+`native_tools/{__init__,_tool_search}.py`, `models/{__init__,function,test}.py`, `profiles/__init__.py` and `capabilities/__init__.py`
 *(amended 2026-08-27, superseding "five file digests" naming only `agent/__init__.py`,
 `_tool_execution.py`, `toolsets/external.py`, `toolsets/approval_required.py` and `_deferred.py`:
 that pin left `native_tools/__init__.py` — the module that decides which vendor-hosted tools may
@@ -275,7 +275,7 @@ text said "the `ToolCall → ledger` boundary is a **decorator** rather than a f
 an executor that wants to run. It does not, and interception is the weaker design. Phoenix
 declares tools through `ExternalToolset`, whose `call_tool` raises
 `NotImplementedError('External tools cannot be called directly')` **unconditionally**
-(`toolsets/external.py:44 @ b48ee38`) while `get_tools` still advertises them to the model with
+(`toolsets/external.py:46 @ b48ee38` *(citation corrected 2026-08-28: the unconditional raise is at `:46`; `:44` is the `call_tool` parameter line)*) while `get_tools` still advertises them to the model with
 `kind='external'` (`:36`). **The SDK is never given an executable body**, so there is no executor
 to disable and no wrapper for a future version to route around. `@agent.tool` is not used by
 Phoenix at all; spike 06's negative control shows it *is* the bypass.
@@ -323,7 +323,7 @@ version of this paragraph (superseded 2026-08-27) claimed the restriction was fr
 the entire guarantee — the guarantee is real, the zero cost was not.
 
 **Required by §08 inventory rows 30a–30e.** **VERIFIED 2026-08-27 by
-`spikes/06-tool-interception/` — 18 gate assertions**, whose negative control runs the same
+`spikes/06-tool-interception/` — 53 gate assertions** *(amended 2026-08-28: was "18", the round-1 count; rounds 2, 3 and 4 took it 18 → 26 → 47 → 53, and nothing in `tools/` reads this number)*, whose negative control runs the same
 function through `FunctionToolset` and observes the body execute with **zero ledger rows**. Its
 oracle is a filesystem side channel the harness never touches, so the assertions are about
 observable effects rather than the SDK's own accounting.

@@ -7,7 +7,7 @@ side-channel that this module never touches.
 The claim being tested is NOT "we can wrap the decorator". Reading the source
 showed Pydantic AI already has the shape Phoenix needs:
 
-  * `toolsets/external.py:44` — `ExternalToolset.call_tool` raises
+  * `toolsets/external.py:46` — `ExternalToolset.call_tool` raises
     `NotImplementedError('External tools cannot be called directly')`
     UNCONDITIONALLY. An external tool has no executable body inside the SDK.
   * `_deferred.py:27` — `DeferredToolRequests` used as an `output_type` ENDS the
@@ -38,6 +38,7 @@ closed:
 """
 from __future__ import annotations
 
+import inspect
 import json
 import secrets
 import time
@@ -95,7 +96,12 @@ CLAIMED_STATUS: frozenset[str] = frozenset(
 COMPLETED_STATUS: frozenset[str] = frozenset({"succeeded", "failed"})
 SETTLEABLE_STATUS: frozenset[str] = frozenset({"succeeded", "failed", "indeterminate"})
 
-RUN_LEASE_SECONDS = 300.0
+# `spec/02-consistency.md:463` fixes the TTLs: "run lease 60s with renewal every 20s;
+# effect claim 5 min, no renewal". CORRECTED 2026-08-28 (round 4): this was 300.0, five
+# times the specified run lease, which is also why no gate could observe a run lease
+# expiring while an effect claim was still open (the asymmetry of `spec/02:268-286`).
+# The gates pin the clock, so no assertion depends on the value.
+RUN_LEASE_SECONDS = 60.0
 EFFECT_LEASE_SECONDS = 300.0
 
 
@@ -113,8 +119,21 @@ class RunLease:
     fence_token: str
     expires_at: float
 
-    def authorises(self, run_id: str, holder: str, now: float) -> bool:
+    def authorises(self, run_id: str, holder: str, fence: str | None,
+                   now: float) -> bool:
+        """ADDED 2026-08-28 (round 4): the FENCE half of predicate (b).
+
+        `spec/02-consistency.md:248` states the predicate as
+        `... AND l.holder=$worker AND l.fence_token=$fence AND l.expires_at > now()`,
+        and `spec/02:440-443` says it must appear in every fenced write precisely
+        because a lease row holding a *higher* token still matches an EXISTS that
+        omits the token, so the stale worker's write lands. Until now `fence_token`
+        was stored (`:113`) and never read anywhere in this spike, so only the
+        holder and expiry halves were implemented. A caller that supplies no fence
+        fails closed.
+        """
         return (self.run_id == run_id and self.holder == holder
+                and fence is not None and self.fence_token == fence
                 and self.expires_at > now)
 
 
@@ -190,7 +209,24 @@ class EffectLedger:
 
     # ---- phase 1: intent ----------------------------------------------------
     def append(self, row: LedgerRow) -> None:
+        """`spec/01-schema.md:366-367` — THE PRIMITIVE: recording intent is an
+        insert, and `PRIMARY KEY (tenant_id, idempotency_key)` makes losing the race
+        a conflict. `spec/02-consistency.md:202-204` makes a duplicate intent a
+        no-op: `ON CONFLICT (tenant_id, idempotency_key) DO NOTHING` — "no row => this
+        effect already exists. Read it and DO NOT re-derive intent."
+
+        ADDED 2026-08-28 (round 4). This appended unconditionally, so the ledger had
+        no key uniqueness at all: intending the same call twice left TWO rows, and
+        because `_index()` returns the FIRST match the duplicate was permanently
+        unreachable and sat at `intended` forever — the exact state a stuck-effect
+        sweep is meant to never see. DO NOTHING is chosen over raising to match the
+        spec's statement, which is a no-op and not an error; the caller's next read
+        finds the existing row.
+        """
         self._check(row)
+        if any(r.tool_call_id == row.tool_call_id and r.run_id == row.run_id
+               for r in self._rows):
+            return  # ON CONFLICT ... DO NOTHING (spec/02-consistency.md:202)
         self._rows.append(row)
 
     # ---- phase 2: approval --------------------------------------------------
@@ -223,8 +259,9 @@ class EffectLedger:
 
     # ---- phase 3: claim -----------------------------------------------------
     def claim(self, tool_call_id: str, owner: str, token: str, *,
-              lease: RunLease | None, approved: bool = False) -> None:
-        """`spec/02-consistency.md:227-247`, both predicates:
+              lease: RunLease | None, fence: str | None = None,
+              approved: bool = False) -> None:
+        """`spec/02-consistency.md:227-248`, both predicates:
 
         (a) the effect is claimable — `intended`, or `awaiting_approval` WITH an
             approval;
@@ -232,6 +269,12 @@ class EffectLedger:
             whose run was already reclaimed could still take a fresh effect claim
             and dispatch it, which is the duplicate execution the run lease exists
             to prevent.
+
+        `fence` is the fence token the CLAIMANT believes it holds, checked against
+        the lease's own token (`spec/02:248`). ADDED 2026-08-28 (round 4): predicate
+        (b) previously compared holder and expiry only, so a worker holding a
+        superseded token could claim under a lease that had been reclaimed at a
+        higher one.
         """
         i = self._index(tool_call_id)
         row = self._rows[i]
@@ -249,11 +292,12 @@ class EffectLedger:
                 "claim requires an unexpired run lease "
                 "(spec/02-consistency.md:246, predicate (b))")
         now = self.clock()
-        if not lease.authorises(row.run_id, owner, now):
+        if not lease.authorises(row.run_id, owner, fence, now):
             raise LedgerRefused(
                 "the run lease does not authorise this claim: it must be held by "
-                f"{owner!r} for run {row.run_id!r} and unexpired "
-                "(spec/02-consistency.md:246)")
+                f"{owner!r} for run {row.run_id!r}, under the fence token the lease "
+                "carries, and unexpired "
+                "(spec/02-consistency.md:246-248)")
         self._replace(i, status="claimed", claim_owner=owner, claim_token=token,
                       lease_expires_at=now + EFFECT_LEASE_SECONDS)
 
@@ -327,13 +371,24 @@ class Turn:
         return tuple(self.requests.approvals) if self.requests else ()
 
 
-SDK_SURFACE_ARGS = ("native_tools", "toolsets", "tools")
+SDK_SURFACE_ARGS = ("native_tools", "toolsets", "tools", "capabilities")
 
 
 def _reject_sdk_surface(where: str, kw: dict[str, Any]) -> None:
     """`native_tools=` and `toolsets=` are the two ways a caller could hand the SDK
     something Phoenix cannot ledger. Both are refused, at the door — whatever their
-    value, so that even `native_tools=None` is a refusal rather than a near miss."""
+    value, so that even `native_tools=None` is a refusal rather than a near miss.
+
+    AMENDED 2026-08-28 (round 4): THREE ways, not two. `capabilities=`
+    (`agent/__init__.py:618`) is a first-class public route in 2.35.0 and delivers
+    both native tools (`capabilities.NativeTool` — verified: it reaches a
+    `FunctionModel` recorder as `WebSearchTool(kind='web_search', ...)`) and
+    executable LOCAL bodies (`capabilities.Toolset`, `MCP(local=True)`,
+    `WebSearch(local=...)`), i.e. exactly what `ExternalToolset` exists to withhold.
+    `Agent.__init__` also auto-injects capabilities (`_inject_auto_capabilities`,
+    `agent/__init__.py:630`). It was previously refused only by the catch-all
+    "unknown arguments" branch below, with no gate on it; it is now refused BY NAME
+    so the message says which surface was refused."""
     for name in SDK_SURFACE_ARGS:
         if name in kw:
             raise UninterceptableTool(
@@ -352,12 +407,26 @@ class PhoenixHarness:
     is told the tool exists so the model can call it; the SDK is given no way to
     run it.
 
-    THE AGENT IS NOT REACHABLE. `build_agent()` used to return it, which made every
-    guarantee in this file advisory — `agent.override(native_tools=[WebSearchTool()])`
+    NO PUBLIC NAME YIELDS THE AGENT. `build_agent()` used to return it, which made
+    every guarantee in this file advisory — `agent.override(native_tools=[WebSearchTool()])`
     on a model that supports native tools delivers a vendor-hosted tool with no
     Phoenix involvement (demonstrated as a negative control in `test_gate.py`). The
     agent now lives behind a name-mangled attribute and the public surface is
     `register` / `run` / `resume` / `stream_output` / `resolve`.
+
+    AMENDED 2026-08-28 (round 4). This docstring previously opened "THE AGENT IS NOT
+    REACHABLE." That absolute claim was false and is superseded, not erased. Name
+    mangling is not access control: `h._PhoenixHarness__build()` returns the Agent,
+    and both `test_gate.py`'s `LeakyHarness` control and `mutate.py`'s "expose the
+    Agent" mutation use exactly that idiom. Executed against this file:
+    `override(native_tools=[WebSearchTool()])` on the mangled agent delivers the
+    native tool to the model, and `override(toolsets=[FunctionToolset(...)])` runs a
+    registered tool's BODY — both with zero ledger rows. In-process, the tool author
+    and the platform share an interpreter; the ledger boundary here is enforced
+    against ACCIDENT and against the SDK's own surface, not against a hostile
+    in-process caller. A hostile-caller boundary needs the process split of OQ-056.
+    `test_gate13_the_mangled_accessor_is_a_known_limitation` asserts that limitation
+    is real rather than absent.
     """
 
     def __init__(self, *, ledger: EffectLedger, model: Any = None,
@@ -501,9 +570,23 @@ class PhoenixHarness:
         lease = self._lease_for(run_id)
         owner = lease.holder if lease else f"worker:{run_id}"
         token = secrets.token_hex(16)
-        self.ledger.claim(call.tool_call_id, owner, token, lease=lease)
+        self.ledger.claim(call.tool_call_id, owner, token, lease=lease,
+                          fence=lease.fence_token if lease else None)
 
-        # --- everything to the `impl(**args)` line below is BEFORE dispatch ---
+        # --- everything to the `impl(...)` line below is BEFORE dispatch ---
+        #
+        # CORRECTED 2026-08-28 (round 4). Argument BINDING used to happen at the
+        # `impl(**args)` call itself, inside the dispatch try — but Python raises
+        # binding errors AT the call, before the body is entered, so a call whose
+        # argument NAMES did not match the impl was recorded `indeterminate` /
+        # `dispatch_lost_contact` although nothing was dispatched. That manufactures
+        # uncertainty, which `spec/05-state-machine.md:110` says is never free, and
+        # contradicts `spec/02-consistency.md:327-328`: "indeterminate now means only
+        # 'we took a lease, dispatched, and lost contact' — real uncertainty, never
+        # bookkeeping". Binding is now done here, with `inspect.signature().bind`, so
+        # only exceptions raised by the BODY can reach the indeterminate branch. The
+        # JSON-decode branch below is unreachable on the SDK path (args arrive as a
+        # dict); the binding branch is the one a model actually hits.
         try:
             args = (call.args if isinstance(call.args, dict)
                     else json.loads(call.args or "{}"))
@@ -514,10 +597,17 @@ class PhoenixHarness:
                                owner=owner, token=token,
                                error_code="arguments_undecodable")
             raise
+        try:
+            bound = inspect.signature(impl).bind(**args)
+        except Exception:
+            self.ledger.settle(call.tool_call_id, "failed", None,
+                               owner=owner, token=token,
+                               error_code="arguments_unbindable")
+            raise
 
         # --- the dispatch itself. After this line the outcome is unknowable. ---
         try:
-            result = impl(**args)
+            result = impl(*bound.args, **bound.kwargs)
         except Exception:
             self.ledger.settle(call.tool_call_id, "indeterminate", None,
                                owner=owner, token=token,

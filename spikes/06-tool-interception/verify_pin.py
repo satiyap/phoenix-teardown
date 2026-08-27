@@ -15,6 +15,19 @@ statements of `harness.py` and `test_gate.py` (`sdk_modules_imported_by`) rather
 than from a second hand-kept list, so the pin and its coverage check cannot drift
 together.
 
+WHY IT WAS REVISED AGAIN (2026-08-28, round 4). Round 3's sixteen files omitted
+`models/__init__.py`, which is where native-tool ADMISSION is decided
+(`ModelRequestParameters.native_tools` at `:179`; `resolve_request_tools` at
+`:1812-1930`, whose `:1849` filter is what rejects an unsupported native tool), and
+`profiles/__init__.py`, the source of `supported_native_tools`. Review reproduced
+the round-2 defect verbatim in a scratch copy of the SDK: replace the admission
+filter so no model can reject a native tool, and this file still printed "pin holds:
+16 files" with all 47 gates green. Both are now pinned. The coverage oracle was also
+blind by construction -- it never added the ancestor package `__init__.py` files an
+import executes, so it returned a strict SUBSET of the hand-written list. It now
+adds them, and `frontier()` records the one-level transitive edge of the pin so a
+new import out of a pinned file is a decision rather than a silent widening.
+
 `requirements.txt` pins `pydantic-ai-slim==2.35.0`, but that string is only a
 label -- the source tree uses `uv-dynamic-versioning` (`pyproject.toml:5-6`) and
 the read clone has no git tags, so it cannot state its own version. These digests
@@ -61,6 +74,21 @@ REQUIRED_PINS: tuple[str, ...] = (
     # the two models the gates drive, one of which SUPPORTS native tools
     "models/function.py",
     "models/test.py",
+    # ADDED 2026-08-28 (round 4). Native-tool ADMISSION is decided here, not in
+    # `native_tools/`: `models/__init__.py:179` defines
+    # `ModelRequestParameters.native_tools` -- the exact object gate 13's recorder
+    # asserts is empty -- and `resolve_request_tools` (`models/__init__.py:1812-1930`)
+    # is the function that filters native tools against `supported_native_tools` and
+    # raises `UserError('Native tool(s) ... not supported by this model')` at `:1849`.
+    # Round 3's pin covered sixteen files and omitted both of these, so the admission
+    # filter could be replaced with `supported_natives = list(params.native_tools)`
+    # and `verify_pin.py` still printed "pin holds" with all 47 gates green.
+    "models/__init__.py",
+    "profiles/__init__.py",   # the source of `supported_native_tools`
+    # `capabilities=` is the THIRD SDK surface that delivers tools (round 4): it
+    # carries both native tools and executable LOCAL bodies. Gate 13 asserts the
+    # harness refuses it, so these bytes are load-bearing too.
+    "capabilities/__init__.py",
 )
 
 
@@ -99,12 +127,42 @@ def module_to_relpath(dotted: str) -> str | None:
     return None
 
 
+def ancestor_inits(rel: str) -> set[str]:
+    """`models/function.py` -> {`models/__init__.py`, `__init__.py`}.
+
+    ADDED 2026-08-28 (round 4). Importing `pydantic_ai.models.function` EXECUTES
+    `pydantic_ai/__init__.py` and `pydantic_ai/models/__init__.py` first; those bytes
+    are as load-bearing as the leaf module's. Omitting them is why the round-3 oracle
+    could not see the `models/__init__.py` hole.
+    """
+    out: set[str] = set()
+    parts = rel.split("/")[:-1]
+    while True:
+        candidate = "/".join([*parts, "__init__.py"])
+        if candidate != rel and (sdk_root() / candidate).is_file():
+            out.add(candidate)
+        if not parts:
+            return out
+        parts.pop()
+
+
 def sdk_modules_imported_by(paths) -> set[str]:
     """Every SDK file imported from by the given source files, read with `ast`.
 
     This is the independent oracle for the pin's COVERAGE (rule 5): it is derived
     from the spike's own import statements, so adding a dependency on a new SDK
     module without pinning it is a gate failure rather than a silent gap.
+
+    AMENDED 2026-08-28 (round 4). As written in round 3 this mapped each dotted name
+    to a SINGLE relpath and never added the ancestor package `__init__.py` files
+    Python must execute to perform the import, so
+    `from pydantic_ai.models.function import FunctionModel` yielded only
+    `models/function.py`. Measured at that commit it returned exactly ten modules --
+    a strict SUBSET of the sixteen hand-written `REQUIRED_PINS` -- so it asserted
+    nothing the hand-kept list did not already assert, and `'models/__init__.py' in
+    imported` was False. It could not have caught the admission-path hole. It now
+    adds every ancestor package `__init__.py`, which makes it catch that hole on its
+    own.
     """
     found: set[str] = set()
     for path in paths:
@@ -119,7 +177,80 @@ def sdk_modules_imported_by(paths) -> set[str]:
                 rel = module_to_relpath(dotted)
                 if rel:
                     found.add(rel)
+                    found |= ancestor_inits(rel)
     return found
+
+
+def sdk_imports_of(rel: str) -> set[str]:
+    """Every SDK module the PINNED file `rel` imports from, relative imports included.
+
+    `sdk_modules_imported_by` reads the spike's own sources, which use absolute
+    imports only. Inside the SDK almost every import is relative, so resolving
+    `node.level` is required or the walk below sees nothing.
+    """
+    pkg = rel.split("/")[:-1]
+    found: set[str] = set()
+    tree = ast.parse((sdk_root() / rel).read_text())
+    for node in ast.walk(tree):
+        dotted_names: list[str] = []
+        if isinstance(node, ast.ImportFrom):
+            if node.level:
+                base = ["pydantic_ai", *pkg][: len(pkg) + 1 - (node.level - 1)]
+                if node.module:
+                    dotted_names.append(".".join([*base, node.module]))
+                else:
+                    dotted_names += [".".join([*base, a.name]) for a in node.names]
+            elif node.module:
+                dotted_names.append(node.module)
+        elif isinstance(node, ast.Import):
+            dotted_names += [a.name for a in node.names]
+        for dotted in dotted_names:
+            got = module_to_relpath(dotted)
+            if got:
+                found.add(got)
+                found |= ancestor_inits(got)
+    return found
+
+
+def frontier(files) -> list[str]:
+    """The one-level transitive frontier: SDK modules the pinned files import and
+    that are NOT themselves pinned.
+
+    ADDED 2026-08-28 (round 4). The pin covers the files whose bytes an assertion in
+    this spike depends on DIRECTLY. It deliberately does not cover the transitive
+    closure, which at this SDK is effectively the whole distribution (284 modules,
+    including every vendor model adapter). Leaving that unstated is what let the
+    `models/__init__.py` hole sit unnoticed, so the frontier is now RECORDED in
+    `pinned_digests.json` and compared on every check: a pinned file growing a new
+    import into a module nobody has looked at is a deliberate decision, not a silent
+    widening.
+    """
+    reached: set[str] = set()
+    for rel in files:
+        reached |= sdk_imports_of(rel)
+    return sorted(reached - set(files))
+
+
+def frontier_problems(recorded, files) -> list[str]:
+    """Compare the recorded frontier with the one computed from the installed SDK.
+
+    Injectable so a gate can plant a wrong frontier and prove this objects (rule 4)
+    without writing to the live pin file (rule 7).
+    """
+    got = frontier(files)
+    if recorded is None:
+        return ["the pin records no _coverage_frontier"]
+    added = sorted(set(got) - set(recorded))
+    gone = sorted(set(recorded) - set(got))
+    problems = []
+    if added:
+        problems.append(
+            "pinned files now import SDK modules outside the recorded frontier "
+            f"(neither pinned nor reviewed): {added}")
+    if gone:
+        problems.append(
+            f"the recorded frontier lists modules no pinned file imports: {gone}")
+    return problems
 
 
 def check(spec: dict | None = None) -> list[str]:
@@ -151,6 +282,7 @@ def check(spec: dict | None = None) -> list[str]:
         missing = [rel for rel in REQUIRED_PINS if rel not in files]
         if missing:
             problems.append(f"the pin no longer covers required files: {missing}")
+        problems += frontier_problems(spec.get("_coverage_frontier"), sorted(files))
     return problems
 
 
@@ -169,9 +301,11 @@ def require() -> None:
 def record() -> None:
     """Rewrite the pin from the installed SDK. A DELIBERATE act, never automatic."""
     spec = json.loads(PIN.read_text())
-    spec["files"] = {rel: digest(rel) for rel in REQUIRED_PINS}
+    spec["files"] = {rel: digest(rel) for rel in sorted(REQUIRED_PINS)}
+    spec["_coverage_frontier"] = frontier(sorted(REQUIRED_PINS))
     PIN.write_text(json.dumps(spec, indent=2) + "\n")
-    print(f"recorded {len(spec['files'])} digests from {sdk_root()}")
+    print(f"recorded {len(spec['files'])} digests and a "
+          f"{len(spec['_coverage_frontier'])}-module frontier from {sdk_root()}")
 
 
 if __name__ == "__main__":

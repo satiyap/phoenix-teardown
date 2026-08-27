@@ -2,9 +2,17 @@
 
 INVARIANT, STATED FIRST (rule 1):
     A tool body executes only after the platform has written an `effect_ledger`
-    row for that exact call. There is no path -- construction, model-driven
-    call, resume, approval, streaming, or error -- by which a registered tool
-    body runs without one.
+    row for that exact call. There is no path THROUGH THE HARNESS'S PUBLIC
+    SURFACE -- construction, model-driven call, resume, approval, streaming, or
+    error -- by which a registered tool body runs without one.
+
+SCOPED 2026-08-28 (round 4), superseding the unqualified wording above (which
+said "no path" without naming the surface). The boundary holds against a
+COOPERATING in-process caller. `h._PhoenixHarness__build()` still returns the
+`Agent`, and `override(native_tools=...)` / `override(toolsets=...)` on it
+bypass the ledger entirely; `test_gate13_the_mangled_accessor_is_a_known_limitation`
+asserts that limitation is real rather than absent. A boundary against a hostile
+in-process caller requires the process split of OQ-056.
 
 THE ORACLE IS INDEPENDENT (rule 5). Every tool in this file writes a line to a
 real file in `tmp_path`. `harness.py` never reads or writes that file, so the
@@ -120,8 +128,67 @@ def test_gate0_pin_covers_the_native_tool_admission_path():
     """The specific hole review found: admission is decided by `native_tools`."""
     for rel in ("native_tools/__init__.py", "native_tools/_tool_search.py",
                 "models/function.py", "models/test.py", "toolsets/__init__.py",
-                "toolsets/abstract.py"):
+                "toolsets/abstract.py",
+                # ADDED 2026-08-28 (round 4). ADMISSION is decided HERE, not in
+                # `native_tools/`: `models/__init__.py` defines
+                # `ModelRequestParameters.native_tools` (`:179`) -- the object the
+                # gate 13 recorder asserts is empty -- and `resolve_request_tools`
+                # (`:1812-1930`), which filters native tools against
+                # `supported_native_tools` at `:1849` and raises
+                # `UserError('Native tool(s) ... not supported by this model')`.
+                # `profiles/__init__.py` is where `supported_native_tools` comes
+                # from. Round 3 pinned sixteen files and neither of these, so the
+                # admission filter could be replaced wholesale with the pin still
+                # reporting "pin holds" and all 47 gates green.
+                "models/__init__.py", "profiles/__init__.py"):
         assert rel in verify_pin.pinned(), f"{rel} decides behaviour and is unpinned"
+
+
+def test_gate0_the_import_oracle_reaches_the_admission_path_on_its_own():
+    """Rule 5 for the oracle itself: it must be able to FIND the hole, not just
+    agree with the hand-kept list.
+
+    ADDED 2026-08-28 (round 4). `sdk_modules_imported_by` mapped each dotted name to
+    a single relpath and never added the ancestor package `__init__.py` files an
+    import executes, so it returned exactly ten modules -- a strict SUBSET of
+    `REQUIRED_PINS` -- and `'models/__init__.py' in imported` was False. It asserted
+    nothing the hand-kept list did not already assert. It now adds ancestors, so the
+    module that decides admission is reached from the spike's own imports.
+    """
+    imported = verify_pin.sdk_modules_imported_by(
+        [HERE / "harness.py", HERE / "test_gate.py"])
+    assert "models/__init__.py" in imported, \
+        "the oracle still cannot see the package __init__ an import executes"
+    assert "__init__.py" in imported and "toolsets/__init__.py" in imported
+    round3_list = set(verify_pin.REQUIRED_PINS) - {"models/__init__.py",
+                                                   "profiles/__init__.py"}
+    assert not imported <= round3_list, \
+        "the oracle adds nothing round 3's hand-kept list did not already assert"
+
+
+def test_gate0_negative_control_an_unrecorded_frontier_module_is_caught():
+    """Rule 4 for what is DELIBERATELY out of the pin.
+
+    The pin does not cover the transitive closure -- 284 modules, including every
+    vendor model adapter. `pinned_digests.json:_coverage_frontier` records the
+    one-level edge instead, and `check()` compares it, so a pinned file that grows
+    an import into a module nobody has looked at fails rather than widening the
+    unexamined surface silently. This plants a doctored frontier; nothing is
+    written to the live pin file (rule 7).
+    """
+    files = sorted(verify_pin.pinned())
+    real = verify_pin.frontier(files)
+    assert len(real) > len(files), "the frontier is inert if it reaches nothing"
+    assert verify_pin.frontier_problems(real, files) == []
+
+    dropped = verify_pin.frontier_problems([r for r in real if r != "_utils.py"], files)
+    assert len(dropped) == 1 and "_utils.py" in dropped[0]
+    assert "outside the recorded frontier" in dropped[0]
+
+    invented = verify_pin.frontier_problems([*real, "models/no_such.py"], files)
+    assert len(invented) == 1 and "no pinned file imports" in invented[0]
+    assert verify_pin.frontier_problems(None, files) == \
+        ["the pin records no _coverage_frontier"]
 
 
 def test_gate0_negative_control_a_fake_digest_is_caught():
@@ -433,6 +500,14 @@ def test_gate6_negative_control_a_new_native_tool_subclass_turns_the_gate_red(tm
     mechanism every shipped native tool uses -- without touching this process or
     the installed SDK (rule 7). Copying the SDK itself would trip the digest pin
     first, and the child would then go red for the wrong reason.
+
+    CORRECTED 2026-08-28 (round 4). The child used to run at `cwd=HERE`, the LIVE
+    spike directory, so it wrote `__pycache__/` and `.pytest_cache/` into a tree
+    this test does not uniquely own while the parent session was running there too.
+    Not destructive, and six concurrent runs were green -- but it is the asymmetry
+    rule 7 names, and the two neighbouring controls
+    (`..._a_mismatched_pin_aborts_COLLECTION`, `test_rule7_...`) already ran in an
+    owned copy for exactly this reason. It now does the same.
     """
     plugin = tmp_path / "fake_native_tool.py"
     plugin.write_text(
@@ -442,10 +517,11 @@ def test_gate6_negative_control_a_new_native_tool_subclass_turns_the_gate_red(tm
         "class FakeVendorTool(AbstractNativeTool):\n"
         "    kind: str = 'fake_vendor_search'\n")
     env = dict(os.environ, PYTHONPATH=str(tmp_path))
+    work = copy_spike(tmp_path / "spike")
     r = subprocess.run(
         [sys.executable, "-m", "pytest", "test_gate.py", "-q", "-p", "fake_native_tool",
          "-k", "instantiated_and_refused or matches_the_sdk_registry"],
-        cwd=str(HERE), capture_output=True, text=True, env=env)
+        cwd=str(work), capture_output=True, text=True, env=env)
 
     assert r.returncode != 0, "a new vendor-hosted tool was admitted with the gate green"
     assert "fake_vendor_search" in (r.stdout + r.stderr), r.stdout[-2000:]
@@ -496,7 +572,7 @@ def test_gate6_test_model_refuses_native_tools_is_a_fact_about_TestModel(led):
 def test_gate6_external_toolset_refuses_direct_invocation():
     """The SDK's own guarantee, asserted rather than assumed.
 
-    `toolsets/external.py:44` raises unconditionally. If a future version made
+    `toolsets/external.py:46` raises unconditionally. If a future version made
     this executable, this test fails and the harness assumption is void.
     """
     import asyncio
@@ -647,6 +723,43 @@ def test_gate11_a_raise_BEFORE_dispatch_is_failed_not_indeterminate(chan, led):
     assert row.claim_owner == "worker:run-1" and row.claim_token
 
 
+def test_gate11_arguments_that_do_not_BIND_are_failed_not_indeterminate(chan, led):
+    """The pre-dispatch branch a model actually reaches.
+
+    ADDED 2026-08-28 (round 4). Argument BINDING used to happen at the
+    `impl(**args)` call inside the dispatch try, and Python raises binding errors AT
+    the call, before the body is entered -- so a call whose argument NAMES did not
+    match the impl was recorded `indeterminate` / `dispatch_lost_contact` although
+    nothing was dispatched. `spec/05-state-machine.md:110`: "Manufacturing
+    uncertainty is not free -- every `indeterminate` run costs human attention, so
+    the state must be reserved for cases where uncertainty is real."
+    `spec/02-consistency.md:327-328`: "indeterminate now means only 'we took a
+    lease, dispatched, and lost contact' -- real uncertainty, never bookkeeping."
+
+    The sibling test above exercises the JSON-decode branch, which is UNREACHABLE on
+    the real path: args arrive from the SDK as a dict. This is the branch a
+    hallucinated or renamed parameter hits, so no gate could have gone red on it.
+    """
+    h = harness(led)
+    h.register("send_email", SCHEMA, lambda to: chan.touch(f"send_email:{to}"))
+
+    class WrongArgName:
+        tool_call_id = "tc-unbindable"
+        tool_name = "send_email"
+        args = {"recipient": "a"}   # the impl takes `to`
+
+    h.intend("run-1", WrongArgName())
+    with pytest.raises(TypeError, match="missing a required argument"):
+        h.dispatch("run-1", WrongArgName())
+
+    assert chan.lines == [], "the body must NOT have run"
+    row = led.rows_for("tc-unbindable")[0]
+    assert row.status == "failed", \
+        "nothing was dispatched, so the outcome is KNOWN -- not `indeterminate`"
+    assert row.error_code == "arguments_unbindable"
+    assert row.completed_at is not None, "a failed effect is completed"
+
+
 def test_gate11_negative_control_intended_would_hide_the_effect(chan, led):
     """Mutation control for gate 11: prove the assertion discriminates.
 
@@ -726,7 +839,7 @@ def _claimed_row(led, *, run_id="run-1", call_id="tc-1", owner="worker:run-1",
     led.clock = clock
     led.append(LedgerRow(run_id, call_id, "send_email", "{}", "intended"))
     lease = RunLease(run_id=run_id, holder=owner, fence_token="f", expires_at=clock() + 300)
-    led.claim(call_id, owner, token, lease=lease)
+    led.claim(call_id, owner, token, lease=lease, fence=lease.fence_token)
     return lease
 
 
@@ -781,12 +894,80 @@ def test_gate12_claim_with_an_expired_or_foreign_run_lease_is_refused(led):
             (RunLease("run-1", "another-worker", "f", 2000.0), "held by someone else"),
             (RunLease("run-OTHER", "worker:run-1", "f", 2000.0), "for another run")):
         with pytest.raises(LedgerRefused, match="does not authorise this claim"):
-            led.claim("tc-1", "worker:run-1", "tok", lease=bad)
+            led.claim("tc-1", "worker:run-1", "tok", lease=bad, fence="f")
         assert led.rows_for("tc-1")[0].status == "intended", why
     # ...and a good lease is accepted, so the refusals above are the predicate.
     led.claim("tc-1", "worker:run-1", "tok",
-              lease=RunLease("run-1", "worker:run-1", "f", 2000.0))
+              lease=RunLease("run-1", "worker:run-1", "f", 2000.0), fence="f")
     assert led.rows_for("tc-1")[0].status == "claimed"
+
+
+def test_gate12_claim_under_a_SUPERSEDED_fence_token_is_refused(led):
+    """The fence half of predicate (b): `AND l.fence_token = $fence`
+    (`spec/02-consistency.md:248`).
+
+    ADDED 2026-08-28 (round 4). `fence_token` was stored on `RunLease` and read
+    NOWHERE, so only the holder and expiry halves of predicate (b) existed and a
+    worker holding a superseded token claimed successfully. `spec/02:440-443` is
+    explicit about why that matters: a lease row carrying a *higher* token still
+    matches an EXISTS that omits the token, so the stale worker's write lands.
+    """
+    led.clock = lambda: 1000.0
+    led.append(LedgerRow("run-1", "tc-1", "send_email", "{}", "intended"))
+    reclaimed = RunLease("run-1", "worker:run-1", "FENCE-2", 2000.0)
+
+    with pytest.raises(LedgerRefused, match="does not authorise this claim"):
+        led.claim("tc-1", "worker:run-1", "tok", lease=reclaimed, fence="FENCE-1")
+    assert led.rows_for("tc-1")[0].status == "intended", \
+        "a superseded fence token took the claim"
+    # ...and no fence at all is not a way around it.
+    with pytest.raises(LedgerRefused, match="does not authorise this claim"):
+        led.claim("tc-1", "worker:run-1", "tok", lease=reclaimed, fence=None)
+    assert led.rows_for("tc-1")[0].status == "intended"
+    # ...while the token the lease actually carries is accepted, so the two
+    # refusals above are the fence and not something incidental.
+    led.claim("tc-1", "worker:run-1", "tok", lease=reclaimed, fence="FENCE-2")
+    assert led.rows_for("tc-1")[0].status == "claimed"
+
+
+def test_gate12_a_second_intent_for_the_same_call_is_a_no_op(chan, led):
+    """`spec/01-schema.md:366-367` — THE PRIMITIVE: `PRIMARY KEY (tenant_id,
+    idempotency_key)`, and `spec/02-consistency.md:202-204` makes a duplicate intent
+    `ON CONFLICT ... DO NOTHING`.
+
+    ADDED 2026-08-28 (round 4). `append()` appended unconditionally, so the ledger
+    had no key uniqueness at all. Reproduced single-threaded through the PUBLIC
+    surface: `resolve()` twice for one call left two rows for one `tool_call_id` --
+    `[('c2','succeeded'), ('c2','intended')]` -- and since `_index()` returns the
+    first match the duplicate was permanently unreachable, stuck at `intended`
+    forever. Gate 3's "exactly one row per call" held only because no gate had ever
+    intended twice.
+    """
+    h = harness(led)
+    h.register("send_email", SCHEMA, lambda to: chan.touch(f"send_email:{to}"))
+    turn = h.run("email")
+
+    h.resolve("run-1", turn.requests)
+    call_id = turn.calls[0].tool_call_id
+    assert [r.status for r in led.rows_for(call_id)] == ["succeeded"]
+    assert chan.lines == ["send_email:a"]
+
+    # The same call, intended a second time. The duplicate intent is dropped, so
+    # the claim meets the SETTLED row rather than a fresh `intended` one and the
+    # effect is refused instead of executed twice.
+    with pytest.raises(LedgerRefused, match="claim requires status 'intended'"):
+        h.resolve("run-1", turn.requests)
+
+    rows = led.rows_for(call_id)
+    assert len(rows) == 1, f"a duplicate intent created a second row: {rows}"
+    assert rows[0].status == "succeeded", \
+        "the duplicate intent reset a settled effect to `intended`"
+    assert chan.lines == ["send_email:a"], "the effect was executed twice"
+
+    # Control for vacuity: a DIFFERENT key still appends, so the guard above is a
+    # key comparison and not a blanket refusal to record intent.
+    led.append(LedgerRow("run-1", "tc-other", "send_email", "{}", "intended"))
+    assert len(led.rows_for("tc-other")) == 1
 
 
 def test_gate12_an_expired_run_lease_stops_the_whole_dispatch(chan, led):
@@ -821,10 +1002,10 @@ def test_gate12_the_approval_phase_is_the_spec_one(led):
 
     good = RunLease("run-1", "worker:run-1", "f", 2000.0)
     with pytest.raises(LedgerRefused, match="requires an approval"):
-        led.claim("tc-1", "worker:run-1", "tok", lease=good)
+        led.claim("tc-1", "worker:run-1", "tok", lease=good, fence="f")
     assert led.rows_for("tc-1")[0].status == "awaiting_approval"
 
-    led.claim("tc-1", "worker:run-1", "tok", lease=good, approved=True)
+    led.claim("tc-1", "worker:run-1", "tok", lease=good, fence="f", approved=True)
     assert led.rows_for("tc-1")[0].status == "claimed"
 
 
@@ -944,15 +1125,34 @@ def test_gate13_no_public_name_on_the_harness_yields_an_agent(chan, led):
 
 
 def test_gate13_native_tools_and_toolsets_are_refused_at_the_door(led):
-    """A caller cannot hand the harness SDK surface Phoenix would not ledger."""
+    """A caller cannot hand the harness SDK surface Phoenix would not ledger.
+
+    EXTENDED 2026-08-28 (round 4) with `capabilities=`, the THIRD such surface and
+    the one this gate did not name. `Agent(capabilities=[...])`
+    (`agent/__init__.py:618-631`) delivers native tools -- verified: a
+    `FunctionModel` recorder handed `NativeTool(WebSearchTool())` through it sees
+    `WebSearchTool(kind='web_search', ...)` -- and `pydantic_ai.capabilities` also
+    exports `Toolset`, `MCP(local=True)` and `WebSearch(local='duckduckgo')`, which
+    carry a LOCAL EXECUTABLE BODY, i.e. exactly what `ExternalToolset` exists to
+    withhold. The harness already failed closed on it, but only through the
+    catch-all "unknown arguments" branch, with no gate asserting it and the refusal
+    naming no surface.
+    """
+    from pydantic_ai.capabilities import NativeTool
     from pydantic_ai.native_tools import WebSearchTool
 
     with pytest.raises(UninterceptableTool, match="native_tools="):
         PhoenixHarness(ledger=led, model=TestModel(), native_tools=[WebSearchTool()])
     with pytest.raises(UninterceptableTool, match="toolsets="):
         PhoenixHarness(ledger=led, model=TestModel(), toolsets=[FunctionToolset()])
+    with pytest.raises(UninterceptableTool, match="capabilities="):
+        PhoenixHarness(ledger=led, model=TestModel(),
+                       capabilities=[NativeTool(WebSearchTool())])
 
     h = harness(led)
+    with pytest.raises(UninterceptableTool, match="capabilities="):
+        h.register("send_email", SCHEMA, lambda to: None,
+                   capabilities=[NativeTool(WebSearchTool())])
     with pytest.raises(UninterceptableTool, match="native_tools="):
         h.register("send_email", SCHEMA, lambda to: None, native_tools=[WebSearchTool()])
     with pytest.raises(UninterceptableTool, match="native_tools="):
@@ -962,6 +1162,46 @@ def test_gate13_native_tools_and_toolsets_are_refused_at_the_door(led):
     with pytest.raises(UninterceptableTool, match="tools="):
         h.register("send_email", SCHEMA, lambda to: None, tools=[lambda: None])
     assert led.rows == []
+
+
+def test_gate13_the_mangled_accessor_is_a_known_limitation(chan, led):
+    """The STATED LIMIT of an in-process boundary, asserted rather than left absent.
+
+    ADDED 2026-08-28 (round 4). `harness.py` claimed "THE AGENT IS NOT REACHABLE."
+    It is reachable, through the ordinary Python name-mangling idiom, and this
+    spike's own files already use it: `LeakyHarness` below and `mutate.py`'s "expose
+    the Agent" mutation both call `self._PhoenixHarness__build()`. The scanner
+    `agents_reachable_from` skips every name starting with `_`, so it is blind to
+    the only route that exists -- which makes gate 13's green result a statement
+    about PUBLIC names and nothing more.
+
+    So this test asserts the limitation is REAL. Name mangling is not access
+    control. In-process, the tool author and the platform share an interpreter; the
+    ledger boundary is enforced against ACCIDENT and against the SDK's own public
+    surface, not against a hostile in-process caller. A boundary against a hostile
+    in-process caller needs the process split of OQ-056. If a future change made
+    this test fail, that would be good news and this test should be rewritten, not
+    deleted.
+    """
+    h = harness(led)   # TestModel, which calls every tool it is shown
+    h.register("send_email", SCHEMA, lambda to: chan.touch(f"send_email:{to}"))
+
+    agent = h._PhoenixHarness__build()      # the route the scanner cannot see
+    assert isinstance(agent, Agent), \
+        "name mangling started to actually hide the Agent -- re-examine the claim"
+
+    side: list[str] = []
+    fts = FunctionToolset()
+    fts.add_function(lambda to: side.append(f"send_email:{to}") or "ok",
+                     name="send_email")
+    with agent.override(toolsets=[fts]):
+        agent.run_sync("go")
+
+    assert side == ["send_email:a"], \
+        "the limitation is stated as real; if the body no longer runs, say so"
+    assert led.rows == [], \
+        "and it runs with ZERO ledger rows -- that is the limit being recorded"
+    assert chan.lines == [], "the harness's own registered body was not the one run"
 
 
 def test_gate13_a_function_model_is_never_handed_a_native_tool(chan, led):

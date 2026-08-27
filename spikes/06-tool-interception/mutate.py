@@ -110,7 +110,8 @@ MUTATIONS: list[tuple[str, str, str, str]] = [
     (
         "drop the claim before dispatch",
         "an effect is dispatched without being claimed",
-        "        self.ledger.claim(call.tool_call_id, owner, token, lease=lease)",
+        "        self.ledger.claim(call.tool_call_id, owner, token, lease=lease,\n"
+        "                          fence=lease.fence_token if lease else None)",
         "        pass  # claim removed",
     ),
     (
@@ -121,7 +122,7 @@ MUTATIONS: list[tuple[str, str, str, str]] = [
         '                "claim requires an unexpired run lease "\n'
         '                "(spec/02-consistency.md:246, predicate (b))")\n'
         "        now = self.clock()\n"
-        "        if not lease.authorises(row.run_id, owner, now):",
+        "        if not lease.authorises(row.run_id, owner, fence, now):",
         "        now = self.clock()\n"
         "        if False:",
     ),
@@ -138,6 +139,40 @@ MUTATIONS: list[tuple[str, str, str, str]] = [
         "                               owner=owner, token=token,\n"
         '                               error_code="dispatch_lost_contact")',
         "            pass  # verdict dropped",
+    ),
+    (
+        "bind arguments inside the dispatch try",
+        "a call that never dispatched is reported as uncertain",
+        "        try:\n"
+        "            bound = inspect.signature(impl).bind(**args)\n"
+        "        except Exception:\n"
+        '            self.ledger.settle(call.tool_call_id, "failed", None,\n'
+        "                               owner=owner, token=token,\n"
+        '                               error_code="arguments_unbindable")\n'
+        "            raise\n"
+        "\n"
+        "        # --- the dispatch itself. After this line the outcome is unknowable. ---\n"
+        "        try:\n"
+        "            result = impl(*bound.args, **bound.kwargs)\n",
+        # the defect, restored exactly: binding happens AT the call, inside the try
+        # that settles `indeterminate`
+        "        # --- the dispatch itself. After this line the outcome is unknowable. ---\n"
+        "        try:\n"
+        "            result = impl(**args)\n",
+    ),
+    (
+        "drop the intent conflict guard",
+        "the ledger has no primary key: one call, two rows",
+        "        if any(r.tool_call_id == row.tool_call_id and r.run_id == row.run_id\n"
+        "               for r in self._rows):\n"
+        "            return  # ON CONFLICT ... DO NOTHING (spec/02-consistency.md:202)\n",
+        "",
+    ),
+    (
+        "drop the fence-token comparison",
+        "a worker holding a superseded fence token can still claim",
+        "                and fence is not None and self.fence_token == fence\n",
+        "",
     ),
     (
         "call a raise after dispatch 'failed'",
