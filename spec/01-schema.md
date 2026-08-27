@@ -123,7 +123,7 @@ CREATE TABLE adapter_contracts (
     protocol_version TEXT NOT NULL,
     -- The enum is Omnigent's full taxonomy and is kept so the column never needs a
     -- migration. Only 'sdk_in_process' is SHIPPED: we build and operate the agents on
-    -- a thin internal harness over the vendor SDKs, so there is no third-party
+    -- an internal harness on Pydantic AI (amended 2026-08-27), so there is no third-party
     -- subprocess or TUI to adapt. The others are reserved, not supported.
     integration_mode TEXT NOT NULL
         CHECK (integration_mode IN ('sdk_in_process','cli_subprocess',
