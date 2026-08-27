@@ -1,9 +1,9 @@
 # Spike 03 — the Postgres gate
 
-**Gate assertions: 42** — the number `README.md` sums. Counts only tests that assert THIS spike's claims through its public boundary; vendored upstream suites are evidence, not our verdict (`VERIFICATION-RULES.md` rule 6).
+**Gate assertions: 43** — the number `README.md` sums. Counts only tests that assert THIS spike's claims through its public boundary; vendored upstream suites are evidence, not our verdict (`VERIFICATION-RULES.md` rule 6).
 
 
-**Verdict: PASS.** **42 assertions**, 0 failures, 7 negative controls, against
+**Verdict: PASS.** **43 assertions**, 0 failures, 7 negative controls, against
 **PostgreSQL 16.14** in a throwaway container. (35 at first writing; scenario 9 added
 2026-08-27 in redo 3 — see finding 3.)
 

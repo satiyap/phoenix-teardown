@@ -110,7 +110,7 @@ answered, all six synthesis deliverables final.
 | 4 Targeted | + HumanLayer, AWS AgentCore, Microsoft Agent Framework, Agent Control |
 | 5 Synthesis | domain model, reference architecture, build/reuse map, v0.1 boundary |
 | 6 Handoff | `DESIGN.md` + developer journey |
-| 7 Spikes | AG2 storage swap, definition pin, **Postgres concurrency**, **work-bundle generality** — 4 spikes, **116 gate assertions**, verification rules |
+| 7 Spikes | AG2 storage swap, definition pin, **Postgres concurrency**, **work-bundle generality** — 4 spikes, **117 gate assertions**, verification rules |
 | 8 Spec | **10 documents** + compiling `.proto` and OpenAPI contracts; 50 required invariant tests with negative controls |
 
 **How the 116 is counted.** 12 (spike 01) + 35 (02) + 42 (03) + 27 (04), read from the
