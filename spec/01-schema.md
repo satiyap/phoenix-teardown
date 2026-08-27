@@ -259,18 +259,21 @@ BEGIN
 
   IF NEW.event_type = 'run.rewound' THEN
     IF NEW.epoch <> cur + 1 THEN
-      RAISE EXCEPTION 'a rewind must open epoch %, got %', cur + 1, NEW.epoch;
+      RAISE EXCEPTION 'a rewind must open epoch %, got %', cur + 1, NEW.epoch
+        USING ERRCODE = 'invalid_parameter_value';       -- 22023, see below
     END IF;
     IF (NEW.payload->>'to_epoch')::INTEGER > cur THEN
       RAISE EXCEPTION 'cannot supersede epoch % which does not exist yet',
-                      NEW.payload->>'to_epoch';
+                      NEW.payload->>'to_epoch'
+        USING ERRCODE = 'invalid_parameter_value';
     END IF;
     UPDATE runs SET current_epoch = NEW.epoch
      WHERE tenant_id = NEW.tenant_id AND run_id = NEW.run_id;
   ELSE
     IF NEW.epoch <> cur THEN
       RAISE EXCEPTION 'event in epoch % but run is at epoch % (an ordinary event '
-                      'may not change the epoch)', NEW.epoch, cur;
+                      'may not change the epoch)', NEW.epoch, cur
+        USING ERRCODE = 'invalid_parameter_value';
     END IF;
   END IF;
 
@@ -279,7 +282,8 @@ BEGIN
               WHERE tenant_id = NEW.tenant_id AND run_id = NEW.run_id
                 AND seq >= NEW.seq) THEN
     RAISE EXCEPTION 'seq % is not greater than every existing seq for this run',
-                    NEW.seq;
+                    NEW.seq
+      USING ERRCODE = 'invalid_parameter_value';
   END IF;
   RETURN NEW;
 END $$ LANGUAGE plpgsql;
@@ -288,6 +292,12 @@ CREATE TRIGGER run_events_epoch_check
   BEFORE INSERT ON run_events
   FOR EACH ROW EXECUTE FUNCTION check_event_epoch();
 ```
+
+**`USING ERRCODE` is not cosmetic.** A bare `RAISE EXCEPTION` raises `P0001`
+(`raise_exception`), which is what *every* PL/pgSQL error uses — so a caller cannot tell an
+epoch violation from any other trigger failure, and a retry loop matching broadly would
+retry a bug forever. Spike 03 asserts the code is `22023` and, separately, that it is **not**
+`23505`, because `23505` is the one code the append path *does* retry.
 
 The `FOR UPDATE` is what makes epoch assignment atomic: two concurrent appends to the
 same run serialise on the `runs` row, so they cannot both read `current_epoch = 3` and

@@ -57,9 +57,16 @@ PATCH /v1/agents/{id}       { "digest": "c3d4...", "declared_version": 2 }
 GET   /v1/agents/{id}
 ```
 
-`PATCH` is how an agent is "edited": it moves the pointer. Runs already pinned to the
-old digest are unaffected until they try to resume, at which point they get
-`INCOMPATIBLE` — which is the entire mechanism working as intended.
+`PATCH` is how an agent is "edited": it moves the pointer. **It affects new runs only.**
+Runs already pinned to the old digest keep running and resume against *their own* pinned
+artifact, which is still verified by digest on every resume.
+
+An earlier version of this document said such runs became `INCOMPATIBLE` on resume. That
+was reversed: a pointer update and a security invalidation are different operations, and
+overloading one to mean the other turned any edit — however cosmetic — into a global
+resume blocker. Stopping in-flight work needs an audited digest revocation, which **v0.1
+does not ship**; until then the way to stop a run is `POST /v1/runs/{id}/cancel`. See
+[§09](09-decisions.md) 2.
 
 ### Runs
 

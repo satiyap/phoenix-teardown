@@ -56,6 +56,28 @@ def _jcs_number(v: float, path: str) -> int:
     return int(v)
 
 
+def _reject_lone_surrogates(s: str, path: str) -> None:
+    r"""Reject unpaired UTF-16 surrogates (U+D800..U+DFFF).
+
+    These are not characters; they only exist as PAIRS inside UTF-16. Languages
+    disagree on what to do with a lone one, which was verified rather than assumed:
+
+        Python  json/encode : UnicodeEncodeError
+        JS      JSON.stringify: accepts, emits "\ud800", produces a digest
+
+    So a lone surrogate is an "incompatible by accident" value: one implementation
+    refuses, another silently digests. Rejecting it explicitly in the PROFILE is what
+    keeps a future language from legitimately disagreeing.
+    """
+    for i, ch in enumerate(s):
+        if 0xD800 <= ord(ch) <= 0xDFFF:
+            raise NonCanonical(
+                f"{path}: unpaired UTF-16 surrogate U+{ord(ch):04X} at index {i}. "
+                f"Surrogates are not characters; they exist only as pairs in UTF-16, "
+                f"and implementations disagree on lone ones (Python raises, "
+                f"JavaScript digests). Remove it or encode the text as bytes.")
+
+
 def _canon(v: Any, path: str = "$") -> Any:
     """Reject anything whose serialisation is not stable across processes."""
     if isinstance(v, bool) or v is None:
@@ -71,6 +93,7 @@ def _canon(v: Any, path: str = "$") -> Any:
             raise NonCanonical(f"{path}: non-finite float {v!r} has no canonical form")
         return _jcs_number(v, path)
     if isinstance(v, str):
+        _reject_lone_surrogates(v, path)
         # NFC so 'café' (composed) and 'cafe\u0301' (decomposed) agree.
         return unicodedata.normalize("NFC", v)
     if isinstance(v, (list, tuple)):
@@ -81,6 +104,7 @@ def _canon(v: Any, path: str = "$") -> Any:
         for k in v:
             if not isinstance(k, str):
                 raise NonCanonical(f"{path}: non-string key {k!r}")
+            _reject_lone_surrogates(k, f"{path} (key)")
             nk = unicodedata.normalize("NFC", k)
             if nk in origin:
                 # Two DISTINCT keys that normalise to the same key. Overwriting

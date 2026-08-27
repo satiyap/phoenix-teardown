@@ -30,15 +30,18 @@ PIN = ROOT / "spikes" / "02-definition-pin"
 
 
 def check_canon_vectors() -> list[str]:
-    """Verify the fixture against an INDEPENDENT implementation, not its author.
+    """Run BOTH canonicalisers and compare all three pairings.
 
-    Review finding: comparing the vectors with the same Python that generated
-    them proves only that Python is deterministic. The CLAIM is cross-language
-    reproducibility, so the oracle must be a different language. `canon_ref.mjs`
-    is written from the normative text, not ported from pin.py.
+    Review finding: the gate ran the JS oracle against the fixture but never
+    invoked the Python implementation, so `make spec` alone did not establish
+    "two implementations agree". The three comparisons are now explicit:
 
-    It has already earned its keep: it could not even PARSE the fixture, because
-    Python had written bare `NaN`/`Infinity` — literals no other language reads.
+        fixture <-> Python        (the fixture is not stale)
+        fixture <-> JavaScript    (a second language reproduces it)
+        Python  <-> JavaScript    (they agree with each other, not just the file)
+
+    The third is not implied by the first two only when a digest is missing from
+    one side, but stating it keeps the claim honest and catches partial runs.
     """
     errs: list[str] = []
     fx_path = SPEC / "canon_vectors.json"
@@ -60,30 +63,86 @@ def check_canon_vectors() -> list[str]:
     if "sort_rule" not in fx:
         errs.append("fixture does not state its key sort_rule")
 
-    # 1. the spike fixture and the spec fixture must be the same file
+    # every distinct failure MODE must be represented, not just a count
+    codes = {r.get("code") for r in fx.get("reject", [])}
+    for required in ("non_integral_float", "integer_out_of_range", "non_finite",
+                     "nfc_key_collision", "lone_surrogate"):
+        if required not in codes:
+            errs.append(f"fixture has no `{required}` rejection case")
+    # both non-finite values, not the same one twice
+    nonfinite = {json.dumps(r["case"]) for r in fx.get("reject", [])
+                 if r.get("code") == "non_finite"}
+    kinds = set()
+    for c in nonfinite:
+        if '"nan"' in c:
+            kinds.add("nan")
+        if '"inf"' in c:
+            kinds.add("inf")
+    if kinds != {"nan", "inf"}:
+        errs.append(f"non_finite cases cover {sorted(kinds) or 'nothing'}; both NaN and "
+                    f"Infinity must be present (an earlier fixture had Infinity twice "
+                    f"and no NaN)")
+
     spike_fx = PIN / "canon_vectors.json"
     if spike_fx.exists() and spike_fx.read_text() != raw:
         errs.append("spec/canon_vectors.json and the spike fixture have diverged")
 
-    # 2. the independent JS oracle must reproduce every accept and reject
+    # ---- comparison 1: fixture <-> Python
+    py = PIN / ".venv" / "bin" / "python"
+    py_exe = str(py) if py.exists() else sys.executable
+    py_digests: dict[str, str] = {}
+    runner = PIN / "verify_vectors.py"
+    if not runner.exists():
+        errs.append("spikes/02-definition-pin/verify_vectors.py missing")
+    else:
+        res = subprocess.run([py_exe, str(runner), str(fx_path)],
+                             capture_output=True, text=True, cwd=str(PIN))
+        if res.returncode != 0:
+            for ln in (res.stdout + res.stderr).strip().splitlines():
+                if ln.strip():
+                    errs.append(f"python canonicaliser: {ln.strip()}")
+        else:
+            try:
+                py_digests = json.loads(res.stdout)["digests"]
+            except Exception:                                    # noqa: BLE001
+                errs.append("python canonicaliser produced unreadable output")
+
+    # ---- comparison 2: fixture <-> JavaScript
     oracle = PIN / "canon_ref.mjs"
     node = shutil.which("node")
+    js_digests: dict[str, str] = {}
     if not oracle.exists():
         errs.append("canon_ref.mjs missing — no independent oracle for the vectors")
     elif node is None:
-        # FAIL CLOSED. A missing verifier is an unverified claim, not a pass.
         errs.append("node is not installed, so the canonicalisation vectors cannot be "
                     "verified against an independent implementation. Install node or "
                     "run with SPEC_ALLOW_UNVERIFIED=1 to downgrade this to a warning.")
     else:
-        res = subprocess.run([node, str(oracle), str(fx_path)],
+        res = subprocess.run([node, str(oracle), str(fx_path), "--json"],
                              capture_output=True, text=True, cwd=str(PIN))
         if res.returncode != 0:
-            detail = (res.stdout + res.stderr).strip().splitlines()
-            errs.extend(f"independent oracle disagrees: {ln.strip()}"
-                        for ln in detail if ln.strip())
+            for ln in (res.stdout + res.stderr).strip().splitlines():
+                if ln.strip() and not ln.startswith("{"):
+                    errs.append(f"independent oracle disagrees: {ln.strip()}")
+        else:
+            for ln in res.stdout.splitlines():
+                if ln.startswith("{"):
+                    try:
+                        js_digests = json.loads(ln)["digests"]
+                    except Exception:                            # noqa: BLE001
+                        pass
 
-    # 3. the fixture's own MUST EQUAL relations, checked structurally
+    # ---- comparison 3: Python <-> JavaScript, directly
+    if py_digests and js_digests:
+        for n in sorted(set(py_digests) | set(js_digests), key=lambda x: int(x)):
+            a, b = py_digests.get(n), js_digests.get(n)
+            if a != b:
+                errs.append(f"vector #{n}: python {str(a)[:12]} != javascript "
+                            f"{str(b)[:12]}")
+    elif not errs:
+        errs.append("could not compare the two implementations directly")
+
+    # ---- the fixture's own declared relations
     by_n = {r["n"]: r for r in fx.get("accept", [])}
     for n, row in by_n.items():
         m = re.search(r"MUST EQUAL #(\d+)", row.get("note", ""))
@@ -347,12 +406,89 @@ def check_effect_lifecycle() -> list[str]:
     return errs
 
 
+def check_postgres_gate() -> list[str]:
+    """Run the Postgres scenarios when a server is reachable.
+
+    Skipped-but-reported when it is not: the point of spike 03 is that these
+    were previously assumptions, so silence would be the wrong default.
+    """
+    spike = ROOT / "spikes" / "03-postgres"
+    script = spike / "test_postgres.py"
+    if not script.exists():
+        return ["spikes/03-postgres/test_postgres.py missing"]
+    dsn = os.environ.get("PHOENIX_PG_DSN",
+                         "postgresql://postgres:spike@127.0.0.1:55433/spike")
+    py = ROOT / ".venv" / "bin" / "python"
+    probe = subprocess.run(
+        [str(py), "-c",
+         "import sys,psycopg\n"
+         "try:\n"
+         "    psycopg.connect(sys.argv[1], connect_timeout=2).close()\n"
+         "except Exception as e:\n"
+         "    print(e); sys.exit(1)\n", dsn],
+        capture_output=True, text=True)
+    if probe.returncode != 0:
+        return ["no Postgres reachable, so the eight concurrency scenarios are "
+                "UNVERIFIED. See spikes/03-postgres/RESULT.md for the one-line "
+                "docker command."]
+    res = subprocess.run([str(py), str(script)], capture_output=True, text=True,
+                         cwd=str(spike), env={**os.environ, "PHOENIX_PG_DSN": dsn})
+    if res.returncode != 0:
+        bad = [ln.strip() for ln in res.stdout.splitlines()
+               if ln.strip().startswith("FAIL")]
+        return [f"postgres gate: {b}" for b in bad] or ["postgres gate failed"]
+    return []
+
+
 def check_references() -> list[str]:
     errs = []
     for f in sorted(SPEC.glob("*.md")):
         for ref in re.findall(r"\]\((\d\d-[a-z0-9-]+\.md)", f.read_text()):
             if not (SPEC / ref).exists():
                 errs.append(f"{f.name}: dangling reference to {ref}")
+    return errs
+
+
+# Claims that a SUPERSEDED decision is still being stated as normative. Each entry
+# is (pattern, files-exempt-from-it, why). Three review rounds found the same
+# "answer document drift" pattern, so it is now mechanical.
+#
+# An exemption exists because a document may legitimately DISCUSS the old rule while
+# explaining the change; what must not survive is the old rule stated as current.
+SUPERSEDED = [
+    (r"sorted by \*\*UTF-16 code unit\*\*", (),
+     "UTF-16 ordering was replaced by UTF-8 byte order"),
+    (r"nfc\+jcs", (), "profile renamed to nfc+intjson"),
+    (r"they get\s*\n?`INCOMPATIBLE`", (),
+     "repointing an agent no longer blocks in-flight runs"),
+    (r"ApprovalRequest\s+approval_request\s*=", (),
+     "the ApprovalRequest frame was removed; the platform decides on approval"),
+    (r"Three frames MUST be typed", (), "four frames are typed"),
+    (r"The worker delivers `ToolResult\{ok:false", (),
+     "denial is delivered as ToolDenied"),
+    (r"claimed, by unique-index\s*\n?\s*insert", (),
+     "the claim is a conditional UPDATE; only INTENT is an insert"),
+    (r"CREATE TABLE effect_claim_history", (),
+     "effect rows are never reclaimed, so monotonic claim tokens are meaningless"),
+]
+
+
+def check_superseded_claims() -> list[str]:
+    """Fail when a document still states a decision that was reversed.
+
+    Prose drift is not architectural failure, but it is what an implementer reads,
+    and a spec that contradicts itself has no single answer to any question.
+    """
+    errs = []
+    for pat, exempt, why in SUPERSEDED:
+        for f in sorted(SPEC.glob("*.md")):
+            if f.name in exempt:
+                continue
+            m = re.search(pat, f.read_text())
+            if m:
+                ln = f.read_text()[:m.start()].count("\n") + 1
+                errs.append(f"{f.name}:{ln} still states a superseded decision "
+                            f"({why})")
     return errs
 
 
@@ -395,6 +531,8 @@ def main() -> int:
         ("protobuf compiles", check_proto_compiles()),
         ("openapi coverage", check_openapi()),
         ("effect lifecycle", check_effect_lifecycle()),
+        ("postgres gate", check_postgres_gate()),
+        ("superseded claims", check_superseded_claims()),
         ("cross-references", check_references()),
         ("placeholders", check_placeholders()),
         ("foreign-key targets", check_fk_targets()),

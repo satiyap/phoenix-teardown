@@ -58,9 +58,16 @@ guidelines. Each traces to evidence; several were learned the hard way in the sp
 1. **`tenant_id` is in every composite primary key and every composite foreign key.**
    An unscoped lookup finds nothing; a cross-tenant *relationship* cannot be created.
    (Omnigent + ADK for PKs, Agent Control for FKs.)
-2. **Every side effect is claimed atomically before it is attempted**, by unique-index
-   insert. A read-then-act check is not a dedupe primitive — proven in spike 01,
-   where read-then-act double-executed.
+2. **Every side effect is claimed atomically before it is attempted.** Two distinct
+   mechanisms, not one:
+   - **intent** is deduplicated by a unique-index `INSERT ... ON CONFLICT DO NOTHING`
+     on the deterministic effect key;
+   - **the claim** is a conditional `UPDATE` that must simultaneously find the effect
+     claimable, the approval granted, and the worker still holding the run lease.
+
+   A read-then-act check is not a dedupe primitive — proven in spike 01, where
+   read-then-act double-executed (`['w1','w2']`). An earlier version of this list
+   described only the insert, which is the intent half.
 3. **The effect ledger does not depend on message-log retention.** Channel deletion or
    compaction must not change the safety guarantee for an unrelated external effect.
 4. **A run's pin is compared before any adapter code runs**, and a mismatch is a

@@ -163,14 +163,11 @@ def test_numbers_outside_the_profile_are_rejected(bad, label):
     with pytest.raises(NonCanonical):
         canonical_digest(bad, kind="effect_key")
 
-def _subst(v):
-    """A reject case {"__nonfinite__": "nan"|"inf"} denotes a value strict JSON
-    cannot express. The fixture stays parseable; each language substitutes."""
-    if isinstance(v, dict):
-        if set(v) == {"__nonfinite__"}:
-            return float("nan") if v["__nonfinite__"] == "nan" else float("inf")
-        return {k: _subst(x) for k, x in v.items()}
-    return v
+# Import the ONE substitution implementation rather than keeping a copy. A local
+# copy is how this test silently stopped rejecting: the fixture grew surrogate
+# placeholders, the copy did not learn them, and the literal dict was digested
+# happily instead of being expanded into a lone surrogate.
+from verify_vectors import subst as _subst
 
 
 def _fixture():

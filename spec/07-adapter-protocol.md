@@ -104,8 +104,9 @@ message AdapterFrame {
   }
 }
 
-// Three frames MUST be typed, because the control plane makes decisions about
-// them. The rest stay opaque. See "What must be typed, and why" below.
+// FOUR frames MUST be typed, because the control plane makes decisions about
+// them: ToolCall inbound, ToolResult and ToolDenied outbound, and the Checkpoint
+// ENVELOPE. The rest stay opaque. See "What must be typed, and why" below.
 message Output {
   string step_id = 1;      // stable across replay; feeds logical_step_path
 
@@ -157,7 +158,10 @@ Google AX's practice: state the *terminator count* in the contract, because that
 makes a third-party adapter implementable without reading our source.
 
 1. The control plane sends **exactly one `Start`**, first.
-2. It may then send **zero or more `Input`** frames and **at most one `Cancel`**.
+2. It may then send **zero or more `Input`** frames, **zero or more `ToolResult` /
+   `ToolDenied`** frames (one per outstanding `ToolCall`), and **at most one `Cancel`**.
+   Every `ToolCall` the adapter emits receives **exactly one** `ToolResult` *or* one
+   `ToolDenied`, correlated by `call_id`.
 3. The adapter streams **zero or more `Output`** frames.
 4. The adapter sends **exactly one `End`** and then closes.
 5. **A stream that closes without `End` is a protocol violation.** The resulting run

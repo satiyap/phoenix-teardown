@@ -103,12 +103,30 @@ happen to canonicalise identically must not be equal. Registered domains:
 canonicaliser silently invalidates every stored pin, and "changed" is
 indistinguishable from "recomputed differently".
 
-### Step 4 — serialise (JCS rules)
+### Step 4 — serialise
 
-- Object keys sorted by **UTF-16 code unit** (RFC 8785 §3.2.3), not by byte or locale.
+- Object keys sorted by **UTF-8 byte order**. *Not* UTF-16 code units, *not* locale.
+
+  This is the profile's own rule and it deliberately differs from RFC 8785 §3.2.3.
+  The two disagree for non-BMP characters, because in UTF-16 a non-BMP character is a
+  surrogate pair starting `0xD800`, which sorts *below* `U+E000`:
+
+  | | first | second |
+  |---|---|---|
+  | UTF-8 byte order (**ours**) | `U+E000` | `U+1F600` |
+  | UTF-16 code units (RFC 8785) | `U+1F600` | `U+E000` |
+
+  UTF-8 order is chosen because it is trivially reimplementable with a byte comparator in
+  any language, and because it coincides with code point order — so no implementation has
+  to special-case surrogates to get the ordering right. Vectors #14–#16 pin it.
 - No insignificant whitespace: separators are `,` and `:` exactly.
 - Strings escaped per RFC 8785 §3.2.2.2 — only the mandatory escapes; **no `\uXXXX`
   for characters that need no escaping**.
+- **Unpaired UTF-16 surrogates (U+D800–U+DFFF) are rejected**, in values and in keys.
+  They are not characters, and languages disagree: Python raises `UnicodeEncodeError`
+  while `JSON.stringify` accepts one and emits an escape. Leaving that latent means a
+  future implementation can legitimately produce a different digest. Vectors
+  `lone_surrogate` pin the rejection; a *valid* pair (#18, #21) is accepted.
 - Output as **UTF-8**, not ASCII-escaped.
 - Numbers: integers only, emitted without a fractional part. `-0.0` becomes `0`.
   Non-integral values never reach this step (rejected in step 1).

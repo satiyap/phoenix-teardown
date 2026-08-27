@@ -44,14 +44,16 @@ left to a global setting.
 | Operation | Isolation | Why |
 |---|---|---|
 | Append a run event | `READ COMMITTED` | The primary key does the work; see below |
-| Claim an effect | `READ COMMITTED` | The unique index does the work |
+| Record effect **intent** | `READ COMMITTED` | The unique index does the work |
+| **Claim** an effect | `READ COMMITTED` | A single conditional `UPDATE` is atomic; its `WHERE` carries every precondition, so nothing is decided across reads |
 | Acquire a run lease | `READ COMMITTED` | Same |
 | **Fold the log to derive state** | `REPEATABLE READ` | A fold that sees events appended mid-read produces a state that never existed |
 | **Resume (validate → lease → execute)** | `REPEATABLE READ` | The pin must be read consistently with the artifact it names |
 | **Sweep expired leases** | `SERIALIZABLE` | Reclaiming a lease races other reclaimers; the conflict must be detected |
 
-The general rule: **where a unique constraint provides the guarantee, weak isolation
-is correct and cheaper.** Where a *decision* is made from multiple reads, the reads
+The general rule: **where a unique constraint or a single conditional statement provides
+the guarantee, weak isolation is correct and cheaper.** Where a *decision* is made from
+multiple reads, the reads
 must be consistent.
 
 ---
@@ -107,9 +109,6 @@ COMMIT;
 A rewind must hold the run lease like any other write, and the projection is recomputed
 from `live(events)` rather than patched — the fold is cheap once, and a patched
 projection after a rewind is a guess.
-
-The caller must treat `23505` (unique violation) on this statement as *retryable*, and
-anything else as fatal. That distinction belongs in one place; see §Error mapping.
 
 ---
 
@@ -226,19 +225,55 @@ UPDATE effect_ledger
        lease_expires_at = now() + interval '5 minutes'
  WHERE tenant_id = $tenant
    AND idempotency_key = $key
+   -- (a) the effect is claimable
    AND (status = 'intended'
         OR (status = 'awaiting_approval'
             AND EXISTS (SELECT 1 FROM approvals a
                          WHERE a.tenant_id = $tenant AND a.action_ref = $key
                            AND a.run_id = $run AND a.status = 'approved')))
+   -- (b) AND we still hold the RUN lease. Without this a worker whose run was
+   --     already reclaimed can still take a fresh effect claim and dispatch it.
+   AND EXISTS (SELECT 1 FROM run_leases l
+                WHERE l.tenant_id = $tenant AND l.run_id = $run
+                  AND l.holder = $worker AND l.fence_token = $fence
+                  AND l.expires_at > now())
 RETURNING claim_token;
--- no row => not approved, already claimed, denied, or abandoned. DO NOT DISPATCH.
+-- no row => not approved, already claimed, denied, abandoned, OR we are fenced out
+--           of the run. DO NOT DISPATCH. Re-read to find out which.
 ```
 
-One statement, so the approval check and the claim cannot interleave. A second worker
-finds the row already `claimed` and stops. **The approved-effect check is inside the same
-`UPDATE`** — reading approval status and then claiming would be exactly the read-then-act
-race that double-executes.
+One statement, so the approval check, the run-lease check and the claim cannot interleave.
+A second worker finds the row already `claimed` and stops. **The approved-effect check is
+inside the same `UPDATE`** — reading approval status and then claiming would be exactly the
+read-then-act race that double-executes.
+
+### Two leases, deliberately, with different jobs
+
+Review found the claim checked effect status and approval but **not the run lease**, so a
+worker whose run had been reclaimed could still acquire a new effect claim and dispatch it —
+a duplicate execution the run lease exists to prevent.
+
+The rule is asymmetric, and the asymmetry is the point:
+
+| | Acquiring an effect claim | Completing a claimed effect |
+|---|---|---|
+| requires an unexpired **run** lease | **yes** — predicate (b) | **no** |
+| requires the **effect** claim token | n/a | **yes** — see §5 |
+
+**Acquiring** requires the run lease, because starting new work on behalf of a run you no
+longer own is precisely the duplicate-execution case.
+
+**Completing** does not, because the effect has already been dispatched: the outside world
+may have changed. Refusing to record its outcome would abandon a real effect with no
+verdict, which is strictly worse than recording it late — the ledger's purpose is to know
+what happened. So once claimed, the **effect lease and its token** authorise settlement on
+their own, even if the run lease expired mid-dispatch.
+
+The consequence to accept: a run can be reclaimed by a new worker while the old worker is
+still legitimately settling an effect it dispatched. That is safe because settlement is
+fenced by `claim_token` (§5) and because the new worker cannot re-claim the same effect —
+the ledger row is not `intended` any more. It is also why an effect key must never contain
+the worker identity.
 
 ### 4. Dispatch
 
@@ -475,7 +510,8 @@ One table, so retry logic lives in one place rather than in every call site.
 | `23503` foreign key | cross-tenant or missing reference | **bug** — fail loudly, do not retry |
 | `23514` check violation | invariant breach (e.g. `temp:` write) | **bug** — fail loudly |
 | `40001` serialisation failure | sweeper conflict | retry with backoff |
-| `57014` statement timeout | contention or a slow query | retry once, then surface |
+| `57014` statement timeout | blocked on a competitor's uncommitted append, or a slow query | **retry** (spike 03: an append blocks *before* it collides, so this is the common contention signal, not an exotic one) |
+| `22023` invalid_parameter_value | the epoch trigger refused the event | **bug** — never retry; the caller named an epoch it may not name |
 
 **`23503` and `23514` are never retried.** They mean the code attempted something the
 schema forbids, and retrying converts a clear bug into an intermittent one.

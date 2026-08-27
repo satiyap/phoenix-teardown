@@ -89,7 +89,7 @@ Three different answers, because the remedies differ (§05).
 
 | Outcome | Run goes to | Why |
 |---|---|---|
-| **denied** | `running` | A denial is an *answer*. The worker delivers `ToolResult{ok:false, error_code:"approval_denied"}` and the adapter decides what to do — retry differently, take a compliant path, or stop. |
+| **denied** | `running` | A denial is an *answer*. The worker sends `ToolDenied{call_id, reason: APPROVAL_DENIED, guidance}` and the adapter decides what to do — retry differently, take a compliant path, or stop. A distinct frame, not `ToolResult{ok:false}`, because "refused" and "errored" call for different behaviour. |
 | **expired** | `failed`, `error_code=approval_expired` | Nobody answered. A system transition, since no principal acted. |
 | **superseded** | stays `waiting_input` | A *new* approval is now outstanding; the run is still blocked, on a different question. |
 
@@ -139,7 +139,7 @@ A frame must be typed **iff the control plane makes a decision about it.**
 |---|---|---|
 | `ToolCall` | **yes** | evaluate policy, derive `request_digest`, **claim the effect atomically**, verify the tool is in the pinned definition |
 | `ToolResult` | **yes** | settle the claim |
-| `ApprovalRequest` | **yes** | create an `Approval` row bound to the gated call |
+| `ToolDenied` (outbound) | **yes** | tell the adapter it was refused, and why |
 | `Checkpoint` **envelope** | **yes** | pin `payload_schema_digest` |
 | `Checkpoint` **payload** | no | opaque — the adapter's own format |
 | `text`, `thought` | no | display only |

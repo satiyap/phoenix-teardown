@@ -83,8 +83,9 @@ message AdapterFrame {
   }
 }
 
-// Three frames MUST be typed, because the control plane makes decisions about
-// them. The rest stay opaque. See "What must be typed, and why" below.
+// FOUR frames MUST be typed, because the control plane makes decisions about
+// them: ToolCall inbound, ToolResult and ToolDenied outbound, and the Checkpoint
+// ENVELOPE. The rest stay opaque. See "What must be typed, and why" below.
 message Output {
   string step_id = 1;      // stable across replay; feeds logical_step_path
 

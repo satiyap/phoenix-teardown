@@ -7,3 +7,6 @@ __pycache__/
 .DS_Store
 /tmp/
 scratch/
+
+# spike 03 uses a throwaway container; nothing local to ignore, but keep venvs out
+spikes/*/.venv/

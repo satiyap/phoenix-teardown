@@ -1,6 +1,11 @@
 {
   "profile": "nfc+intjson/v1",
-  "sort_rule": "keys sorted by UTF-8 byte order (NOT UTF-16 code units; NOT JCS)",
+  "sort_rule": "object keys sorted by UTF-8 byte order — NOT UTF-16 code units, NOT locale. This is deliberately not RFC 8785 ordering.",
+  "symbolic_encoding": {
+    "__nonfinite__": "nan | inf — a value strict JSON cannot express",
+    "__surrogate__": "high | low — an unpaired UTF-16 surrogate in a string",
+    "__surrogate_key__": "high | low — an unpaired surrogate used as a key"
+  },
   "accept": [
     {
       "n": 1,
@@ -130,7 +135,7 @@
         "😀": 2
       },
       "digest": "de6ef0452dea7bc07b402082ef3c2c6df5494098baaef09dcf5fb2cca6cee20d",
-      "note": "NON-BMP SORT: emoji U+1F600 vs private-use U+E000. UTF-8/code-point order puts U+E000 first; UTF-16 code-unit order (RFC 8785) puts U+1F600 first. This profile mandates UTF-8 byte order, so U+E000 sorts first."
+      "note": "NON-BMP SORT: UTF-8 byte order puts U+E000 before U+1F600; UTF-16 code-unit order (RFC 8785) would put U+1F600 first, because its surrogate pair starts 0xD800. This profile mandates UTF-8 byte order."
     },
     {
       "n": 15,
@@ -171,7 +176,7 @@
         "s": "😀"
       },
       "digest": "87e17ee93c324a80a7800c09b8bfeaeb0436835f9e1e80f6c3cb4a017615f838",
-      "note": "non-BMP in a VALUE, emitted raw as UTF-8 (ensure_ascii=False)"
+      "note": "a VALID surrogate pair (non-BMP char) is accepted and emitted raw as UTF-8"
     },
     {
       "n": 19,
@@ -199,6 +204,15 @@
       },
       "digest": "f1ead7b8a3d99d2fbcf7a214968bcd7cc7148f1e00f860e98c0e427b77af349f",
       "note": "literals: true/false/null lowercase, unquoted"
+    },
+    {
+      "n": 21,
+      "kind": "effect_key",
+      "payload": {
+        "😀": 1
+      },
+      "digest": "0d48f886c1426e8a049f52bd19d7da9da5b99ca35929c5b1c523a70cae1a7ff9",
+      "note": "a valid surrogate pair as a KEY is accepted"
     }
   ],
   "reject": [
@@ -207,21 +221,34 @@
         "n": 1.5
       },
       "kind": "effect_key",
-      "error": "non-integral float: Python and ECMAScript formatting disagree"
+      "code": "non_integral_float",
+      "error": "non-integral float: Python emits 1.5, and formatting rules diverge across languages for other fractions. Encode fractions as strings."
     },
     {
       "case": {
         "n": 9007199254740992
       },
       "kind": "effect_key",
-      "error": "integer exceeds 2^53-1 and cannot round-trip as a JSON number"
+      "code": "integer_out_of_range",
+      "error": "integer exceeds 2^53-1 and cannot round-trip through a JSON number in every language"
     },
     {
       "case": {
         "n": 1e-07
       },
       "kind": "effect_key",
-      "error": "non-integral float (Python emits 1e-07, ECMAScript 1e-7)"
+      "code": "non_integral_float",
+      "error": "non-integral float: Python emits 1e-07 where ECMAScript emits 1e-7"
+    },
+    {
+      "case": {
+        "n": {
+          "__nonfinite__": "nan"
+        }
+      },
+      "kind": "effect_key",
+      "code": "non_finite",
+      "error": "NaN has no canonical JSON form"
     },
     {
       "case": {
@@ -230,18 +257,8 @@
         }
       },
       "kind": "effect_key",
-      "error": "null has no canonical form",
-      "note": "encoded symbolically: JSON has no NaN/Infinity literal, so the fixture must not contain one. Implementations substitute their language's non-finite value for {'__nonfinite__': ...}."
-    },
-    {
-      "case": {
-        "n": {
-          "__nonfinite__": "inf"
-        }
-      },
-      "kind": "effect_key",
-      "error": "null has no canonical form",
-      "note": "encoded symbolically: JSON has no NaN/Infinity literal, so the fixture must not contain one. Implementations substitute their language's non-finite value for {'__nonfinite__': ...}."
+      "code": "non_finite",
+      "error": "Infinity has no canonical JSON form"
     },
     {
       "case": {
@@ -249,8 +266,36 @@
         "café": 2
       },
       "kind": "effect_key",
+      "code": "nfc_key_collision",
       "error": "two distinct keys normalise to the same key under NFC; one would silently overwrite the other"
+    },
+    {
+      "case": {
+        "s": {
+          "__surrogate__": "high"
+        }
+      },
+      "kind": "effect_key",
+      "code": "lone_surrogate",
+      "error": "unpaired HIGH surrogate in a string value: Python raises UnicodeEncodeError while JSON.stringify emits an escape and digests it"
+    },
+    {
+      "case": {
+        "s": {
+          "__surrogate__": "low"
+        }
+      },
+      "kind": "effect_key",
+      "code": "lone_surrogate",
+      "error": "unpaired LOW surrogate in a string value"
+    },
+    {
+      "case": {
+        "__surrogate_key__": "high"
+      },
+      "kind": "effect_key",
+      "code": "lone_surrogate",
+      "error": "unpaired surrogate in a KEY"
     }
-  ],
-  "reject_encoding": "A reject case of the form {'__nonfinite__': 'nan'|'inf'} denotes the language's NaN / Infinity value, which strict JSON cannot express."
+  ]
 }
