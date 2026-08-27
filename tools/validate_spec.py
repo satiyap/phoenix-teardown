@@ -454,36 +454,45 @@ def _apply_spec_ddl(dsn: str) -> list[str]:
     sql = _spec_sql_blocks()
     if not sql.strip():
         return ["no ```sql blocks found in spec/01-schema.md"]
-    # Apply into a SEPARATE DATABASE, never a schema in the one the spike uses.
+    # Apply inside a UNIQUE schema, in ONE transaction, and ALWAYS roll back.
     #
-    # The first version created a `specddl` SCHEMA, set search_path to it, and dropped
-    # it afterwards -- which DESTROYED the spike's tables, because they had been
-    # created while that search_path was active. A verification step must not be able
-    # to damage the thing it verifies; isolating by database makes that structural
-    # rather than careful.
+    # Two earlier designs were destructive, and both were caught by review rather
+    # than by me:
+    #   1. a fixed `specddl` SCHEMA with `SET search_path` -- dropping it destroyed
+    #      the spike's tables, because they had been created under that search_path;
+    #   2. a fixed `specddl_check` DATABASE with `DROP DATABASE ... WITH (FORCE)` --
+    #      which silently deleted a pre-existing database of that name belonging to
+    #      someone else. A verification step must never force-drop a target it did
+    #      not create.
+    #
+    # This design cannot destroy anything: the schema name is unique per run, every
+    # object is created inside one transaction, and the transaction is rolled back
+    # unconditionally. Nothing is dropped, so there is nothing to drop by mistake.
+    # `app_role` is created inside the same transaction, so a role that did not
+    # already exist disappears with the rollback.
     script = (
-        "import sys, psycopg\n"
+        "import secrets, sys, psycopg\n"
         "dsn, sql = sys.argv[1], sys.stdin.read()\n"
-        "admin = psycopg.connect(dsn, autocommit=True)\n"
-        "acur = admin.cursor()\n"
-        "acur.execute(\"DROP DATABASE IF EXISTS specddl_check WITH (FORCE)\")\n"
-        "acur.execute('CREATE DATABASE specddl_check')\n"
-        "rc = 0\n"
+        "schema = 'specddl_' + secrets.token_hex(6)\n"
+        "conn = psycopg.connect(dsn)          # NOT autocommit: we need the rollback\n"
+        "rc, msg = 0, None\n"
         "try:\n"
-        "    target = dsn.rsplit('/', 1)[0] + '/specddl_check'\n"
-        "    c = psycopg.connect(target, autocommit=True)\n"
-        "    cur = c.cursor()\n"
-        "    cur.execute(\"DO $$BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles \"\n"
-        "                \"WHERE rolname='app_role') THEN CREATE ROLE app_role \"\n"
-        "                \"NOLOGIN; END IF; END$$\")\n"
+        "    cur = conn.cursor()\n"
+        "    cur.execute(f'CREATE SCHEMA {schema}')\n"
+        "    cur.execute(f'SET LOCAL search_path TO {schema}')\n"
+        "    cur.execute(\"SELECT 1 FROM pg_roles WHERE rolname='app_role'\")\n"
+        "    if cur.fetchone() is None:\n"
+        "        cur.execute('CREATE ROLE app_role NOLOGIN')   # transactional\n"
         "    try:\n"
         "        cur.execute(sql)\n"
         "    except Exception as e:\n"
-        "        print(f'{type(e).__name__}: {e}'.replace(chr(10), ' ')[:300])\n"
+        "        msg = f'{type(e).__name__}: {e}'.replace(chr(10), ' ')[:300]\n"
         "        rc = 1\n"
-        "    c.close()\n"
         "finally:\n"
-        "    acur.execute(\"DROP DATABASE IF EXISTS specddl_check WITH (FORCE)\")\n"
+        "    conn.rollback()                  # unconditional; drops schema and role\n"
+        "    conn.close()\n"
+        "if msg:\n"
+        "    print(msg)\n"
         "sys.exit(rc)\n"
     )
     res = subprocess.run([str(py), "-c", script, dsn], input=sql,

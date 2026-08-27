@@ -109,6 +109,11 @@ MUTATIONS = [
     ("'third-party adapter' in ADR-0004",
      "decisions/ADR-0004-runtime-is-adapter-based.md",
      "This makes a third-party adapter implementable."),
+    # A wrong CITATION is a defect too. Review found :2399 surviving in three files
+    # after the ADR was corrected, so the gate now polices the citation itself.
+    ("miscitation ':2399' as the tool decorator",
+     "spec/07-adapter-protocol.md",
+     "The decorator lives at agent/__init__.py:2399 in the SDK."),
 ]
 
 

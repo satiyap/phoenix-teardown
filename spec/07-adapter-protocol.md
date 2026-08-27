@@ -255,7 +255,9 @@ ships a working tool executor and calling it is one line.
 **One harness, on Pydantic AI** (amended 2026-08-27, superseding a two-SDK plan). The pinned
 version is a **placeholder until spike 06 fixes it**: `pydantic-ai == 2.35.0` is what the
 teardown read (`projects/pydantic-ai/teardown.md:7 @ b48ee38`). Tools are registered Python
-functions (`@agent.tool`, `agent/__init__.py:2399`), so the `ToolCall → ledger` boundary is a
+functions — the `tool` decorator's implementation is at `agent/__init__.py:2423`, with
+`@agent.tool` usage documented at `:2460` (corrected 2026-08-27: `:2399` is an `@overload`
+stub, not the implementation) — so the `ToolCall → ledger` boundary is a
 **decorator** rather than a fork — which is the property spike 06 must confirm before this
 version is treated as fixed. The adapter boundary is retained so a **second** SDK can be added
 later without touching the control plane.

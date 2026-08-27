@@ -78,6 +78,17 @@ docker stop phoenix-pg-spike
 
 Runs in about 40s. `PHOENIX_PG_DSN` overrides the connection string.
 
+## Known limitation — one runner at a time
+
+`fresh()` deletes rows by `tenant_id` from shared tables, so **two concurrent runs of this
+suite interfere** and one will fail. That is a property of the fixtures, not of the invariants:
+the assertions are about single-writer behaviour under concurrent *connections*, which the suite
+creates itself.
+
+Noted 2026-08-27 after a concurrency probe. The **spec DDL check** in `validate_spec.py` is
+separately concurrency-safe — it uses a unique schema per run inside a rolled-back transaction,
+verified with four parallel invocations.
+
 ## Still not verified
 
 - **Multi-node.** One Postgres instance; no failover, no replica lag, no partition.

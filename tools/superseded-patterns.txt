@@ -62,6 +62,10 @@ two pending rows for one effect	2026-08-27	the ledger status is `claimed`
 one gets a unique violation and rolls back	2026-08-27	spike 03: the loser BLOCKS, then raises 23505 after the winner commits
 answer its own approvals	2026-08-27	agents do not decide approvals in v0.1 (D-A); there is no assignee model and no self-approval rule
 third[- ]party adapter	2026-08-27	no third party writes adapters for us; the contract exists so a SECOND adapter is implementable
+# A wrong CITATION is a defect the gate can catch, same as a wrong claim. :2399 is an
+# @overload stub; the tool decorator's implementation is :2423 and usage :2460.
+__init__\.py:2399	2026-08-27	miscitation: :2399 is an @overload stub, not the @agent.tool implementation (:2423)
+30 provider modules	2026-08-27	miscitation: a file count of models/*.py; there are 16 provider model modules
 
 # --- counts that drifted ---
 all 15 adrs are accepted	2026-08-27	16 ADRs: 15 Accepted, 1 Proposed

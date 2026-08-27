@@ -653,7 +653,7 @@ Replaces "Claude Agent SDK then OpenAI Agents SDK". Recorded in ADR-0004's evide
 | one harness to build, spec and adapt instead of two | — |
 | **model-agnostic**, so model choice is a tenant/bundle setting and "no model gateway" holds because we do not own the abstraction | counted **30 modules** in `pydantic_ai_slim/pydantic_ai/models/` |
 | **no durable-state authority of its own** — Temporal, DBOS and Prefect are "first-class compatibility targets… not peripheral adapters" | `projects/pydantic-ai/teardown.md:45-50 @ b48ee38` |
-| tools are **registered Python functions**, so the `ToolCall → ledger` boundary is a decorator | `pydantic_ai_slim/pydantic_ai/agent/__init__.py:2399` (`@agent.tool`) |
+| tools are **registered Python functions**, so the `ToolCall → ledger` boundary is a decorator | `pydantic_ai_slim/pydantic_ai/agent/__init__.py:2423` — the implementation; `:2460` shows `@agent.tool` usage. *(Corrected 2026-08-27: this row first cited `:2399`, which is an `@overload` type stub — the miscitation is kept visible rather than swapped.)* |
 | three patterns **already ported** | `TestModel`, `_ssrf.py:101-118`, `CapabilityPosition` — `teardown.md:58,218,245` |
 
 **LangGraph was rejected for the mirror reason**: its checkpointer *is* a second durable
@@ -768,7 +768,57 @@ contradictions or bad citations that the rule would have parked. The narrower cl
 does hold — the **wording class is now caught mechanically**, so when review finds something the
 gates should have caught, **the gate is the defect**.
 
-### The gate's FINAL run, and `make check` — verbatim, 2026-08-27 (redo 4 follow-up)
+### 7f. Two defects: a destructive check and an unpropagated citation (2026-08-27)
+
+#### The isolation fix was itself destructive
+
+`_apply_spec_ddl` ran `DROP DATABASE IF EXISTS specddl_check WITH (FORCE)` against a **fixed
+name**. Review created an unrelated `specddl_check` holding a sentinel table; the "isolated"
+checker **silently deleted it** and reported success. It also created a cluster-global
+`app_role` and never removed it.
+
+Reproduced both before changing anything: the sentinel database was gone, and `app_role`
+persisted after the temporary database had been dropped.
+
+| | v1 (redo 4) | v2 (this fix) | v3 (now) |
+|---|---|---|---|
+| isolation unit | fixed `specddl` **schema** + `SET search_path` | fixed `specddl_check` **database** | **unique** `specddl_<12 hex>` schema |
+| teardown | `DROP SCHEMA CASCADE` | `DROP DATABASE ... WITH (FORCE)` | **`ROLLBACK`** — nothing is dropped |
+| destroyed | the spike's tables | any pre-existing DB of that name | — |
+| `app_role` | leaked cluster-wide | leaked cluster-wide | created **inside the transaction**, so it vanishes on rollback; a **pre-existing** role is left alone |
+
+The principle: **nothing is dropped, so there is nothing to drop by mistake.** A unique name per
+run plus an unconditional rollback removes the destructive statement entirely rather than aiming
+it more carefully. Verified against all four hazards:
+
+- a planted `specddl_check` database with a sentinel row: **survives**;
+- `app_role` absent before the run: **still absent** after;
+- `app_role` present before the run: **still present** after;
+- four **concurrent** DDL checks: all four pass, because the schema name is unique.
+
+That is the fifth unsound verification step in six passes, and the first where the *fix for* an
+unsound step was itself unsound. The lesson I am drawing is narrower than "be careful": **a
+verification step should have no destructive statement in it at all.** If a check needs to
+remove something, that is a signal it is creating something it should not.
+
+A concurrency limitation was found in passing and documented rather than fixed: the spike suite's
+`fresh()` deletes rows from shared tables, so **two concurrent runs of the suite** interfere. The
+invariants it asserts are about concurrent *connections*, which it creates itself, so this is a
+fixture property. `spikes/03-postgres/RESULT.md` now says so.
+
+#### The citation correction did not propagate
+
+Correcting ADR-0004 left `:2399` in three other places — `spec/07:258`, `open-questions.md:72`
+(OQ-043), and the §7d evidence row. All three now cite `:2423` (implementation) and `:2460`
+(usage), each with a dated note, and the miscitation is kept visible rather than swapped.
+
+**A wrong citation is now a gate-enforced defect.** Two patterns added —
+`__init__\.py:2399` and `30 provider modules` — plus a self-test mutation (**21 controls**).
+Review found this by grepping for the number after I had "corrected" it in one file; the gate
+should have been the thing that found it, which is precisely the §7e rule: *when review finds
+something the gates should have caught, the gate is the defect.*
+
+### The gate's FINAL run, and `make check` — verbatim, 2026-08-27 (redo 4, second follow-up)
 
 ```
 $ make spec
@@ -806,6 +856,7 @@ self-test: superseded-claims gate
   ok   'answer its own approvals' in openapi.yaml
   ok   'Adapter (ACP)' inside a DESIGN `text` diagram block
   ok   'third-party adapter' in ADR-0004
+  ok   miscitation ':2399' as the tool decorator
   ok   a dated retraction in the same sentence is exempt
   ok   quoting WITHOUT a date is NOT exempt
   ok   a wrong invariant count in README fails the count check
@@ -813,7 +864,7 @@ self-test: superseded-claims gate
   ok   corrupting the normative DDL fails the postgres gate
   ok   an empty pattern file does not silently pass
 
-20 passed, 0 failed
+21 passed, 0 failed
 PASS — every mutation is caught and named; amendments are forgiven only when dated.
 ```
 
@@ -839,6 +890,7 @@ self-test: superseded-claims gate
   ok   'answer its own approvals' in openapi.yaml
   ok   'Adapter (ACP)' inside a DESIGN `text` diagram block
   ok   'third-party adapter' in ADR-0004
+  ok   miscitation ':2399' as the tool decorator
   ok   a dated retraction in the same sentence is exempt
   ok   quoting WITHOUT a date is NOT exempt
   ok   a wrong invariant count in README fails the count check
@@ -846,7 +898,7 @@ self-test: superseded-claims gate
   ok   corrupting the normative DDL fails the postgres gate
   ok   an empty pattern file does not silently pass
 
-20 passed, 0 failed
+21 passed, 0 failed
 PASS — every mutation is caught and named; amendments are forgiven only when dated.
 project                    depth        cov  status
 ------------------------------------------------------------
