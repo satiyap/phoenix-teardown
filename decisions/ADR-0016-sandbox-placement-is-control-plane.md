@@ -1,6 +1,6 @@
 # ADR-0016 — Sandbox lifecycle and placement are a control-plane concern; isolation is a provider's
 
-- **Status:** **Proposed** (2026-08-27) — raised by the SaaS repositioning. **Not Accepted:** it depends on spike 05. *(Amended 2026-08-27: OQ-019 no longer blocks; the v0.1 provider is decided below and SubstrATE is an upgrade path.)*
+- **Status:** **Proposed** (2026-08-27) — raised by the SaaS repositioning. **Not Accepted:** it depends on spike 05. *(Amended 2026-08-27: OQ-019 no longer blocks; the v0.1 provider is decided below.)*
 - **Date:** 2026-08-27
 - **Supersedes:** —
 - **Superseded by:** —
@@ -70,15 +70,12 @@ continue?" inside a component that cannot name the tenant asking.
   idle cost is zero and resume is seconds, which is invisible behind a human wait. Warm-tier
   policy (keep the pod for short waits), a small warm pool, and pre-pull are scheduler
   configuration under this ADR, never visible to the harness.
-- **Named upgrade paths, same four verbs:** `runsc checkpoint/restore` (sub-second resume,
-  same provider); self-hosted `e2b-dev/infra` (Firecracker, Apache-2.0, production today, but a
-  Nomad/Postgres/Redis footprint per customer and a KVM requirement); Kata `RuntimeClass` for a
-  hardware boundary on KVM nodes; SubstrATE when it ships eviction, authN and tenancy
-  boundaries (`docs/architecture.md` calls itself "aspirational", read 2026-08-27). None is a
-  v0.1 dependency. **The rule that keeps them swappable: the harness never relies on process
-  memory surviving; the log and the adapter checkpoint are the only durability.**
-- Eviction semantics of SubstrATE (OQ-019/OQ-042) therefore no longer block this ADR; they
-  gate the *upgrade*, not v0.1.
+- **No upgrade provider is named** (amended 2026-08-27: an earlier bullet listed candidates;
+  removed — that is a future decision, taken on evidence when utilisation becomes a
+  measured problem). What *is* fixed now is the rule that keeps the choice open: **the
+  harness never relies on process memory surviving; the log and the adapter checkpoint are
+  the only durability**, and spike 05 gate 4 tests it.
+- OQ-019/OQ-042 (SubstrATE internals) no longer block this ADR and are parked until a provider change is on the table.
 
 ## Falsification criteria
 
@@ -101,7 +98,8 @@ executing in — and of its checkpoint artefact — with no weakening of the res
 loss of tool interception, and no compute consumed while it waits.*
 
 Provider under test: Kubernetes + gVisor `RuntimeClass`, checkpoint-and-kill. Harness: the
-Pydantic AI adapter from spike 06, with its boundary reused, not re-proven.
+Pydantic AI adapter from spike 06 (**complete 2026-08-27, PASS, 18 assertions**), with its
+boundary reused, not re-proven.
 
 1. Start the harness in pod A; let it emit one `ToolCall` and settle the effect; drive the run
    to `waiting_input` on an approval.
@@ -122,7 +120,10 @@ Pydantic AI adapter from spike 06, with its boundary reused, not re-proven.
    window to zero and skip pod deletion ⇒ gate 1 goes red.
 
 Tool interception after resume is covered by spike 06's boundary running unchanged in pod B;
-one assertion that its ledger row appears is enough here.
+one assertion that its ledger row appears is enough here. *(Spike 06 gate 4 already proves the
+resume path does not re-execute a body in-process — `_tool_execution.py:399` makes `external`
+kinds executable on resume — so what remains here is only that the same boundary holds when the
+process is a different pod.)*
 
 ## Evidence log
 

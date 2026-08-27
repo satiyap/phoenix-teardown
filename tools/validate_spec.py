@@ -761,7 +761,7 @@ def check_counts() -> list[str]:
             errs.append(f"README says {m.group(1)} required invariant tests; "
                         f"spec/08-conformance.md has {rows} inventory rows")
 
-    # 2. spike assertion total vs the four RESULT.md headline counts
+    # 2. spike assertion total vs each RESULT.md headline count (any number of spikes)
     totals = {}
     for res in sorted((ROOT / "spikes").glob("*/RESULT.md")):
         body = res.read_text()
@@ -778,8 +778,8 @@ def check_counts() -> list[str]:
         if not m:
             errs.append("README does not state a '<n> gate assertions' total")
         elif int(m.group(1)) != want:
-            errs.append(f"README says {m.group(1)} gate assertions; the four "
-                        f"RESULT.md files sum to {want} ({totals})")
+            errs.append(f"README says {m.group(1)} gate assertions; the "
+                        f"{len(totals)} RESULT.md files sum to {want} ({totals})")
 
     # 3. ADR status split
     adrs = sorted((ROOT / "decisions").glob("ADR-*.md"))

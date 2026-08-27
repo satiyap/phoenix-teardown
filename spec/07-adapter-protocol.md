@@ -241,9 +241,12 @@ incompatible with three things we have already committed to:
 > asserting the guard's output rather than the guard.
 
 **Tools the platform cannot intercept (vendor-hosted execution) are unsupported in v0.1.**
-Whether and how they are admitted is decided by **spike 06** (OQ-043); until then an adapter
-that cannot disable native execution for a tool **must not register that tool**. Any future
-admission must be stated as *"provider-reported use"* rather than as an effect the platform
+**Spike 06 decided this on 2026-08-27, and the reason is structural rather than a judgement
+call**: `ExternalToolset` withholds a *local* body, and a vendor-hosted tool has no local body to
+withhold. The mechanism that makes every other tool safe cannot express them at all. An adapter
+that cannot route a tool through the ledger **must not register that tool** — enforced, not
+asserted (`UninterceptableTool`, gate 6). Any future admission must be stated as
+*"provider-reported use"* rather than as an effect the platform
 owns, must require a durable provider receipt for anything stronger, and must carry egress
 and confidentiality constraints — not only a mutation-pack restriction.
 
@@ -252,18 +255,33 @@ and confidentiality constraints — not only a mutation-pack restriction.
 `sdk_in_process` is the only mode shipped, and it is the mode most likely to cheat: the SDK
 ships a working tool executor and calling it is one line.
 
-**One harness, on Pydantic AI** (amended 2026-08-27, superseding a two-SDK plan). The pinned
-version is a **placeholder until spike 06 fixes it**: `pydantic-ai == 2.35.0` is what the
-teardown read (`projects/pydantic-ai/teardown.md:7 @ b48ee38`). Tools are registered Python
-functions — the `tool` decorator's implementation is at `agent/__init__.py:2423`, with
-`@agent.tool` usage documented at `:2460` (corrected 2026-08-27: `:2399` is an `@overload`
-stub, not the implementation) — so the `ToolCall → ledger` boundary is a
-**decorator** rather than a fork — which is the property spike 06 must confirm before this
-version is treated as fixed. The adapter boundary is retained so a **second** SDK can be added
-later without touching the control plane.
+**One harness, on Pydantic AI.** Pin: **`pydantic-ai-slim == 2.35.0`**, fixed by spike 06 on
+2026-08-27 (was a placeholder). The version string is a label for five file digests: the source
+tree uses `uv-dynamic-versioning` (`pyproject.toml:5-6`) and carries no git tags, so it cannot
+state its own version. Spike 06 installed 2.35.0 from PyPI and verified `agent/__init__.py`,
+`_tool_execution.py`, `toolsets/external.py`, `toolsets/approval_required.py` and `_deferred.py`
+are **byte-identical** to the read source at `b48ee38`.
 
-**That executor MUST be disabled.** An in-process adapter routes every tool call across the
-same typed boundary as a remote one:
+**The boundary is a TOOLSET, not a decorator** *(corrected 2026-08-27 by spike 06; the earlier
+text said "the `ToolCall → ledger` boundary is a **decorator** rather than a fork", naming
+`@agent.tool` at `agent/__init__.py:2423`/`:2460`)*. That framing assumed Phoenix must intercept
+an executor that wants to run. It does not, and interception is the weaker design. Phoenix
+declares tools through `ExternalToolset`, whose `call_tool` raises
+`NotImplementedError('External tools cannot be called directly')` **unconditionally**
+(`toolsets/external.py:44 @ b48ee38`) while `get_tools` still advertises them to the model with
+`kind='external'` (`:36`). **The SDK is never given an executable body**, so there is no executor
+to disable and no wrapper for a future version to route around. `@agent.tool` is not used by
+Phoenix at all; spike 06's negative control shows it *is* the bypass.
+
+The adapter boundary is retained so a **second** SDK can be added later without touching the
+control plane.
+
+**There is no executor to disable** *(corrected 2026-08-27, spike 06 — the earlier text said
+"That executor MUST be disabled")*. An in-process adapter routes every tool call across the
+same typed boundary as a remote one, and Pydantic AI supplies both halves natively:
+`DeferredToolRequests` as an `output_type` **ends the run** and returns the pending calls
+(`_deferred.py:27,37`), and `deferred_tool_results=` supplies the platform's results on resume
+(`agent/__init__.py:1139`):
 
 ```
 SDK asks for a tool
@@ -281,13 +299,24 @@ This is why "an adapter cannot bring its own tools" moved from a cost to **the d
 (2026-08-27, with the SaaS repositioning): we build every adapter, so no third party is asking
 to bring tools.
 
-**The cost is real, and naming it is the point.** Vendor-hosted tools are **unsupported until
-spike 06 decides** (OQ-043), and the analytics pack loses web search until then. An earlier
+**The cost is real, and naming it is the point.** Vendor-hosted tools are **unsupported in
+v0.1** — settled by spike 06 (OQ-043 resolved 2026-08-27), not pending it — and the analytics
+pack loses web search. An earlier
 version of this paragraph (superseded 2026-08-27) claimed the restriction was free while buying
 the entire guarantee — the guarantee is real, the zero cost was not.
 
-**Required by §08 inventory row 30a**, whose negative control lets the SDK execute a tool
-directly and asserts no ledger row appears. **No executable test exists yet — spike 06.**
+**Required by §08 inventory rows 30a–30e.** **VERIFIED 2026-08-27 by
+`spikes/06-tool-interception/` — 18 gate assertions**, whose negative control runs the same
+function through `FunctionToolset` and observes the body execute with **zero ledger rows**. Its
+oracle is a filesystem side channel the harness never touches, so the assertions are about
+observable effects rather than the SDK's own accounting.
+
+**One finding changed this section.** `_tool_execution.py:399` sets
+`executable_function_kinds = ('function', 'unknown', 'external', 'unapproved')` on the **resume**
+path — external kinds *do* flow through the regular execution pipeline when
+`tool_call_results` is supplied. Resume was therefore a real bypass candidate, not a
+hypothetical one; it holds (gate 4), but it is now an inventory row (30d) rather than an
+assumption.
 
 ## What must be typed, and why
 
