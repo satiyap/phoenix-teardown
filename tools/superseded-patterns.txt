@@ -66,6 +66,9 @@ third[- ]party adapter	2026-08-27	no third party writes adapters for us; the con
 # @overload stub; the tool decorator's implementation is :2423 and usage :2460.
 __init__\.py:2399	2026-08-27	miscitation: :2399 is an @overload stub, not the @agent.tool implementation (:2423)
 30 provider modules	2026-08-27	miscitation: a file count of models/*.py; there are 16 provider model modules
+# The overbroad verification rule, corrected the day it was written. Fixtures may
+# delete state they own; the rule is about OWNERSHIP, not the SQL verb.
+no destructive statement in it at all	2026-08-27	overbroad: a verifier must not destructively mutate state it does not UNIQUELY OWN
 
 # --- counts that drifted ---
 all 15 adrs are accepted	2026-08-27	16 ADRs: 15 Accepted, 1 Proposed

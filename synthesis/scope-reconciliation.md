@@ -797,9 +797,35 @@ it more carefully. Verified against all four hazards:
 - four **concurrent** DDL checks: all four pass, because the schema name is unique.
 
 That is the fifth unsound verification step in six passes, and the first where the *fix for* an
-unsound step was itself unsound. The lesson I am drawing is narrower than "be careful": **a
-verification step should have no destructive statement in it at all.** If a check needs to
-remove something, that is a signal it is creating something it should not.
+unsound step was itself unsound.
+
+> **Rule, corrected 2026-08-27.** I first wrote: *"a verification step should have no
+> destructive statement in it at all. If a check needs to remove something, that is a signal it
+> is creating something it should not."* **That is overbroad and it contradicts this document
+> four lines below**, where `fresh()`'s `DELETE`s are described as a legitimate fixture. Tests
+> routinely create and clean up state they own; the commit message of `9f2ebb4` carries the
+> same overbroad claim and cannot be edited, which is why the correction is recorded here.
+>
+> The defect was never the SQL verb. It was **destructive mutation of state the verifier does
+> not own**:
+>
+> **A verifier must never destructively mutate state it does not uniquely own. Prefer
+> rollback; where explicit cleanup is necessary, target only uniquely named, run-owned
+> resources and prove unrelated state survives.**
+
+Read against that rule, the three designs separate cleanly, which the overbroad version could
+not do:
+
+| Design | Owned the target? | Verdict |
+|---|---|---|
+| fixed `specddl` schema + `SET search_path`, then `DROP SCHEMA CASCADE` | **no** — the spike's tables were created under that `search_path` | unsound |
+| fixed `specddl_check` database + `DROP DATABASE ... WITH (FORCE)` | **no** — a pre-existing database of that name belongs to someone else | unsound |
+| unique `specddl_<hex>` schema in a rolled-back transaction | **yes**, and it removes nothing | sound |
+| `fresh()` deleting rows by `tenant_id` in the spike's own fixture tables | **yes** — it created them | sound, and the concurrency limit is documented |
+
+The "prove unrelated state survives" clause is the part that actually caught this: the planted
+sentinel database, the pre-existing `app_role`, and the spike's seven tables are each asserted
+to survive a run.
 
 A concurrency limitation was found in passing and documented rather than fixed: the spike suite's
 `fresh()` deletes rows from shared tables, so **two concurrent runs of the suite** interfere. The
@@ -818,7 +844,7 @@ Review found this by grepping for the number after I had "corrected" it in one f
 should have been the thing that found it, which is precisely the §7e rule: *when review finds
 something the gates should have caught, the gate is the defect.*
 
-### The gate's FINAL run, and `make check` — verbatim, 2026-08-27 (redo 4, second follow-up)
+### The gate's FINAL run, and `make check` — verbatim, 2026-08-27 (rule correction)
 
 ```
 $ make spec

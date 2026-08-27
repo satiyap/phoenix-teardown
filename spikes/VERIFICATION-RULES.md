@@ -100,6 +100,35 @@ compatibility-layer route. "Conditional PASS" obscured that the original gate fa
 | 5 · independent oracle | `sqlite3` inspected directly, not via the store | registry body compared byte-for-byte |
 | 6 · full reproduce command | 12 tests, no deselect | 35 tests, no deselect |
 
+### 7. A verifier must never destructively mutate state it does not uniquely own
+
+Added 2026-08-27, after **five** unsound verification steps in six review passes — and one case
+where the *fix for* an unsound step was itself unsound.
+
+> **Prefer rollback. Where explicit cleanup is necessary, target only uniquely named, run-owned
+> resources, and prove unrelated state survives.**
+
+The instances, all real:
+
+| What it did | State it did not own |
+|---|---|
+| inserted the `observed` ledger row by hand | asserted the guard's *output*, so the guard was never exercised |
+| `schema.sql` was not idempotent | a second apply left a **half-built** schema; a test then passed against a database missing the constraint under test |
+| a negative control dropped two constraints and **committed** | every later run failed against a schema the test had broken |
+| DDL check used a fixed `specddl` schema + `SET search_path`, then `DROP SCHEMA CASCADE` | **the spike's own tables**, created under that `search_path` |
+| DDL check used a fixed `specddl_check` database + `DROP DATABASE ... WITH (FORCE)` | **a pre-existing database of that name**, belonging to whoever created it |
+
+An earlier version of this rule said *"a verification step should have no destructive statement
+in it at all"*. **That was overbroad** and was corrected the same day: the spike's own
+`fresh()` deletes rows from fixture tables it created, which is legitimate. The verb was never
+the problem — **ownership** was.
+
+Two clauses do the work. *Prefer rollback* removes the destructive statement where possible: the
+DDL check now creates a `specddl_<12 hex>` schema inside one transaction and rolls it back
+unconditionally, so there is nothing to drop. *Prove unrelated state survives* is what actually
+catches a violation — assert the planted sentinel, the pre-existing role, and the neighbouring
+tables are all still there after a run.
+
 ## The failure this prevents
 
 Both review rounds found the same class of defect, and it was not carelessness — it
@@ -110,3 +139,8 @@ guarantee under concurrency.
 
 Rule 3 and rule 4 exist specifically to break that: test the boundary you are making
 a claim about, and prove your test can fail.
+
+**Rule 7 is the same failure in a different direction.** There, a green result was evidence
+about the wrong thing; here, a verification step *changed the system it was measuring* and the
+damage showed up as an unrelated failure one run later. Both come from treating the harness as
+trustworthy because I wrote it.
