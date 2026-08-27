@@ -1,8 +1,16 @@
 # Spike 06 — tool interception on Pydantic AI
 
-**Gate assertions: 18** — the number `README.md` sums. Counts only tests that assert THIS spike's claims through its public boundary; vendored upstream suites are evidence, not our verdict (`VERIFICATION-RULES.md` rule 6).
+**Gate assertions: 26** — the number `README.md` sums. Counts only tests that assert THIS spike's claims through its public boundary; vendored upstream suites are evidence, not our verdict (`VERIFICATION-RULES.md` rule 6).
 
 **Verdict: PASS — OQ-043 is answered, and the mechanism is stronger than the one specified.**
+
+> **Revised 2026-08-27 after review returned FAIL on the verification, not the discovery.** Six
+> defects, all fixed: the digest pin was claimed but never asserted (`external.py` could be
+> edited with all 18 gates passing); row 30e's `indeterminate` skipped the claim phase that
+> `spec/02-consistency.md:326` requires, so the lifecycle it named was absent; gate 6 tested a
+> boolean Phoenix invented instead of `pydantic_ai.native_tools`; the mutation table was prose
+> and one count was wrong (3 vs the real 7); `make check` never ran this spike; and OQ-043
+> pointed at OQ-055 instead of OQ-056. Assertions 18 → **26**.
 **Date:** 2026-08-27 · **SDK:** `pydantic-ai-slim == 2.35.0` (PyPI), verified byte-identical to
 the read source at `b48ee38`.
 
@@ -59,12 +67,13 @@ side channel stays empty — but that was not safe to assume.
 | 3 | the ledger row is written **before** execution, exactly one per call | PASS |
 | 4 | **resume** consumes the platform result without re-executing the body | PASS |
 | 5 | `ApprovalRequired` halts before execution | PASS |
-| 6 | row 30c is executable: an uninterceptable tool **cannot be registered** | PASS |
+| 6 | row 30c is executable: **every vendor-hosted tool the SDK ships** is refused by name, the refusal list is checked against the installed SDK, and native tools are shown absent from the execution pipeline | PASS |
 | 7 | a policy-denied call is ledgered `denied` and never reaches the system | PASS |
 | 8 | the **streaming** path is not a side door | PASS |
 | 9 | a hallucinated tool name finds no dispatcher | PASS |
 | 10 | three calls in one step ⇒ three distinct rows, no `tool_call_id` collision | PASS |
 | 11 | a body that ran then raised ⇒ `indeterminate`, never `intended` | PASS |
+| 12 | **the claim/fence lifecycle**: `intended → claimed → settled`; `indeterminate` requires a claimed row; a stale token is fenced out; a claim requires prior intent | PASS |
 
 ## The oracle is independent (rule 5)
 
@@ -84,15 +93,32 @@ the SDK were lying about what it executed.
 | `settle()` on a never-intended call ⇒ refused | the ledger cannot settle what it never saw |
 | a `SloppyLedger` that skips `indeterminate` ⇒ gate 11 fails | gate 11 discriminates between the two behaviours |
 
-### Harness mutations, each proven to break the gate
+### Harness mutations — GENERATED, not asserted
 
-| Mutation | Effect |
-|---|---|
-| dispatch before ledgering | 3 gates fail |
-| ignore the policy verdict | gate 7 fails |
-| allow `sdk_executable=True` registration | gate 6 fails |
-| **route tools through `FunctionToolset`** (the real bypass) | **7 gates fail** |
-| drop the `indeterminate` settle on a raising body | gate 11 fails |
+The first version listed these counts as prose and got one wrong: it said "dispatch before
+ledgering ⇒ 3 gates fail" when the real answer is **7**. The table was written before gates 10
+and 11 existed and never re-measured. It is now produced by `mutate.py`, which is committed and
+runnable:
+
+```
+$ ../../.venv/bin/python mutate.py --check
+baseline: 26 passed, 0 failed
+```
+
+| Mutation | Removes | Gates broken |
+|---|---|---|
+| dispatch before ledgering | intent no longer precedes the effect | **7** — gates 3, 4, 7, 10, 11, 12 |
+| ignore the policy verdict | a denied call executes anyway | **1** — gate 7 |
+| allow uninterceptable registration | `spec/08` row 30c is unenforced | **2** — gate 6 |
+| **route tools through `FunctionToolset`** | **the real bypass: the SDK gets an executable body** | **12** — gates 2, 3, 4, 7, 8, 9, 10, 11, 12 |
+| drop the claim before dispatch | an effect is dispatched unclaimed | **3** — gates 11, 12 |
+| settle `indeterminate` as `intended` | a crashed effect looks like one that never started | **1** — gate 11 |
+
+`--check` exits non-zero if any mutation survives. A **stale-bytecode trap** is worth naming:
+two mutations only reorder lines, so file length is unchanged, and CPython invalidates `.pyc`
+files on `(mtime, size)` — restoring with `cp` can reproduce a colliding mtime and the
+interpreter silently keeps running the mutated bytecode. That is how a clean tree once reported
+6 failures. `mutate.py` deletes `__pycache__` before every run.
 
 ## A defect this spike found in Phoenix's own design
 
@@ -103,17 +129,29 @@ that never happened. `spec/02-consistency.md:326-348` already says a dispatched 
 never be left without a verdict; the harness didn't honour it. Fixed: a raising body settles
 `indeterminate`, which is the state that surfaces for a human.
 
-## The version pin, and how it was fixed
+## The version pin — claimed, then actually enforced
 
 `pyproject.toml:5-6` uses `uv-dynamic-versioning` and the clone carries **no git tags**, so the
-source tree **cannot state its own version**. Resolved by digest instead of by declaration:
-`pydantic-ai-slim==2.35.0` from PyPI, then `shasum -a 256` on the five files this spike depends
-on against the clone at `b48ee38` — `agent/__init__.py`, `_tool_execution.py`,
-`toolsets/external.py`, `toolsets/approval_required.py`, `_deferred.py`. **All five identical.**
+source tree **cannot state its own version**. The version label is `pydantic-ai-slim==2.35.0`;
+the assertion is five SHA-256 digests of the files these gates depend on.
 
-So the pin `pydantic-ai-slim == 2.35.0` is now **fixed, not a placeholder**, and `spec/07:256`
-should be updated. The five digests are the real assertion; the version string is a label for
-them.
+**The first version of this document claimed a digest pin and stored no digests.** Review
+disproved it in one move: edit `toolsets/external.py`, run the suite, watch all 18 gates still
+pass. A pin that is not asserted is a comment.
+
+Now enforced. `pinned_digests.json` holds the five digests and `conftest.py` fails the **whole
+session** before any gate runs if the installed SDK differs:
+
+```
+$ ../../.venv/bin/python verify_pin.py
+pin holds: 5 files byte-identical to the verified SDK
+```
+
+Re-running review's own control now aborts collection:
+
+```
+toolsets/external.py: expected 47770d0c19453912… got f128ad7952dea705…
+```
 
 ## Cited claims
 
@@ -130,10 +168,24 @@ them.
 ## Reproduce
 
 ```bash
+make spike06              # verify_pin.py, then 26 assertions -- part of `make check`
+make spike06-mutations    # all six mutations; non-zero if any survives
+```
+
+Or directly:
+
+```bash
 cd spikes/06-tool-interception
 ../../.venv/bin/pip install -r requirements.txt
-../../.venv/bin/python -m pytest test_gate.py -q     # 18 passed
+../../.venv/bin/python verify_pin.py                 # pin holds: 5 files
+../../.venv/bin/python -m pytest test_gate.py -q     # 26 passed
+../../.venv/bin/python mutate.py --check             # every mutation caught
 ```
+
+**`make check` now runs this spike.** It previously did not, so a green repository gate was
+being presented as evidence for assertions it never executed (review's finding). `conftest.py`
+checks the digest pin before collection, so the suite cannot silently run against a different
+SDK.
 
 No network, no API key, no database: `TestModel` is Pydantic AI's built-in fake model
 (`pydantic_ai/models/test.py`), and it calls every registered tool by default, which is what
@@ -144,10 +196,18 @@ no database, no fixed-name resource, nothing to clean up.
 
 ## Still not verified
 
-- **Vendor-hosted tools** (web search, code execution) remain **unsupported**, unchanged by this
-  spike. They execute on the vendor's side, so `ExternalToolset` cannot express them: there is no
-  local body to withhold. Any admission is still *provider-reported use* needing a durable
-  receipt.
+- **Vendor-hosted tools** remain **unsupported**, and the reason is now tested against the SDK
+  rather than against a flag Phoenix invented. Review was right that the first gate 6 asserted on
+  `sdk_executable=True` — our own boolean — which is mechanism-shaped evidence. The real path is
+  `pydantic_ai.native_tools` (`WebSearchTool`, `CodeExecutionTool`, `FileSearchTool`,
+  `ImageGenerationTool`, `MemoryTool`, `WebFetchTool`, `XSearchTool`, `MCPServerTool`,
+  `AdvisorTool`, plus `tool_search`), admitted via `Agent.override(native_tools=...)`
+  (`agent/__init__.py:1969`) or agent capabilities (`:762`). Three findings make the refusal
+  structural: **`_tool_execution.py` contains no reference to `NativeToolCallPart`** — native
+  tools never enter the module that runs tool bodies; `TestModel` raises `UserError('TestModel
+  does not support built-in tools')` (`models/test.py:252`), i.e. support is a **model**
+  property; and so there is no local body for `ExternalToolset` to withhold. Any admission is
+  still *provider-reported use* needing a durable receipt.
 - **Native `@agent.tool` functions are never used by Phoenix.** This spike proves they are the
   bypass (`FunctionToolset` control) and that we don't need them. It does **not** prove they are
   safe under any wrapping, because that question is now moot.

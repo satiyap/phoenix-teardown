@@ -1,0 +1,13 @@
+{
+  "_why": "The SDK source tree uses uv-dynamic-versioning (pyproject.toml:5-6) and the read clone carries no git tags, so it cannot state its own version. `pydantic-ai-slim==2.35.0` in requirements.txt is a LABEL; these digests are the assertion. Review proved the distinction mattered: with only the version pin in place, external.py could be edited and all 18 gates still passed.",
+  "_algorithm": "sha256 of the file bytes, as installed under site-packages/pydantic_ai/",
+  "_source_commit": "b48ee38",
+  "_recorded": "2026-08-27",
+  "files": {
+    "toolsets/external.py": "47770d0c1945391209594e73be231a36002adbdb5feb024f4c7d5a8e1e159a54",
+    "toolsets/approval_required.py": "cf2606131d95aa9acb79dd7a397835416afcd6b9c00740a60334dec9027d038a",
+    "_deferred.py": "a01d33078fa25274566a8ff692d28ae10d627a6431cfb54fb8e194dfe32d8b8c",
+    "_tool_execution.py": "f5c58a7e7138cfb14a2dcfcdfdbfd2909b8e232e7072932c80cff0cfea7fcc8a",
+    "agent/__init__.py": "7106f8b82d88feaf0a1f4b46afc116230f997863cfc35dced9633fe8da2748c1"
+  }
+}

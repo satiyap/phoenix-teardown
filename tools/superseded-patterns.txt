@@ -68,6 +68,10 @@ __init__\.py:2399	2026-08-27	miscitation: :2399 is an @overload stub, not the @a
 # The overbroad verification rule, corrected the day it was written. Fixtures may
 # delete state they own; the rule is about OWNERSHIP, not the SQL verb.
 no destructive statement in it at all	2026-08-27	overbroad: a verifier must not destructively mutate state it does not UNIQUELY OWN
+# Spike 06 corrected the framing: there is no executor to disable, because the SDK
+# is never handed an executable body (ExternalToolset).
+(?<!no )(?<!not )native tool executor is disabled	2026-08-27	corrected by spike 06: the SDK is never given an executable body; there is no executor to disable
+[Tt]hat executor MUST be disabled	2026-08-27	corrected by spike 06: tools are declared via ExternalToolset, so nothing needs disabling
 
 # --- counts that drifted ---
 all 15 adrs are accepted	2026-08-27	16 ADRs: 15 Accepted, 1 Proposed

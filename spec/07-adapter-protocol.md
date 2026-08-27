@@ -276,8 +276,8 @@ Phoenix at all; spike 06's negative control shows it *is* the bypass.
 The adapter boundary is retained so a **second** SDK can be added later without touching the
 control plane.
 
-**There is no executor to disable** *(corrected 2026-08-27, spike 06 — the earlier text said
-"That executor MUST be disabled")*. An in-process adapter routes every tool call across the
+**There is no executor to disable.** The wording that stood here before, asserting that "that
+executor MUST be disabled", was superseded 2026-08-27 by spike 06. An in-process adapter routes every tool call across the
 same typed boundary as a remote one, and Pydantic AI supplies both halves natively:
 `DeferredToolRequests` as an `output_type` **ends the run** and returns the pending calls
 (`_deferred.py:27,37`), and `deferred_tool_results=` supplies the platform's results on resume

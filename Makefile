@@ -1,6 +1,6 @@
 PY := ./.venv/bin/python
 
-.PHONY: help status validate matrix check probes llm setup spec gate-tests
+.PHONY: help status validate matrix check probes llm setup spec gate-tests spike06 spike06-mutations
 
 help:
 	@echo "make setup     create venv and install deps"
@@ -32,6 +32,7 @@ matrix:
 check:
 	@git diff --check || (echo "trailing whitespace or conflict markers — see git diff --check"; exit 1)
 	@$(PY) tools/test_validate_spec.py
+	@$(MAKE) --no-print-directory spike06
 	@cd tools && ../$(PY) validate_facts.py --strict && ../$(PY) validate_spec.py && ../$(PY) build_matrix.py && ../$(PY) check_exit_criteria.py
 
 probes:
@@ -45,3 +46,14 @@ spec:
 
 gate-tests:
 	@$(PY) tools/test_validate_spec.py
+
+# Spike 06's 26 assertions were NOT executed by any repository target, so a green
+# `make check` was being presented as evidence for them. It now runs them, pin first:
+# the digest check must fail the session if the installed SDK is not the code the
+# gates were written against.
+spike06:
+	@cd spikes/06-tool-interception && ../../$(PY) verify_pin.py
+	@cd spikes/06-tool-interception && ../../$(PY) -m pytest test_gate.py -q
+
+spike06-mutations:
+	@cd spikes/06-tool-interception && ../../$(PY) mutate.py --check

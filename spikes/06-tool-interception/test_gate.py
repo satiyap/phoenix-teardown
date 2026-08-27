@@ -29,7 +29,7 @@ from pydantic_ai.toolsets.approval_required import ApprovalRequiredToolset
 from pydantic_ai.toolsets.external import ExternalToolset
 from pydantic_ai.toolsets.function import FunctionToolset
 
-from harness import EffectLedger, PhoenixHarness, UninterceptableTool
+from harness import EffectLedger, LedgerRow, PhoenixHarness, UninterceptableTool
 
 SCHEMA = {"type": "object", "properties": {"to": {"type": "string"}}, "required": ["to"]}
 
@@ -229,12 +229,94 @@ def test_gate5_negative_control_approval_granted_then_it_runs(chan, led):
     assert chan.lines == ["send_email:a"], "approval was granted but nothing ran"
 
 
-# ============ GATE 6: row 30c is executable ================================
-def test_gate6_uninterceptable_tool_cannot_be_registered(led):
+# ============ GATE 6: row 30c is executable, against the REAL admission path
+def test_gate6_every_native_tool_the_sdk_ships_is_refused(led):
+    """`spec/08` row 30c against Pydantic AI's ACTUAL vendor-hosted tools.
+
+    An earlier version asserted only on `sdk_executable=True` -- a boolean Phoenix
+    invented. Review was right to call that mechanism-shaped evidence: it tested
+    our own flag, not the SDK's real native-tool path. This enumerates the tools
+    the installed SDK actually ships and asserts each is refused BY NAME.
+    """
+    import pydantic_ai.native_tools as nt
+
+    shipped = {}
+    for attr in dir(nt):
+        if attr.endswith("Tool") and not attr.startswith("Abstract"):
+            try:
+                shipped[getattr(nt, attr)().kind] = attr
+            except Exception:
+                pass
+    assert shipped, "could not enumerate the SDK's native tools"
+
     h = PhoenixHarness(ledger=led)
-    with pytest.raises(UninterceptableTool, match="cannot be registered"):
-        h.register("web_search", SCHEMA, lambda to: None, sdk_executable=True)
+    for kind, cls in shipped.items():
+        with pytest.raises(UninterceptableTool, match="cannot be routed"):
+            h.register(kind, SCHEMA, lambda **k: "x")
+    assert led.rows == []
+
+
+def test_gate6_native_tool_list_is_complete(led):
+    """If a FUTURE SDK version adds a native tool, this fails rather than admitting it.
+
+    Fail-closed by construction: the harness's refusal list is compared against the
+    installed SDK, so a new vendor-hosted tool cannot slip through unnoticed.
+    """
+    import pydantic_ai.native_tools as nt
+    from harness import NATIVE_TOOL_NAMES
+
+    shipped = set()
+    for attr in dir(nt):
+        if attr.endswith("Tool") and not attr.startswith("Abstract"):
+            try:
+                shipped.add(getattr(nt, attr)().kind)
+            except Exception:
+                pass
+    missing = shipped - NATIVE_TOOL_NAMES
+    assert not missing, f"SDK ships native tools the harness would admit: {sorted(missing)}"
+
+
+def test_gate6_native_tools_never_enter_the_execution_pipeline():
+    """WHY the refusal is structural, asserted against the SDK's own source.
+
+    `_tool_execution.py` -- the only module that runs tool bodies -- contains no
+    reference to `NativeToolCallPart`. Native tools arrive as transcript parts from
+    the provider; they are never dispatched locally. So there is no local body for
+    `ExternalToolset` to withhold, which is why this is a structural impossibility
+    rather than a policy choice.
+    """
+    import os
+    import pydantic_ai
+    src = Path(os.path.dirname(pydantic_ai.__file__)) / "_tool_execution.py"
+    body = src.read_text()
+    assert "NativeToolCallPart" not in body, \
+        "native tools now enter the execution pipeline -- re-examine the refusal"
+    assert "'external'" in body, "sanity: external kinds ARE handled here"
+
+
+def test_gate6_caller_declared_flag_is_also_refused(led):
+    """The original assertion, kept but demoted to what it actually proves."""
+    h = PhoenixHarness(ledger=led)
+    with pytest.raises(UninterceptableTool, match="cannot be routed"):
+        h.register("send_email", SCHEMA, lambda to: None, sdk_executable=True)
     assert h.build_agent(TestModel()) is not None
+
+
+def test_gate6_test_model_refuses_native_tools_entirely(led):
+    """Independent corroboration from the SDK: native tools are MODEL-side.
+
+    `models/test.py:252` raises `UserError('TestModel does not support built-in
+    tools')`. A tool the model must support is a tool the platform cannot
+    intercept -- the clearest possible statement that this is not our layer.
+    """
+    from pydantic_ai import Agent
+    from pydantic_ai.exceptions import UserError
+    from pydantic_ai.native_tools import WebSearchTool
+
+    agent = Agent(TestModel(), output_type=[str, DeferredToolRequests])
+    with pytest.raises(UserError, match="does not support built-in tools"):
+        with agent.override(native_tools=[WebSearchTool()]):
+            agent.run_sync("search the web")
 
 
 def test_gate6_external_toolset_refuses_direct_invocation():
@@ -373,10 +455,10 @@ def test_gate11_negative_control_intended_would_hide_the_effect(chan, led):
     this control, gate 11 would pass against either behaviour.
     """
     class SloppyLedger(EffectLedger):
-        def settle(self, tool_call_id, status, result_json):
+        def settle(self, tool_call_id, status, result_json, *, token=None):
             if status == "indeterminate":
-                return  # the defect: crash leaves the row untouched
-            super().settle(tool_call_id, status, result_json)
+                return  # the defect: a crash leaves the row untouched
+            super().settle(tool_call_id, status, result_json, token=token)
 
     def boom(to):
         chan.touch(f"send_email:{to}")
@@ -390,4 +472,78 @@ def test_gate11_negative_control_intended_would_hide_the_effect(chan, led):
         h.resolve("run-1", req)
 
     statuses = [r.status for r in sloppy.rows_for(req.calls[0].tool_call_id)]
-    assert statuses == ["intended"], "control is broken if the row settled"
+    assert statuses == ["claimed"], \
+        "control is broken if the row settled; it must be left at the claim"
+
+
+# ============ GATE 12: the claim/fence lifecycle, per spec/02 ==============
+def test_gate12_indeterminate_requires_a_claimed_row(led):
+    """`spec/02-consistency.md:326`: "a never-claimed row ... cannot produce
+    `indeterminate`".
+
+    Review found the first harness moving `intended` straight to `indeterminate`,
+    which made row 30e's VERIFIED label false: the mechanism the spec describes
+    (claim, then lose contact) was not present at all. The ledger now refuses.
+    """
+    led.append(LedgerRow("run-1", "tc-1", "send_email", "{}", "intended"))
+    with pytest.raises(AssertionError, match="indeterminate requires a claimed row"):
+        led.settle("tc-1", "indeterminate", None)
+
+
+def test_gate12_effect_is_claimed_before_dispatch(chan, led):
+    """The full phase order is observable: intended -> claimed -> settled."""
+    seen: list[str] = []
+
+    class Traced(EffectLedger):
+        def append(self, row):
+            seen.append(f"append:{row.status}")
+            super().append(row)
+
+        def claim(self, tool_call_id, owner, token):
+            seen.append("claim")
+            super().claim(tool_call_id, owner, token)
+
+        def settle(self, tool_call_id, status, result_json, *, token=None):
+            seen.append(f"settle:{status}")
+            super().settle(tool_call_id, status, result_json, token=token)
+
+    traced = Traced()
+    h = PhoenixHarness(ledger=traced)
+    h.register("send_email", SCHEMA,
+               lambda to: (seen.append("EXECUTE"), chan.touch(f"send_email:{to}"))[1])
+    req = h.build_agent(TestModel()).run_sync("email").output
+    h.resolve("run-1", req)
+
+    assert seen == ["append:intended", "claim", "EXECUTE", "settle:settled"], seen
+    row = traced.rows_for(req.calls[0].tool_call_id)[0]
+    assert row.claim_owner == "worker:run-1" and row.claim_token
+
+
+def test_gate12_a_stale_worker_is_fenced_out(chan, led):
+    """A claim token that is not the holder's cannot overwrite the verdict.
+
+    Without the fence, a stale worker could settle an effect it does not own --
+    including overwriting an `indeterminate` verdict that a human is investigating.
+    """
+    h = PhoenixHarness(ledger=led)
+    h.register("send_email", SCHEMA, lambda to: chan.touch(f"send_email:{to}"))
+    req = h.build_agent(TestModel()).run_sync("email").output
+    call_id = req.calls[0].tool_call_id
+
+    led.append(LedgerRow("run-1", call_id, "send_email", "{}", "intended"))
+    led.claim(call_id, "worker:run-1", "the-real-token")
+
+    with pytest.raises(AssertionError, match="stale worker fenced out"):
+        led.settle(call_id, "settled", '"forged"', token="a-guess")
+    with pytest.raises(AssertionError, match="needs its claim token"):
+        led.settle(call_id, "settled", '"forged"')
+    assert led.rows_for(call_id)[0].status == "claimed", "the fence must hold the row"
+
+
+def test_gate12_claim_requires_intent_first(led):
+    """Claiming a row that was never intended is refused, so the phases cannot be skipped."""
+    with pytest.raises(AssertionError, match="claim for an unledgered call"):
+        led.claim("tc-nope", "worker:x", "tok")
+    led.append(LedgerRow("run-1", "tc-2", "send_email", "{}", "settled"))
+    with pytest.raises(AssertionError, match="claim requires status 'intended'"):
+        led.claim("tc-2", "worker:x", "tok")
