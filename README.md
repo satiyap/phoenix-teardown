@@ -113,16 +113,11 @@ answered, all six synthesis deliverables final.
 | 7 Spikes | AG2 storage swap, definition pin, **Postgres concurrency**, **work-bundle generality** — 4 spikes, **117 gate assertions**, verification rules |
 | 8 Spec | **10 documents** + compiling `.proto` and OpenAPI contracts; 50 required invariant tests with negative controls |
 
-**How the 116 is counted.** 12 (spike 01) + 35 (02) + 42 (03) + 27 (04), read from the
-`**Gate assertions: n**` line each `RESULT.md` declares. **`make check` asserts this sum**, so
-the number cannot drift again; the same check asserts the invariant-row count against
-`spec/08-conformance.md` and the ADR split against `decisions/`.
-
-**Vendored upstream suites do not count.** Spike 01 also ran AG2's own 480 tests through our
-storage — useful evidence that the swap works, but *their* verdict, not ours
-(`VERIFICATION-RULES.md` rule 6). Two earlier versions of this line said 124 and then 115, by
-counting a pytest total and then a retracted scenario; both are why the number is now derived
-rather than written.
+**How the assertion count is derived.** The sum of the `**Gate assertions: n**` line each
+spike's `RESULT.md` declares; `make check` asserts that sum against the table above, the
+invariant-row count against `spec/08-conformance.md`, and the ADR split against `decisions/`.
+Vendored upstream suites do not count (spike 01 also ran AG2's 480 tests — *their* verdict,
+`VERIFICATION-RULES.md` rule 6).
 
 **173 recorded ADR impacts**: 96 confirms, 19 amends, 10 challenges, 48 neutral.
 Four ADRs did not exist before the evidence (0011 pinning, 0012 capabilities,

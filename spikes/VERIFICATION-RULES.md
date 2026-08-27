@@ -82,8 +82,8 @@ The instances, all real:
 
 | What it did | Rule violated | State it did not own |
 |---|---|---|
-| inserted the `observed` ledger row by hand | **2 and 4**, not 7 | nothing — the row was its own; the defect is that it asserted the guard's *output*, so the guard was never exercised and no negative control could have gone red (`synthesis/scope-reconciliation.md:456-458`) |
-| `schema.sql` was not idempotent | **6**, not 7 | nothing — the schema was its own; the defect is that the PASS was written from a standalone 6/6 run rather than the full gate command, against a second apply that left a **half-built** schema missing the constraint under test (`synthesis/scope-reconciliation.md:584-588`) |
+| inserted the `observed` ledger row by hand | **2 and 4**, not 7 | nothing — the row was its own; the defect is that it asserted the guard's *output*, so the guard was never exercised and no negative control could have gone red (`synthesis/scope-reconciliation.md §7a`) |
+| `schema.sql` was not idempotent | **6**, not 7 | nothing — the schema was its own; the defect is that the PASS was written from a standalone 6/6 run rather than the full gate command, against a second apply that left a **half-built** schema missing the constraint under test (`synthesis/scope-reconciliation.md §7a`) |
 | a negative control dropped two constraints and **committed** | **7** | every later run failed against a schema the test had broken |
 | DDL check used a fixed `specddl` schema + `SET search_path`, then `DROP SCHEMA CASCADE` | **7** | **the spike's own tables**, created under that `search_path` |
 | DDL check used a fixed `specddl_check` database + `DROP DATABASE ... WITH (FORCE)` | **7** | **a pre-existing database of that name**, belonging to whoever created it |

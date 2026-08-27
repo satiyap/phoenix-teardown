@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Postgres gate — the eight scenarios review listed as unverified.
+"""Postgres gate — the concurrency scenarios review listed as unverified (see main() for the list).
 
 Everything here was previously "reasoned but untested". Each scenario states an
 externally observable invariant, runs it against real Postgres 16 with real
