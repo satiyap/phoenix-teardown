@@ -1,8 +1,6 @@
 # v0.1 product boundary
 <!-- status: final -->
 
-*SOURCE OF TRUTH: [`synthesis/scope.yaml`](scope.yaml) — `make check` asserts these tables match it.*
-
 The scope decision the study exists to support. Three lists: **in v0.1**,
 **deferred with intent**, and **never**. Every line cites the evidence that put it
 there.
@@ -90,7 +88,7 @@ and each is backed by evidence rather than preference.
 | 1 | **No compensation / rollback / saga engine.** We integrate Temporal, DBOS or Prefect. | **Zero positive answers in 13 projects** — 12 negative, 1 `unknown` only because a client SDK cannot show it — including the project whose whole job is control and the one whose whole job is orchestration. Pydantic AI supplies the reason: saga compensation is the workflow engine's job. |
 | 2 | **No workflow / DAG engine of our own.** | MAF's Pregel engine and Pydantic AI's Temporal integration both demonstrate orchestration is separable and better solved elsewhere. Building one competes with a solved problem. |
 | 3 | **No model gateway or provider abstraction.** | Explicit anti-goal of this study, and a commodity: MAF ships 35 provider packages, which is exactly the surface we should not own. |
-| 4 | **No _public_ authoring framework, and no customer-supplied agent code** (amended 2026-08-27). We own a thin internal harness over the vendor SDKs (Claude Agent SDK, LangGraph, OpenAI Agents SDK). Customers bring knowledge, connectors and data — never agent code. | ADR-0004 (amended 2026-08-27). **The Cloudflare lesson no longer binds (superseded 2026-08-27).** Its cost was the ability to run a third party's agent; that was fatal when adapting third-party agents was a hard requirement, and it is not one any more, because we build and operate the agents. What we keep is the *adapter boundary* — not to admit foreign agents, but so the SDK underneath stays swappable. What we still refuse is publishing an authoring framework for customers to write against. |
+| 4 | **No _public_ authoring framework, and no customer-supplied agent code** (amended 2026-08-27). We own a thin internal harness on **Pydantic AI 2.35.0** (amended 2026-08-27, superseding "over the vendor SDKs (Claude Agent SDK, LangGraph, OpenAI Agents SDK)"; ADR-0004 redo 4, `decisions/ADR-0004-runtime-is-adapter-based.md:132`). Customers bring knowledge, connectors and data — never agent code. | ADR-0004 (amended 2026-08-27). **The Cloudflare lesson no longer binds (superseded 2026-08-27).** Its cost was the ability to run a third party's agent; that was fatal when adapting third-party agents was a hard requirement, and it is not one any more, because we build and operate the agents. What we keep is the *adapter boundary* — not to admit foreign agents, but so the SDK underneath stays swappable. What we still refuse is publishing an authoring framework for customers to write against. |
 | 5 | **No bespoke policy DSL, trace format, or messaging protocol.** Cedar, OTel, AG2's envelope. | ADR-0013, ADR-0010, ADR-0003. Every project that invented one of these ended up with a worse version and no ecosystem. |
 
 ---

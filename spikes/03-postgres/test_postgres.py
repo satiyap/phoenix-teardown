@@ -296,11 +296,17 @@ def s4_claim_vs_denial():
     p = mp.Process(target=_claimer, args=("k4", "w1", out))
     p.start(); p.join()
     _, won = out.get()
+    with conn.cursor() as c:
+        c.execute("SELECT status FROM effect_ledger WHERE tenant_id=1"
+                  " AND idempotency_key='k4'")
+        _pre = c.fetchone()
+    check("NC fixture: the k4 ledger row exists before the claim", _pre is not None)
     check("a denied effect cannot be claimed", not won)
     with conn.cursor() as c:
         c.execute("SELECT status FROM effect_ledger WHERE tenant_id=1"
                   " AND idempotency_key='k4'")
-        check("status stays `denied`, never `indeterminate`", c.fetchone()[0] == "denied")
+        check("status stays `denied`, never `indeterminate`",
+              (lambda r: r is not None and r[0] == "denied")(c.fetchone()))
 
     # an approved one CAN be claimed — the mirror case, so the test is not vacuous
     with conn.cursor() as c:

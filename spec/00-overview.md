@@ -1,8 +1,6 @@
 # Implementation specification — v0.1
 <!-- status: final -->
 
-*SOURCE OF TRUTH: [`synthesis/scope.yaml`](../synthesis/scope.yaml) — `make check` asserts these tables match it.*
-
 The handoff from analysis to construction. `DESIGN.md` states *what* and *why*; this
 states *exactly what to build*.
 

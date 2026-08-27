@@ -70,6 +70,37 @@ tests, with no `--deselect` and no omissions, and the stated count must match.
 Supporting evidence that is *not* reproducible from the checkout (e.g. a vendored
 upstream suite) must be labelled as such and must not carry the verdict.
 
+### 7. A verifier must never destructively mutate state it does not uniquely own
+
+Added 2026-08-27, after **three** ownership violations among five unsound verification steps in six review passes — and one case
+where the *fix for* an unsound step was itself unsound.
+
+> **Prefer rollback. Where explicit cleanup is necessary, target only uniquely named, run-owned
+> resources, and prove unrelated state survives.**
+
+The instances, all real:
+
+| What it did | Rule violated | State it did not own |
+|---|---|---|
+| inserted the `observed` ledger row by hand | **2 and 4**, not 7 | nothing — the row was its own; the defect is that it asserted the guard's *output*, so the guard was never exercised and no negative control could have gone red (`synthesis/scope-reconciliation.md:456-458`) |
+| `schema.sql` was not idempotent | **6**, not 7 | nothing — the schema was its own; the defect is that the PASS was written from a standalone 6/6 run rather than the full gate command, against a second apply that left a **half-built** schema missing the constraint under test (`synthesis/scope-reconciliation.md:584-588`) |
+| a negative control dropped two constraints and **committed** | **7** | every later run failed against a schema the test had broken |
+| DDL check used a fixed `specddl` schema + `SET search_path`, then `DROP SCHEMA CASCADE` | **7** | **the spike's own tables**, created under that `search_path` |
+| DDL check used a fixed `specddl_check` database + `DROP DATABASE ... WITH (FORCE)` | **7** | **a pre-existing database of that name**, belonging to whoever created it |
+
+The first two rows were listed here as rule-7 instances and are not: each mutated only state it
+owned. Classified under the earlier rules they actually violate, **added 2026-08-27**; they stay
+in the table because both were found in the same review sweep.
+
+An earlier version of this rule said *"a verification step should have no destructive statement in it at all"* — **superseded 2026-08-27** as overbroad, because the spike's own `fresh()` deletes rows from fixture tables it created, which is legitimate.
+The verb was never the problem — **ownership** was.
+
+Two clauses do the work. *Prefer rollback* removes the destructive statement where possible: the
+DDL check now creates a `specddl_<12 hex>` schema inside one transaction and rolls it back
+unconditionally, so there is nothing to drop. *Prove unrelated state survives* is what actually
+catches a violation — assert the planted sentinel, the pre-existing role, and the neighbouring
+tables are all still there after a run.
+
 ---
 
 ## Verdict vocabulary
@@ -99,37 +130,6 @@ compatibility-layer route. "Conditional PASS" obscured that the original gate fa
 | 4 · negative controls | claim removed ⇒ both workers act | lease stubbed ⇒ 4 executions; canon version bumped ⇒ digest changes |
 | 5 · independent oracle | `sqlite3` inspected directly, not via the store | registry body compared byte-for-byte |
 | 6 · full reproduce command | 12 tests, no deselect | 35 tests, no deselect |
-
-### 7. A verifier must never destructively mutate state it does not uniquely own
-
-Added 2026-08-27, after **five** unsound verification steps in six review passes — and one case
-where the *fix for* an unsound step was itself unsound.
-
-> **Prefer rollback. Where explicit cleanup is necessary, target only uniquely named, run-owned
-> resources, and prove unrelated state survives.**
-
-The instances, all real:
-
-| What it did | Rule violated | State it did not own |
-|---|---|---|
-| inserted the `observed` ledger row by hand | **2 and 4**, not 7 | nothing — the row was its own; the defect is that it asserted the guard's *output*, so the guard was never exercised and no negative control could have gone red (`synthesis/scope-reconciliation.md:456-458`) |
-| `schema.sql` was not idempotent | **6**, not 7 | nothing — the schema was its own; the defect is that the PASS was written from a standalone 6/6 run rather than the full gate command, against a second apply that left a **half-built** schema missing the constraint under test (`synthesis/scope-reconciliation.md:584-588`) |
-| a negative control dropped two constraints and **committed** | **7** | every later run failed against a schema the test had broken |
-| DDL check used a fixed `specddl` schema + `SET search_path`, then `DROP SCHEMA CASCADE` | **7** | **the spike's own tables**, created under that `search_path` |
-| DDL check used a fixed `specddl_check` database + `DROP DATABASE ... WITH (FORCE)` | **7** | **a pre-existing database of that name**, belonging to whoever created it |
-
-The first two rows were listed here as rule-7 instances and are not: each mutated only state it
-owned. Classified under the earlier rules they actually violate, **added 2026-08-27**; they stay
-in the table because both were found in the same review sweep.
-
-An earlier version of this rule said *"a verification step should have no destructive statement in it at all"* — **superseded 2026-08-27** as overbroad, because the spike's own `fresh()` deletes rows from fixture tables it created, which is legitimate.
-The verb was never the problem — **ownership** was.
-
-Two clauses do the work. *Prefer rollback* removes the destructive statement where possible: the
-DDL check now creates a `specddl_<12 hex>` schema inside one transaction and rolls it back
-unconditionally, so there is nothing to drop. *Prove unrelated state survives* is what actually
-catches a violation — assert the planted sentinel, the pre-existing role, and the neighbouring
-tables are all still there after a run.
 
 ## The failure this prevents
 

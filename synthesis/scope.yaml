@@ -12,11 +12,6 @@
 # The markdown is NOT generated from this file. It is asserted against it, so a change
 # made in either place and not the other fails the build instead of drifting.
 
-harness: 'Pydantic AI 2.35.0 — one internal harness (v01-boundary.md Tier 1 item 4)'
-
-adapters_shipped:
-  - 'sdk_in_process — the only adapter mode shipped in v0.1; the SDK native tool executor is disabled'
-
 # Numbers are the item numbers as v01-boundary.md prints them — the sequence is not
 # contiguous (9 is followed by 11), and it is copied rather than renumbered so a row
 # can be matched to the document. Text is the bolded capability name of each row.
@@ -85,9 +80,10 @@ never:
   - number: 5
     item: 'No bespoke policy DSL, trace format, or messaging protocol.'
 
-# Counts README states. Each is ALSO derived from its own artifact by the older
-# "counts vs source of truth" check, so this file cannot quietly move a number:
-# scope.yaml, README.md and the artifact must all three agree.
+# Counts README states. `adr_status`, `invariant_rows` and `spike_assertions` are ALSO
+# derived from their own artifacts by the older "counts vs source of truth" check, so
+# scope.yaml, README.md and the artifact must all three agree. `spec_docs` is NOT: it is
+# asserted only between this file and README.md, so both can move together undetected.
 counts:
   adr_status:
     total: 16

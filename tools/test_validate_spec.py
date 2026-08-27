@@ -77,18 +77,15 @@ def run_gate(tree: Path) -> tuple[bool, list[str]]:
 MUTATIONS = [
     ("'We adapt agents supplied by customers.' in DESIGN.md",
      "DESIGN.md", "We adapt agents supplied by customers."),
-    # Retargeted 2026-08-27: reference-architecture.md and exit-criteria.md were
-    # frozen and dropped from the scan, so a mutation aimed at them would test
-    # nothing. Both sentences now land in the scanned document that owns the claim.
-    ("'Our adapter exposes four methods.' in 07-adapter-protocol.md",
-     "spec/07-adapter-protocol.md", "Our adapter exposes four methods."),
+    ("'Our adapter exposes four methods.' in reference-architecture.md",
+     "synthesis/reference-architecture.md", "Our adapter exposes four methods."),
     # Injected into the DECISION section, not the evidence log: everything after
     # "## Evidence log" is a finding about another project and is exempt by design.
     # Appending at end-of-file would land inside that exemption and test nothing.
     ("'The ACP path ships first.' in ADR-0014 (decision section)",
      "decisions/ADR-0014-*.md", "The ACP path ships first."),
-    ("'a pending row past its lease' in 02-consistency.md",
-     "spec/02-consistency.md", "Consider a pending row past its lease."),
+    ("'a pending row past its lease' in exit-criteria.md",
+     "synthesis/exit-criteria.md", "Consider a pending row past its lease."),
     # The verifier's actual misses on 3026e38. Each passed the gate before redo 3.
     ("identity comment 'acp:claude-code'",
      "spec/01-schema.md", "-- identity looks like 'acp:claude-code'."),
@@ -246,7 +243,7 @@ def main() -> int:
                                        "item: 'Effect ledger (rewritten)'", 1))
         out = run_full(base)
         check("a changed tier item in scope.yaml fails the scope check",
-              "scope vs source of truth" in out and "tier1" in out,
+              "v01-boundary.md tier1:" in out and "Effect ledger (rewritten)" in out,
               "scope control did not fire")
         sy.write_text(saved_sy)
 

@@ -1,7 +1,6 @@
 # Reference architecture — v0.1
 <!-- status: final -->
-<!-- status: frozen 2026-08-27 -->
-Frozen as of 2026-08-26 (Phase 5). Scope is governed by [`v01-boundary.md`](v01-boundary.md) / [`scope.yaml`](scope.yaml); where this document disagrees, the boundary wins.
+Frozen 2026-08-27; content is as written in Phase 5 (2026-08-26). Scope is governed by [`v01-boundary.md`](v01-boundary.md) / [`scope.yaml`](scope.yaml); where this document disagrees, the boundary wins.
 
 Derived from 13 teardowns, 16 ADRs (15 Accepted, 1 Proposed) and the canonical domain model. Each
 component names the evidence that shaped it. Where a component exists because

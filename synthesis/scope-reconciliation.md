@@ -1008,3 +1008,58 @@ Synthesis deliverables
 9 deep + 4 targeted. Probe set: 173 probes.
 ==================================================================
 ```
+
+---
+
+### 7g. Closure (2026-08-27)
+
+*(Numbered 7g, not 7e: 7e and 7f were already taken by the redo-4 follow-up and the
+two-defect pass above. Recorded here because the closing instruction said "7e".)*
+
+**The commits since `abfb206` ("spike 04: falsification test for the generic enterprise-work core"):**
+
+| Commit | What it did |
+|---|---|
+| `59da08b` | reposition: SaaS, we build and operate the agents (2026-08-27) |
+| `793828b` | redo: fix seven verifier items; permit unmediated tools narrowly |
+| `3026e38` | redo 2: sound superseded gate; retract the narrow permission just granted |
+| `82fbc6b` | redo 3 (closing): D-A, D-B, nine items; approver kind was unenforced |
+| `8503de8` | redo 4: one harness on Pydantic AI; five defects; gate scans contracts |
+| `b3db4cd` | fix six verifier defects; isolate the DDL check by database |
+| `9f2ebb4` | fix destructive DDL check; propagate the corrected citation |
+| `88ee4e4` | correct the overbroad verification rule; record it as rule 7 |
+| `e38a18d` | close scope change: three verifier fixes; scope.yaml as source of truth; freeze Phase-5 artefacts |
+| *this commit* | close scope change: round-2 fixes; file residue as OQs |
+
+**The three moves that closed it.**
+
+1. **Fixes.** The last unpropagated instance of the superseded three-SDK plan was in
+   Never #4 of the boundary itself — the document everything else cites — and is now
+   amended in place with its date (`synthesis/v01-boundary.md:91`), with `DESIGN.md:352`'s
+   line anchor corrected to match. The verifier was fixed where it lied about itself: the
+   Postgres gate now reports the cause it used to discard, its skip message says nine
+   scenarios rather than eight, the module docstring no longer hand-maintains a checklist
+   that `main()` had outgrown, half of the new scope control's assertion was dead and now
+   discriminates, and spike 03's denied-claim negative control now asserts its own fixture
+   exists instead of passing when the row is absent.
+
+2. **`synthesis/scope.yaml`.** Kept, with its claims trimmed to what `make check` actually
+   asserts: the `harness` and `adapters_shipped` keys were reverted, because a
+   source-of-truth file carrying unpoliced scope claims is the drift it exists to stop.
+   The comment above `counts:` no longer overstates the guarantee — `spec_docs` is asserted
+   only between this file and README, and now says so. The three SOURCE OF TRUTH banners
+   were reverted: nothing read them.
+
+3. **Freeze.** `reference-architecture.md` and `exit-criteria.md` keep the dated freeze
+   sentence and the rule that the boundary wins where they disagree. The second status
+   marker and the two-date freeze are gone — one status field, one date. The exclusion of
+   both files from the superseded-claims scan was reverted along with the two mutations it
+   forced off their targets: the freeze is a statement about editing, not a reason to stop
+   checking, and the exclusion removed gate coverage without being load-bearing.
+
+**Filed as OQs rather than fixed:** OQ-045 (spike 03's docstring still says eight
+scenarios), OQ-046 (`make check` is not reliably reproducible from the documented quick
+procedure), OQ-047 (the Postgres gate has no isolation, so concurrent runs go spuriously
+red). Owner Satiya, decide by 2026-09-15, all open.
+
+The SaaS repositioning is closed; further findings are filed as OQs, not redone.

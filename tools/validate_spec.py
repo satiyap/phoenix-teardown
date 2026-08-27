@@ -4,15 +4,8 @@
 Review finding 11: `make check` validated teardown facts and printed status, but
 never parsed spec/. "make check green" was true and irrelevant to spec correctness.
 
-Checks, all of which have caught a real defect in this repo:
-  1. the canonicalisation fixture reproduces against the reference implementation
-  2. every required equality/rejection in the fixture actually holds
-  3. the normative rewind algorithm permits continuation after a rewind
-  4. cross-document references resolve
-  5. no placeholder text survives
-  6. every SQL table referenced by a FOREIGN KEY is defined somewhere in the spec
-  7. the extracted .proto actually compiles (this found an undefined message)
-  8. openapi.yaml parses and covers exactly the paths 06-api.md documents
+Checks are enumerated in main()'s `groups` list, which is the authoritative
+inventory; every one of them has caught a real defect in this repo.
 """
 from __future__ import annotations
 
@@ -531,7 +524,7 @@ def check_postgres_gate() -> list[str]:
          "    print(e); sys.exit(1)\n", dsn],
         capture_output=True, text=True)
     if probe.returncode != 0:
-        return ["no Postgres reachable, so the eight concurrency scenarios are "
+        return ["no Postgres reachable, so the nine concurrency scenarios are "
                 "UNVERIFIED. See spikes/03-postgres/RESULT.md for the one-line "
                 "docker command."]
     # FIRST: apply spec/01's own SQL to the disposable server. The normative DDL
@@ -547,7 +540,16 @@ def check_postgres_gate() -> list[str]:
     if res.returncode != 0:
         bad = [ln.strip() for ln in res.stdout.splitlines()
                if ln.strip().startswith("FAIL")]
-        return [f"postgres gate: {b}" for b in bad] or ["postgres gate failed"]
+        if bad:
+            return [f"postgres gate: {b}" for b in bad]
+        # The LAST stderr line is usually a caret pointer or psycopg's `LINE n:`
+        # echo; the cause is the last UNINDENTED line that is neither.
+        cause = [ln.rstrip() for ln in res.stderr.splitlines()
+                 if ln.strip() and ln[:1] not in " \t"
+                 and not ln.startswith("LINE ") and ln.strip("^ ")]
+        tail = (cause or res.stdout.strip().splitlines() or ["no output"])[-1]
+        return [f"postgres gate failed: {tail} (did you apply "
+                "spikes/03-postgres/schema.sql? see spikes/03-postgres/RESULT.md:74)"]
     return []
 
 
@@ -599,17 +601,6 @@ _EXEMPT_FILES = {
 }
 
 
-# Frozen 2026-08-27 (Phase 5 artefacts). Excluded from the scan the way `projects/`
-# is: both documents were written at a point in the study and are no longer edited,
-# so rewriting them to match a later scope would falsify the record. Where they
-# disagree with the boundary, v01-boundary.md / scope.yaml wins, which each file now
-# says at the top.
-_FROZEN_FILES = {
-    "reference-architecture.md",
-    "exit-criteria.md",
-}
-
-
 def _scanned_files() -> list[Path]:
     """Everything that states what WE build. `projects/` is excluded by omission:
     a teardown describes another system, and its findings must not be rewritten to
@@ -621,8 +612,7 @@ def _scanned_files() -> list[Path]:
     if (SPEC / "contracts").is_dir():
         files += [f for f in sorted((SPEC / "contracts").glob("*"))
                   if f.suffix in {".yaml", ".yml", ".proto", ".json"}]
-    files += [f for f in sorted((ROOT / "synthesis").glob("*.md"))
-              if f.name not in _FROZEN_FILES]
+    files += sorted((ROOT / "synthesis").glob("*.md"))
     files += sorted((ROOT / "decisions").glob("*.md"))
     # The verification rules bind the spec, so a superseded claim in them is a
     # superseded claim in the standard. It was outside the scan until 2026-08-27.
