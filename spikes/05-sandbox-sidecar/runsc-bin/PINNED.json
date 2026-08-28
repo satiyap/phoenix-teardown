@@ -1,0 +1,10 @@
+{
+  "_version": "release-20260817.0",
+  "_arch": "aarch64",
+  "_source": "https://storage.googleapis.com/gvisor/releases/release/20260817.0/aarch64",
+  "_verified": "upstream .sha512 files, shasum -a 512 -c => OK",
+  "files": {
+    "runsc": "56f69300f1368c96a4a7c3e88510af3b0bd2632e20d46b70b7b0b4d2cc2160b4",
+    "containerd-shim-runsc-v1": "90ed8530bfaa3969341bbec91f6186b49f266151bbde3f670d638b354ce4b813"
+  }
+}

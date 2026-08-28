@@ -1,0 +1,8 @@
+# gVisor binaries: 140MB of vendored upstream, pinned by PINNED.json and
+# re-fetchable by fetch-runsc.sh. Digests are tracked; the bytes are not.
+runsc-bin/runsc
+runsc-bin/containerd-shim-runsc-v1
+runsc-bin/*.sha512
+# build outputs
+driver-linux
+*.tar
