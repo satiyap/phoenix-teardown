@@ -1,0 +1,71 @@
+# T2 — a UDS on a shared emptyDir, inside one gVisor pod.
+# One Sentry per pod, so both containers and the volume live in the SAME sandbox:
+# the socket never crosses a gVisor boundary and no host-uds flag is involved.
+#
+# python:3.12-alpine rather than busybox, because busybox `nc` is built without
+# -U (Unix socket) support -- a tooling gap that reads exactly like a gVisor
+# failure if you don't check which one you're looking at.
+apiVersion: v1
+kind: Pod
+metadata: { name: t2-uds }
+spec:
+  runtimeClassName: gvisor
+  restartPolicy: Never
+  volumes:
+  - name: sock
+    emptyDir: {}
+  containers:
+  - name: listener
+    image: python:3.12-alpine
+    volumeMounts: [{ name: sock, mountPath: /run/phoenix }]
+    command: ["python","-u","-c"]
+    args:
+    - |
+      import os, socket, pathlib, stat
+      pathlib.Path("/run/phoenix/listener-kernel.txt").write_text(
+          pathlib.Path("/proc/version").read_text())
+      p = "/run/phoenix/a.sock"
+      if os.path.exists(p): os.unlink(p)
+      s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+      s.bind(p); os.chmod(p, 0o600); s.listen(1)
+      print("LISTENING mode=%s" % oct(stat.S_IMODE(os.stat(p).st_mode)), flush=True)
+      c, _ = s.accept()
+      data = c.recv(1024).decode()
+      print("RECEIVED %s" % data, flush=True)
+      c.sendall(b"PONG"); c.close()
+      pathlib.Path("/run/phoenix/got.txt").write_text(data)
+  - name: dialer
+    image: python:3.12-alpine
+    volumeMounts: [{ name: sock, mountPath: /run/phoenix }]
+    command: ["python","-u","-c"]
+    args:
+    - |
+      import os, socket, time, pathlib, stat
+      pathlib.Path("/run/phoenix/dialer-kernel.txt").write_text(
+          pathlib.Path("/proc/version").read_text())
+      p = "/run/phoenix/a.sock"
+      # Retry until the socket EXISTS AND ACCEPTS. Container start order in a pod
+      # is not guaranteed, so polling existence once is a race: the first attempt
+      # failed instantly with FileNotFoundError, which reads like a gVisor
+      # shared-mount failure but is only a startup race.
+      deadline = time.time() + 60
+      st = None
+      while time.time() < deadline:
+          if os.path.exists(p):
+              st = os.stat(p)
+              break
+          time.sleep(0.5)
+      if st is None:
+          print("DIAL_FAIL socket never appeared within 60s", flush=True)
+          raise SystemExit(1)
+      print("SEES_SOCKET is_sock=%s mode=%s uid=%d" % (
+          stat.S_ISSOCK(st.st_mode), oct(stat.S_IMODE(st.st_mode)), st.st_uid), flush=True)
+      s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+      try:
+          s.connect(p)
+          s.sendall(b"HELLO_ACROSS_EMPTYDIR")
+          print("DIAL_OK reply=%s" % s.recv(64).decode(), flush=True)
+      except Exception as e:
+          print("DIAL_FAIL %s: %s" % (type(e).__name__, e), flush=True)
+      print("listener_kernel=%s" % pathlib.Path("/run/phoenix/listener-kernel.txt").read_text().strip()[:40], flush=True)
+      print("dialer_kernel=%s" % pathlib.Path("/run/phoenix/dialer-kernel.txt").read_text().strip()[:40], flush=True)
