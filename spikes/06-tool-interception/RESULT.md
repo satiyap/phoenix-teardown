@@ -1,6 +1,6 @@
 # Spike 06 — tool interception on Pydantic AI
 
-**Gate assertions: 63** — the number `README.md` sums. Counts only tests that assert THIS spike's claims through its public boundary; vendored upstream suites are evidence, not our verdict (`VERIFICATION-RULES.md` rule 6).
+**Gate assertions: 64** — the number `README.md` sums. Counts only tests that assert THIS spike's claims through its public boundary; vendored upstream suites are evidence, not our verdict (`VERIFICATION-RULES.md` rule 6).
 
 **Verdict: PASS — OQ-043 is answered, and the mechanism is stronger than the one specified.**
 The PASS covers the tool boundary and the effect lifecycle only. Nested agents (S9),
@@ -458,7 +458,7 @@ to investigate an effect that provably did not happen is its own failure.
 ## Reproduce
 
 ```bash
-make spike06              # verify_pin.py, then 57 assertions -- part of `make check`
+make spike06              # verify_pin.py, then 64 assertions -- part of `make check`
 make spike06-mutations    # all nineteen mutations; non-zero if any survives
 ```
 
@@ -468,7 +468,7 @@ Or directly:
 cd spikes/06-tool-interception
 ../../.venv/bin/pip install -r requirements.txt
 ../../.venv/bin/python verify_pin.py                 # pin holds: 22 files
-../../.venv/bin/python -m pytest test_gate.py -q     # 57 passed
+../../.venv/bin/python -m pytest test_gate.py -q     # 64 passed
 ../../.venv/bin/python mutate.py --check             # every mutation caught
 ```
 

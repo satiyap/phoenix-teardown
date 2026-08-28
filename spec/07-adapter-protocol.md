@@ -308,7 +308,7 @@ SDK asks for a tool
    -> adapter hands the result back to the SDK as that tool's return value
 ```
 
-**Decided 2026-08-28 (OQ-056).** The control plane is Go and the harness is Python, so the transport does not collapse to a function call *(superseded 2026-08-28: this sentence previously said it did)*. `sdk_in_process` means **a Python harness sidecar in the same pod as the Go-driven run, speaking these frames over a Unix socket** — the deferred-tool design from spike 06 makes each `DeferredToolRequests` stop exactly one frame exchange. **The contract does not change.** Nothing may reach a
+**Decided 2026-08-28 (OQ-056).** The control plane is Go and the harness is Python, so the transport does not collapse to a function call *(superseded 2026-08-28: this sentence previously said it did)*. `sdk_sidecar` (renamed from `sdk_in_process` 2026-08-28 — a separate process is not in-process) means **a Python harness sidecar in the same pod as the Go-driven run, speaking these frames over a Unix socket** — the deferred-tool design from spike 06 makes each `DeferredToolRequests` stop exactly one frame exchange. **The contract does not change.** Nothing may reach a
 customer system without an `effect_ledger` row, because a tool the SDK executes directly is
 an effect the platform cannot claim, police, or attest.
 
@@ -323,7 +323,7 @@ version of this paragraph (superseded 2026-08-27) claimed the restriction was fr
 the entire guarantee — the guarantee is real, the zero cost was not.
 
 **Required by §08 inventory rows 30a–30e.** **VERIFIED 2026-08-27 by
-`spikes/06-tool-interception/` — 57 gate assertions** *(amended 2026-08-28: was "18", the round-1 count; rounds 2 to 5 took it 18 → 26 → 47 → 53 → 57, and nothing in `tools/` reads this number)*, whose negative control runs the same
+`spikes/06-tool-interception/` — 64 gate assertions** *(amended 2026-08-28: 57 → 64 with OQ-065/066 gates)* *(amended 2026-08-28: was "18", the round-1 count; rounds 2 to 5 took it 18 → 26 → 47 → 53 → 57, and nothing in `tools/` reads this number)*, whose negative control runs the same
 function through `FunctionToolset` and observes the body execute with **zero ledger rows**. Its
 oracle is a filesystem side channel the harness never touches, so the assertions are about
 observable effects rather than the SDK's own accounting.

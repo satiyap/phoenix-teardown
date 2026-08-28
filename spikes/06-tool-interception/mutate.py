@@ -76,6 +76,14 @@ MUTATIONS: list[tuple[str, str, str, str]] = [
         "            if False:",
     ),
     (
+        "strand an unserialisable result at claimed",
+        "OQ-066: the effect ran and the row never gets a verdict",
+        "            self.ledger.settle(call.tool_call_id, \"indeterminate\", None,\n"
+        "                               owner=owner, token=token,\n"
+        "                               error_code=\"result_unserialisable\")",
+        "            pass  # result settle removed",
+    ),
+    (
         "allow uninterceptable registration",
         "spec/08 row 30c is unenforced",
         "        if not self._can_route(name, sdk_executable=sdk_executable):",

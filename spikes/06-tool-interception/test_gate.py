@@ -764,6 +764,20 @@ def test_gate7c_policy_fails_closed_on_an_unknown_verdict(chan, bad):
         "an invalid verdict must leave the row unclaimed"
 
 
+def test_gate11b_unserialisable_result_after_dispatch_is_indeterminate(chan, led):
+    """ADDED 2026-08-28 (OQ-066). The effect ran; `json.dumps` of its return value
+    failed; the row must not stay `claimed` with no verdict."""
+    h = harness(led)
+    h.register("charge", SCHEMA, lambda to: (chan.touch(f"charge:{to}"), object())[1])
+    turn = h.run("charge")
+    with pytest.raises(TypeError):
+        h.resolve("run-1", turn.requests)
+    assert len(chan.lines) == 1, "the effect happened"
+    row = led.row_for(turn.calls[0].tool_call_id)
+    assert row.status == "indeterminate" and row.error_code == "result_unserialisable", \
+        f"a post-dispatch failure left the row at {row.status!r}"
+
+
 # ============ GATE 8: streaming is not a side door =========================
 def test_gate8_streamed_run_does_not_execute_the_body(chan, led):
     """Streaming is a different code path through `_tool_execution.py`.

@@ -382,8 +382,8 @@ Go is better at (Postgres fencing, gRPC serving, Kubernetes placement, one stati
 control plane. Under checkpoint-and-kill the harness pod is already the disposable unit, so the
 sidecar is the natural shape. Cost accepted: two toolchains, two CI matrices, two release artefacts.
 
-The spec was already written for a non-Python implementer, which is why this costs nothing
-to adopt now:
+The spec was already written for a non-Python implementer, which is why adopting Go needs no
+redesign of the contracts (the sidecar's operational cost is the one stated above):
 
 - `spec/03-canonicalisation.md` specifies the profile in terms of **UTF-8 byte order** and an
   integers-only number domain, precisely so it does not depend on one language's `json`

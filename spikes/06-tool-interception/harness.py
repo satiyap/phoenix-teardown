@@ -755,8 +755,17 @@ class PhoenixHarness:
                                owner=owner, token=token,
                                error_code="dispatch_lost_contact")
             raise
-        self.ledger.settle(call.tool_call_id, "succeeded",
-                           json.dumps(result, sort_keys=True),
+        # ADDED 2026-08-28 (OQ-066). Serialising the RESULT is also after dispatch:
+        # the effect has happened, so a failure here must not strand the row at
+        # `claimed`. It settles `indeterminate` -- we know it ran, not what it returned.
+        try:
+            result_json = json.dumps(result, sort_keys=True)
+        except Exception:
+            self.ledger.settle(call.tool_call_id, "indeterminate", None,
+                               owner=owner, token=token,
+                               error_code="result_unserialisable")
+            raise
+        self.ledger.settle(call.tool_call_id, "succeeded", result_json,
                            owner=owner, token=token)
         return result
 
