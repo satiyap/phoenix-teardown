@@ -60,6 +60,8 @@ continue?" inside a component that cannot name the tenant asking.
 
 - The sandbox provider interface gains suspend/resume beyond the three boundaries already
   specified in ADR-0009.
+- The sandbox unit is the **pod**: Go-side driver plus the Python harness sidecar (OQ-056,
+  2026-08-28). Checkpoint-and-kill deletes and recreates that pod as one unit.
 - `spec/09` (or a successor) must state that sandbox identity is **not** run identity, so a
   recycled sandbox cannot be mistaken for a resumed run.
 - **v0.1 provider decided 2026-08-27 (amended; this bullet previously left the choice open):

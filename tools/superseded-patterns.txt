@@ -86,3 +86,6 @@ nfc\+jcs	2026-08-26	profile renamed nfc+intjson; it is not JCS
 approvalrequest\s+approval_request\s*=	2026-08-27	the frame was removed; the platform decides on approval
 create table effect_claim_history	2026-08-27	effect rows are never reclaimed; monotonic claim tokens are meaningless
 "trace_id":	2026-08-27	the log stores a full W3C traceparent, not a bare trace id
+
+# --- OQ-056 process boundary (2026-08-28) ---
+collapses to a function call	2026-08-28	Go plane + Python sidecar: the transport is 07 frames over a pod-local Unix socket

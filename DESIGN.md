@@ -108,8 +108,8 @@ identity is actually for — being nameable as a Cedar `principal`.
 ```
 
 > **Transport, precisely.** The southbound boundary is a **logical frame boundary**, not a
-> network hop. For the shipped `sdk_in_process` mode it **collapses to a function call**
-> (`spec/07`): the frames are real, the transport is not. gRPC is the **deferred remote**
+> network hop. For the shipped `sdk_in_process` mode it runs as **§07 frames over a pod-local Unix socket** between the Go plane and the Python harness sidecar (amended 2026-08-28, OQ-056; superseded: "collapses to a function call")
+> (`spec/07`): the frames and the socket are real; TCP + mTLS is the **deferred remote**
 > transport, retained as a design commitment for the first out-of-process adapter and marked
 > not-shipped in `spec/07` §Transport.
 >
@@ -373,6 +373,14 @@ guarantee it appeared to offer was not one it could keep":
 ## 7a. Implementation language — Go for the control plane
 
 **Decided 2026-08-27.** The control plane is written in **Go**.
+
+**Decided 2026-08-28 (OQ-056) — how Go meets the Python harness.** The harness (Pydantic AI)
+runs as a **sidecar in the same pod** as the run the Go plane drives, and the two speak
+`spec/07`'s frames over a Unix socket with `0600` ownership as the authentication. Everything
+Python-by-evidence (harness, `ag2.network`, `genai-prices`) lives in the data plane; everything
+Go is better at (Postgres fencing, gRPC serving, Kubernetes placement, one static binary) is
+control plane. Under checkpoint-and-kill the harness pod is already the disposable unit, so the
+sidecar is the natural shape. Cost accepted: two toolchains, two CI matrices, two release artefacts.
 
 The spec was already written for a non-Python implementer, which is why this costs nothing
 to adopt now:

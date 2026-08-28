@@ -125,6 +125,9 @@ CREATE TABLE adapter_contracts (
     -- migration. Only 'sdk_in_process' is SHIPPED: we build and operate the agents on
     -- an internal harness on Pydantic AI (amended 2026-08-27), so there is no third-party
     -- subprocess or TUI to adapt. The others are reserved, not supported.
+    -- 'sdk_in_process' MEANS (decided 2026-08-28, OQ-056): the Python harness runs as a
+    -- sidecar in the same pod as the Go-driven run and speaks the 07 frames over a
+    -- Unix socket. The value is kept for migration stability; the name is historical.
     integration_mode TEXT NOT NULL
         CHECK (integration_mode IN ('sdk_in_process','cli_subprocess',
                                     'acp_subprocess','native_tui','native_server')),

@@ -612,6 +612,8 @@ paths:
                   # Amended 2026-08-27: only sdk_in_process is shipped; the rest are
                   # retained so the column never needs a migration (spec/01-schema.md
                   # enforces the restriction with a separate CHECK).
+                  # 2026-08-28 (OQ-056): sdk_in_process = Python harness sidecar,
+                  # same pod, spec/07 frames over a Unix socket.
                   type: string
                   enum: [sdk_in_process]
                 payload_schema_digest: { type: string }

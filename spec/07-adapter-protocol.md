@@ -302,13 +302,13 @@ same typed boundary as a remote one, and Pydantic AI supplies both halves native
 
 ```
 SDK asks for a tool
-   -> adapter emits Output{ToolCall}          (a function call, not a gRPC hop)
+   -> adapter emits Output{ToolCall}          (one §07 frame over the pod-local socket)
    -> control plane: pinned-definition check, policy, intent, approval, claim, dispatch
    -> adapter receives ControlFrame{ToolResult | ToolDenied}
    -> adapter hands the result back to the SDK as that tool's return value
 ```
 
-The transport collapses to a function call; **the contract does not**. Nothing may reach a
+**Decided 2026-08-28 (OQ-056).** The control plane is Go and the harness is Python, so the transport does not collapse to a function call *(superseded 2026-08-28: this sentence previously said it did)*. `sdk_in_process` means **a Python harness sidecar in the same pod as the Go-driven run, speaking these frames over a Unix socket** — the deferred-tool design from spike 06 makes each `DeferredToolRequests` stop exactly one frame exchange. **The contract does not change.** Nothing may reach a
 customer system without an `effect_ledger` row, because a tool the SDK executes directly is
 an effect the platform cannot claim, police, or attest.
 
@@ -428,10 +428,12 @@ usable for optimisation.
 
 ---
 
-## Transport, authentication, and limits — NOT SHIPPED IN v0.1 (2026-08-27)
+## Transport, authentication, and limits — the socket half SHIPS, the remote half does not
 
-> **v0.1 ships in-process SDK adapters only**, so nothing below is exercised by the first
-> release: there is no remote adapter to authenticate. It is **retained rather than deleted
+> **Amended 2026-08-28 (OQ-056).** This heading said NOT SHIPPED IN v0.1 and the note said nothing
+> below is exercised by the first release *(superseded 2026-08-28)*. The **Unix-socket** transport
+> and its `0600` authentication now **ship** — they are how the Go plane reaches the Python
+> sidecar. The **remote (TCP + mTLS)** half remains unshipped: there is no remote adapter to authenticate. It is **retained rather than deleted
 > because the security reasoning must not be rediscovered** — Google AX ships a distributed
 > harness runtime with logging-only interceptors, no authN and no TLS, on a service that
 > provisions sandboxes. The first time we add a remote adapter, this section is the answer
@@ -451,9 +453,9 @@ had the same hole.
 - **Remote adapters: mTLS required.** The certificate subject must match
   `adapter_contracts.identity`; a mismatch is refused before `Start`. A remote adapter is a
   *principal* (§01), not an anonymous endpoint.
-- **Unix-socket adapters:** `0600` socket ownership is the authentication (HumanLayer's
-  model). Acceptable only for a same-host, same-user adapter, and the contract records
-  which mode applied.
+- **Unix-socket adapters — SHIPPED (2026-08-28):** `0600` socket ownership is the authentication
+  (HumanLayer's model). The sidecar and the plane-side driver share a pod and a user; the
+  contract records which mode applied.
 - **Control plane → adapter:** a short-lived bearer token scoped to one `run_id`, so a
   leaked token cannot start unrelated runs.
 
