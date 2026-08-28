@@ -58,6 +58,18 @@ class UninterceptableTool(Exception):
     """
 
 
+class PolicyVerdictInvalid(Exception):
+    """A policy returned something other than a known verdict. Fail CLOSED.
+
+    ADDED 2026-08-28 (OQ-065). `dispatch` compared the verdict to the literal
+    `"deny"` and ran the body on anything else — `"DENY"`, `None`,
+    `"require_approval"` all executed. A verdict is an enum, not a string; an
+    unknown one is a bug in the policy, never permission."""
+
+
+POLICY_VERDICTS: frozenset[str] = frozenset({"allow", "deny", "require_approval"})
+
+
 class LedgerRefused(Exception):
     """A ledger transition whose predicate did not hold.
 
@@ -620,7 +632,7 @@ class PhoenixHarness:
         self.ledger.append(LedgerRow(run_id, call.tool_call_id, call.tool_name,
                                      args_json_of(call.args), "intended"))
 
-    def dispatch(self, run_id: str, call: Any) -> Any:
+    def dispatch(self, run_id: str, call: Any, *, approved: bool = False) -> Any:
         """Phases 2-5. Nothing reaches the impl except through here.
 
         The two error routes are DIFFERENT statuses, and the difference is the whole
@@ -665,7 +677,25 @@ class PhoenixHarness:
                 f"{args_json_of(call.args)}; a differing request_digest is a "
                 "DIFFERENT effect, not this one (spec/01-schema.md:403)")
 
-        verdict = self.policy(call.tool_name, call.args or {})
+        if approved:
+            # Phase 2 answered: a human approved an `awaiting_approval` row. The
+            # policy is NOT re-evaluated; the approval is the verdict (spec/02:241).
+            if row.status != "awaiting_approval":
+                raise LedgerRefused(
+                    f"approved dispatch requires an awaiting_approval row, found "
+                    f"{row.status!r}")
+            verdict = "allow"
+        else:
+            verdict = self.policy(call.tool_name, call.args or {})
+            if verdict not in POLICY_VERDICTS:
+                # FAIL CLOSED (OQ-065, 2026-08-28): nothing is claimed, nothing runs.
+                raise PolicyVerdictInvalid(
+                    f"policy returned {verdict!r}; expected one of "
+                    f"{sorted(POLICY_VERDICTS)} — refusing to dispatch")
+            if verdict == "require_approval":
+                # Phase 2: park the row on the approval's own (long) clock; no lease.
+                self.ledger.await_approval(call.tool_call_id)
+                return "AWAITING approval"
         if verdict == "deny":
             self.ledger.deny(call.tool_call_id, error_code="policy_denied")
             return "DENIED by policy"
@@ -682,7 +712,8 @@ class PhoenixHarness:
         owner = lease.holder if lease else f"worker:{run_id}"
         token = secrets.token_hex(16)
         self.ledger.claim(call.tool_call_id, owner, token, lease=lease,
-                          fence=lease.fence_token if lease else None)
+                          fence=lease.fence_token if lease else None,
+                          approved=approved)
 
         # --- everything to the `impl(...)` line below is BEFORE dispatch ---
         #

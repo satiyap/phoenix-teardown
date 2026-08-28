@@ -1,6 +1,6 @@
 # Spike 06 — tool interception on Pydantic AI
 
-**Gate assertions: 57** — the number `README.md` sums. Counts only tests that assert THIS spike's claims through its public boundary; vendored upstream suites are evidence, not our verdict (`VERIFICATION-RULES.md` rule 6).
+**Gate assertions: 63** — the number `README.md` sums. Counts only tests that assert THIS spike's claims through its public boundary; vendored upstream suites are evidence, not our verdict (`VERIFICATION-RULES.md` rule 6).
 
 **Verdict: PASS — OQ-043 is answered, and the mechanism is stronger than the one specified.**
 The PASS covers the tool boundary and the effect lifecycle only. Nested agents (S9),
@@ -300,6 +300,24 @@ $ git status --porcelain
 > backed by the transcript above, produced on 2026-08-28 at `36a2b22`: three rounds of
 > `make spike06` concurrent with a full `make spike06-mutations`, 6/6 exit zero,
 > `harness.py` SHA-256 identical before and after, `git status --porcelain` empty.
+
+## Two closures after the verifier rounds (2026-08-28)
+
+**Policy verdicts fail closed (OQ-065).** `dispatch` compared the verdict to the literal
+`"deny"` and ran the body on anything else — `"DENY"`, `None`, `"require_approval"` all
+executed, and phase 2 of the lifecycle was unreachable. Now a verdict is an enum
+`{allow, deny, require_approval}`: `require_approval` parks the row `awaiting_approval` with
+no lease and returns without dispatching; `dispatch(..., approved=True)` claims and runs it
+once; anything outside the enum raises `PolicyVerdictInvalid` with the row left `intended`
+and unclaimed. Gates 7b and 7c (six assertions); mutation "accept any policy verdict" is
+caught.
+
+**The SDK pin stops here (OQ-063/064).** Five rounds each pinned one more file and found the
+next unpinned hop; that does not converge, and it was the wrong problem. Which bytes of a
+dependency ship is a **release-pipeline concern** — a lockfile with hashes
+(`uv lock` / `pip --require-hashes`) — not something a spike re-derives. `pinned_digests.json`
+stays as **documentation** of the files these claims were traced through at `b48ee38`; it
+will not be extended, and the `_coverage_frontier` question is closed by that decision.
 
 ## Simplifications vs spec
 

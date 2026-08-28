@@ -70,6 +70,12 @@ MUTATIONS: list[tuple[str, str, str, str]] = [
         "        if False:",
     ),
     (
+        "accept any policy verdict",
+        "OQ-065: an unknown verdict runs the body (fail open)",
+        "            if verdict not in POLICY_VERDICTS:",
+        "            if False:",
+    ),
+    (
         "allow uninterceptable registration",
         "spec/08 row 30c is unenforced",
         "        if not self._can_route(name, sdk_executable=sdk_executable):",
@@ -111,7 +117,8 @@ MUTATIONS: list[tuple[str, str, str, str]] = [
         "drop the claim before dispatch",
         "an effect is dispatched without being claimed",
         "        self.ledger.claim(call.tool_call_id, owner, token, lease=lease,\n"
-        "                          fence=lease.fence_token if lease else None)",
+        "                          fence=lease.fence_token if lease else None,\n"
+        "                          approved=approved)",
         "        pass  # claim removed",
     ),
     (

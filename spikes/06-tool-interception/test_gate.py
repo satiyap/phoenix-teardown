@@ -51,6 +51,7 @@ from pydantic_ai.toolsets.function import FunctionToolset
 
 import verify_pin
 from harness import (EffectLedger, LedgerRefused, LedgerRow, PhoenixHarness,
+                     PolicyVerdictInvalid,
                      RunLease, UninterceptableTool)
 from mutate import SPIKE_FILES, copy_spike
 
@@ -725,6 +726,42 @@ def test_gate7_denied_call_is_ledgered_and_never_executed(chan, led):
         "a denial must be recorded, not silently dropped"
     assert rows[0].claim_owner is None and rows[0].claim_token is None, \
         "a denied row was never claimed (spec/01-schema.md:378)"
+
+
+def test_gate7b_require_approval_parks_the_row_and_runs_once_approved(chan, led):
+    """ADDED 2026-08-28 (OQ-065). Phase 2 was unreachable from the policy: any
+    verdict but the literal "deny" executed the body."""
+    h = harness(led, policy=lambda n, a: "require_approval")
+    h.register("send_email", SCHEMA, lambda to: chan.touch(f"send_email:{to}"))
+    turn = h.run("email")
+    cid = turn.calls[0].tool_call_id
+    out = h.resolve("run-1", turn.requests)
+    assert out[cid] == "AWAITING approval"
+    assert chan.lines == [], "a call awaiting approval reached the customer system"
+    row = led.row_for(cid)
+    assert row.status == "awaiting_approval" and row.claim_owner is None, \
+        "awaiting_approval holds no lease (spec/02: deliberation is not execution)"
+    # non-vacuity: the approval lets it run, exactly once
+    h.dispatch("run-1", turn.calls[0], approved=True)
+    assert len(chan.lines) == 1 and led.row_for(cid).status == "succeeded"
+    with pytest.raises(LedgerRefused):
+        h.dispatch("run-1", turn.calls[0], approved=True)  # cannot approve twice
+    assert len(chan.lines) == 1
+
+
+@pytest.mark.parametrize("bad", ["DENY", None, "require-approval", "allow ", 1])
+def test_gate7c_policy_fails_closed_on_an_unknown_verdict(chan, bad):
+    """ADDED 2026-08-28 (OQ-065). Before this gate every value here ran the body."""
+    led = EffectLedger()
+    h = harness(led, policy=lambda n, a: bad)
+    h.register("send_email", SCHEMA, lambda to: chan.touch(f"send_email:{to}"))
+    turn = h.run("email")
+    with pytest.raises(PolicyVerdictInvalid):
+        h.resolve("run-1", turn.requests)
+    assert chan.lines == [], f"verdict {bad!r} executed the body"
+    row = led.row_for(turn.calls[0].tool_call_id)
+    assert row.status == "intended" and row.claim_owner is None, \
+        "an invalid verdict must leave the row unclaimed"
 
 
 # ============ GATE 8: streaming is not a side door =========================
