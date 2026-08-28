@@ -60,8 +60,12 @@ continue?" inside a component that cannot name the tenant asking.
 
 - The sandbox provider interface gains suspend/resume beyond the three boundaries already
   specified in ADR-0009.
-- The sandbox unit is the **pod**: Go-side driver plus the Python harness sidecar (OQ-056,
-  2026-08-28). Checkpoint-and-kill deletes and recreates that pod as one unit.
+- The sandbox unit is the **pod**, holding **one container in which the Go driver is PID 1 and
+  spawns the Python harness as its child** *(amended 2026-08-29: this said "Go-side driver plus
+  the Python harness sidecar" — two containers — which spike 05 T2 showed cannot share a Unix
+  socket under gVisor; superseded)*. The driver creates the socket directory `0700` before any
+  other process exists, so `0600` ownership is backed by process lineage; `run_token` on `Start`
+  stays as defence in depth. Checkpoint-and-kill deletes and recreates that pod as one unit.
 - `spec/09` (or a successor) must state that sandbox identity is **not** run identity, so a
   recycled sandbox cannot be mistaken for a resumed run.
 - **v0.1 provider decided 2026-08-27 (amended; this bullet previously left the choice open):
@@ -134,3 +138,4 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 | Project | Effect | Evidence | Note |
 |---|---|---|---|
 | Google AX | confirms | `projects/google-ax/teardown.md:29,45 @ b777313` | Supplies the mechanism: actors as suspendable images keyed by conversation, resumed onto any worker, with a single-writer control plane kept separate. Also supplies the anti-pattern — zero authN, no principal, no tenancy, no policy on the service that provisions sandboxes — which is why lifecycle must sit on the governed side. `REFERENCE_ONLY` (`synthesis/licensing.md:27`). |
+| **Spike 05 T2 (2026-08-29)** | amends | `spikes/05-*/T2-FINDING.md` @ `9f21e88` | A Unix socket on a shared `emptyDir` does **not** propagate across containers under gVisor release-20260817.0 (systrap): the inode never appears in the second container; regular files do; the identical pod without `runtimeClassName` connects. Bisected against start races, overlay, mount coherence. Within one container the UDS works at `0600`. Consequence: one container, driver spawns harness. Fallback if two containers are ever required: an abstract-namespace socket in the shared netns, at the cost of `0600`. |

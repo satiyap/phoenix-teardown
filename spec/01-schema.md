@@ -122,18 +122,20 @@ CREATE TABLE adapter_contracts (
     digest         TEXT   NOT NULL,       -- DERIVED from the contract, not supplied
     protocol_version TEXT NOT NULL,
     -- The enum is Omnigent's full taxonomy and is kept so the column never needs a
-    -- migration. Only 'sdk_sidecar' is SHIPPED (renamed from 'sdk_in_process' 2026-08-28,
+    -- migration. Only 'sdk_subprocess' is SHIPPED (renamed from 'sdk_in_process' 2026-08-28 and from 'sdk_sidecar' 2026-08-29,
     -- OQ-056: the harness is a separate process, so the old name was false): we build and operate the agents on
     -- an internal harness on Pydantic AI (amended 2026-08-27), so there is no third-party
     -- subprocess or TUI to adapt. The others are reserved, not supported.
-    -- 'sdk_sidecar' MEANS (decided 2026-08-28, OQ-056): the Python harness runs as a
-    -- sidecar in the same pod as the Go-driven run and speaks the 07 frames over a
-    -- Unix socket. 'sdk_in_process' stays in the enum as reserved; it never shipped.
+    -- 'sdk_subprocess' MEANS (decided 2026-08-28/29, OQ-056 + spike 05 T2): the Go driver is
+    -- PID 1 of the run's container and spawns the Python harness as a child process; the
+    -- two speak the 07 frames over a Unix socket in a 0700 dir the driver created. It is
+    -- NOT 'cli_subprocess' (a third-party CLI driven from outside; reserved, never shipped).
+    -- 'sdk_in_process' and 'sdk_sidecar' stay in the enum as reserved; neither shipped.
     integration_mode TEXT NOT NULL
-        CHECK (integration_mode IN ('sdk_sidecar','sdk_in_process','cli_subprocess',
+        CHECK (integration_mode IN ('sdk_subprocess','sdk_sidecar','sdk_in_process','cli_subprocess',
                                     'acp_subprocess','native_tui','native_server')),
     CONSTRAINT integration_mode_shipped
-        CHECK (integration_mode = 'sdk_sidecar'),   -- drop this to ship another
+        CHECK (integration_mode = 'sdk_subprocess'),   -- drop this to ship another
     -- the adapter's OWN checkpoint payload format, which runs pin (07 6)
     payload_schema_digest TEXT NOT NULL,
     declared_capabilities JSONB NOT NULL DEFAULT '{}',
@@ -143,8 +145,8 @@ CREATE TABLE adapter_contracts (
 );
 ```
 
-`integration_mode` is Omnigent's taxonomy. Only `sdk_sidecar` is shipped (amended
-2026-08-27; renamed from `sdk_in_process` 2026-08-28); the rest are retained so the column never needs a migration. The original
+`integration_mode` is Omnigent's taxonomy. Only `sdk_subprocess` is shipped (amended
+2026-08-27; renamed from `sdk_in_process` 2026-08-28 and from `sdk_sidecar` 2026-08-29 after spike 05 T2); the rest are retained so the column never needs a migration. The original
 argument for `native_tui` — adapting a third-party agent (superseded 2026-08-27)
 that offers no API by driving its terminal.
 

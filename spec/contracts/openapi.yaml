@@ -615,7 +615,7 @@ paths:
                   # 2026-08-28 (OQ-056): sdk_in_process = Python harness sidecar,
                   # same pod, spec/07 frames over a Unix socket.
                   type: string
-                  enum: [sdk_sidecar]   # renamed from sdk_in_process 2026-08-28 (OQ-056)
+                  enum: [sdk_subprocess]   # renamed sdk_in_process -> sdk_sidecar (2026-08-28) -> sdk_subprocess (2026-08-29, spike 05 T2)
                 payload_schema_digest: { type: string }
                 declared_capabilities: { type: object, additionalProperties: true }
       responses:

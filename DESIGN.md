@@ -375,8 +375,11 @@ guarantee it appeared to offer was not one it could keep":
 **Decided 2026-08-27.** The control plane is written in **Go**.
 
 **Decided 2026-08-28 (OQ-056) — how Go meets the Python harness.** The harness (Pydantic AI)
-runs as a **sidecar in the same pod** as the run the Go plane drives, and the two speak
-`spec/07`'s frames over a Unix socket with `0600` ownership as the authentication. Everything
+runs as a **child process of the Go driver, in one container** *(amended 2026-08-29: was "a
+sidecar in the same pod" — two containers — until spike 05 T2 showed gVisor does not propagate a
+Unix socket across containers; superseded)*, and the two speak `spec/07`'s frames over a Unix
+socket in a `0700` directory the driver creates before spawning it, with `0600` ownership backed by
+process lineage as the authentication. Everything
 Python-by-evidence (harness, `ag2.network`, `genai-prices`) lives in the data plane; everything
 Go is better at (Postgres fencing, gRPC serving, Kubernetes placement, one static binary) is
 control plane. Under checkpoint-and-kill the harness pod is already the disposable unit, so the
