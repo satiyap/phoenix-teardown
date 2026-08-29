@@ -252,7 +252,7 @@ and confidentiality constraints — not only a mutation-pack restriction.
 
 ### In-process SDK adapters route tool calls the same way
 
-`sdk_in_process` is the only mode shipped, and it is the mode most likely to cheat: the SDK
+`sdk_subprocess` (renamed from `sdk_in_process` 2026-08-29) is the only mode shipped, and it is the mode most likely to cheat: the SDK
 ships a working tool executor and calling it is one line.
 
 **One harness, on Pydantic AI.** Pin: **`pydantic-ai-slim == 2.35.0`**, fixed by spike 06 on
@@ -308,7 +308,7 @@ SDK asks for a tool
    -> adapter hands the result back to the SDK as that tool's return value
 ```
 
-**Decided 2026-08-28 (OQ-056).** The control plane is Go and the harness is Python, so the transport does not collapse to a function call *(superseded 2026-08-28: this sentence previously said it did)*. `sdk_subprocess` (renamed from `sdk_in_process` 2026-08-28 and from `sdk_sidecar` 2026-08-29 — spike 05 T2 showed two containers cannot share a Unix socket under gVisor) means **the Go driver is PID 1 of the run's container and spawns the Python harness as its child; they speak these frames over a Unix socket in a `0700` directory the driver created** — the deferred-tool design from spike 06 makes each `DeferredToolRequests` stop exactly one frame exchange. **The contract does not change.** Nothing may reach a
+**Decided 2026-08-28 (OQ-056).** The control plane is Go and the harness is Python, so the transport does not collapse to a function call *(superseded 2026-08-28: this sentence previously said it did)*. `sdk_subprocess` (renamed from `sdk_in_process` 2026-08-28 and from `sdk_sidecar` 2026-08-29 — spike 05 T2 showed two containers cannot share a Unix socket under gVisor) means **the Go driver is PID 1 of the run's container, spawns the Python harness as its child, and hands it one end of an `AF_UNIX` socketpair; these frames travel on that pair** *(amended 2026-08-29; superseded: "a Unix socket in a `0700` directory the driver created")* — the deferred-tool design from spike 06 makes each `DeferredToolRequests` stop exactly one frame exchange. **The contract does not change.** Nothing may reach a
 customer system without an `effect_ledger` row, because a tool the SDK executes directly is
 an effect the platform cannot claim, police, or attest.
 
@@ -453,9 +453,12 @@ had the same hole.
 - **Remote adapters: mTLS required.** The certificate subject must match
   `adapter_contracts.identity`; a mismatch is refused before `Start`. A remote adapter is a
   *principal* (§01), not an anonymous endpoint.
-- **Unix-socket adapters — SHIPPED (2026-08-28):** `0600` socket ownership is the authentication
-  (HumanLayer's model). The sidecar and the plane-side driver share a pod and a user; the
-  contract records which mode applied.
+- **Inherited socketpair — SHIPPED (amended 2026-08-29):** the driver creates an `AF_UNIX`
+  socketpair and passes one end to the harness it spawns. There is no filesystem socket, so
+  nothing else in the container can connect; local access control is spawn-bound rather than
+  UID-bound. Protocol authentication is `run_token` on `Start`. *(Superseded 2026-08-29: "`0600`
+  socket ownership is the authentication (HumanLayer's model); the sidecar and the driver share a
+  pod" — a same-UID process can open a `0600` socket, so ownership was never authentication.)*
 - **Control plane → adapter:** a short-lived bearer token scoped to one `run_id`, so a
   leaked token cannot start unrelated runs.
 

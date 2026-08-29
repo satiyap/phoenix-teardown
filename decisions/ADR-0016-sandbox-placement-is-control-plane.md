@@ -61,11 +61,15 @@ continue?" inside a component that cannot name the tenant asking.
 - The sandbox provider interface gains suspend/resume beyond the three boundaries already
   specified in ADR-0009.
 - The sandbox unit is the **pod**, holding **one container in which the Go driver is PID 1 and
-  spawns the Python harness as its child** *(amended 2026-08-29: this said "Go-side driver plus
-  the Python harness sidecar" — two containers — which spike 05 T2 showed cannot share a Unix
-  socket under gVisor; superseded)*. The driver creates the socket directory `0700` before any
-  other process exists, so `0600` ownership is backed by process lineage; `run_token` on `Start`
-  stays as defence in depth. Checkpoint-and-kill deletes and recreates that pod as one unit.
+  spawns the Python harness as its child** *(amended 2026-08-29; superseded wording: "Go-side driver plus the Python harness sidecar",
+  i.e. two containers, which spike 05 T2 showed cannot share a Unix socket under gVisor)*. The channel is an **`AF_UNIX` socketpair the driver creates
+  and passes to the child by fd inheritance** — there is no filesystem socket, so no later process
+  in the container (a `kubectl exec`, a same-UID sibling) has anything to connect to. *(Amended
+  2026-08-29, same day: an earlier wording said a `0700` directory and `0600` ownership "backed by
+  process lineage"; that was wrong — Unix permissions check UID, not ancestry, and a same-UID
+  sibling connected in the verifier's counterexample; superseded.)* Protocol authentication is
+  `run_token` on `Start`. `kubectl exec` authorisation remains a Kubernetes RBAC boundary, not
+  ours. Checkpoint-and-kill deletes and recreates that pod as one unit.
 - `spec/09` (or a successor) must state that sandbox identity is **not** run identity, so a
   recycled sandbox cannot be mistaken for a resumed run.
 - **v0.1 provider decided 2026-08-27 (amended; this bullet previously left the choice open):

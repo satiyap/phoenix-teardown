@@ -119,6 +119,15 @@ MUTATIONS = [
     ("'no destructive statement in it at all' in VERIFICATION-RULES.md",
      "spikes/VERIFICATION-RULES.md",
      "A verification step should have no destructive statement in it at all."),
+    # 2026-08-29: the spike-05 rename. The verifier found ten live sites the gate
+    # missed because no pattern existed for the retired names.
+    ("'the shipped mode is sdk_in_process' in DESIGN.md",
+     "DESIGN.md", "The shipped mode is sdk_in_process."),
+    ("'the Python harness sidecar' in spec/07",
+     "spec/07-adapter-protocol.md", "The Python harness sidecar receives every frame."),
+    ("'backed by process lineage' in ADR-0016 (decision section)",
+     "decisions/ADR-0016-sandbox-placement-is-control-plane.md",
+     "Socket ownership is backed by process lineage."),
 ]
 
 

@@ -108,7 +108,7 @@ identity is actually for — being nameable as a Cedar `principal`.
 ```
 
 > **Transport, precisely.** The southbound boundary is a **logical frame boundary**, not a
-> network hop. For the shipped `sdk_in_process` mode it runs as **§07 frames over a pod-local Unix socket** between the Go plane and the Python harness sidecar (amended 2026-08-28, OQ-056; superseded: "collapses to a function call")
+> network hop. For the shipped `sdk_subprocess` mode (renamed 2026-08-29) it runs as **§07 frames over an `AF_UNIX` socketpair the Go driver creates and hands to the Python harness it spawns** (amended 2026-08-29 after spike 05 T2; superseded: a harness sidecar over a pod-local Unix socket, and before that "collapses to a function call")
 > (`spec/07`): the frames and the socket are real; TCP + mTLS is the **deferred remote**
 > transport, retained as a design commitment for the first out-of-process adapter and marked
 > not-shipped in `spec/07` §Transport.
@@ -285,7 +285,7 @@ service Adapter {
 }
 ```
 
-`integration_mode = sdk_in_process` is the only mode shipped. An in-process SDK adapter
+`integration_mode = sdk_subprocess` (renamed from `sdk_in_process` 2026-08-29) is the only mode shipped. The adapter
 still speaks these frames: `ToolCall` comes **out**, `ToolResult`/`ToolDenied` go **in**,
 and the SDK's own tool executor is **disabled**. A capability declaration accompanies it:
 

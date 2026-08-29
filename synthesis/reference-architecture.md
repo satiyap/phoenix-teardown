@@ -181,7 +181,7 @@ from the contract alone** (amended 2026-08-27: this said "a third-party adapter"
 party writes adapters for us).
 
 Transport is gRPC bidirectional streaming, so a remote adapter needs no
-co-location. The integration-mode taxonomy comes from Omnigent: `SDK_IN_PROCESS`,
+co-location. The integration-mode taxonomy comes from Omnigent (their names; our shipped mode is `sdk_subprocess`, renamed 2026-08-29): `SDK_IN_PROCESS`,
 `CLI_SUBPROCESS`, `ACP_SUBPROCESS`, `NATIVE_TUI`, `NATIVE_SERVER` — of which only `SDK_IN_PROCESS` ships (amended 2026-08-27; the rest are retained so the column never needs a migration).
 
 > **Amended 2026-08-27.** Only **`SDK_IN_PROCESS` is shipped** — the enum is retained so the

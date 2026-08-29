@@ -582,7 +582,7 @@ def _load_superseded_patterns() -> list[tuple[str, str, str]]:
 # A sentence is exempt ONLY with a dated marker AND a retraction verb. Quoting is
 # not an exemption: "this once said X" must also say when it stopped being true.
 _DATE = re.compile(r"20\d\d-\d\d-\d\d")
-_VERB = re.compile(r"superseded|amended|reversed|retracted", re.IGNORECASE)
+_VERB = re.compile(r"superseded|amended|reversed|retracted|renamed", re.IGNORECASE)
 
 # Files whose job is to record history or describe OTHER systems. A foreign agent
 # named here is a FINDING, not a claim about what we ship, and rewriting a finding
