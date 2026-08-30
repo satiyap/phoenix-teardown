@@ -423,20 +423,37 @@ def check_effect_lifecycle() -> list[str]:
 
 
 def _spec_sql_blocks() -> str:
-    """Every ```sql fence in spec/01, concatenated in document order.
+    """Every ```sql fence in EVERY spec/*.md, concatenated in filename order.
+
+    Widened 2026-08-30. It read spec/01-schema.md alone, so every `sql` fence in
+    specs 10, 11, 14, 15, 16 and 18 was DDL no gate had ever applied -- and every
+    negative control in those documents that named a CHECK, an index or an FK was
+    inconclusive. Filename order IS dependency order (01 creates the spine; the
+    cohort's tables reference it), so the concatenation applies as written.
 
     Skips fences that are illustrative rather than schema: a fence containing
     INSERT/UPDATE/SELECT-only statements belongs to a worked example, not the DDL.
     """
-    body = (SPEC / "01-schema.md").read_text()
     out = []
-    for block in re.findall(r"```sql\n(.*?)```", body, re.DOTALL):
-        stripped = block.strip()
-        if not stripped:
-            continue
-        if re.match(r"^(INSERT|UPDATE|SELECT|BEGIN|--)\b", stripped, re.IGNORECASE):
-            continue
-        out.append(block)
+    for path in sorted(SPEC.glob("*.md")):
+        body = path.read_text()
+        for block in re.findall(r"```sql\n(.*?)```", body, re.DOTALL):
+            stripped = block.strip()
+            if not stripped:
+                continue
+            # Leading comment lines are not the statement. The old test read the
+            # raw first token, so a DDL fence opening with a `--` note was
+            # silently skipped -- harmless while only spec/01 was read, a hole
+            # once every document is.
+            head = re.sub(r"\A(?:\s*--[^\n]*\n)+", "", stripped).lstrip()
+            if not re.match(r"(CREATE|ALTER|DROP|GRANT|REVOKE|COMMENT)\b", head,
+                            re.IGNORECASE):
+                continue
+            # A worked example parameterised with `$name` placeholders is not DDL
+            # even when it opens with one of those verbs.
+            if re.search(r"\$[A-Za-z_]", block):
+                continue
+            out.append(f"-- {path.name}\n{block}")
     return "\n".join(out)
 
 
@@ -461,11 +478,15 @@ def _apply_spec_ddl(dsn: str) -> list[str]:
     # This design cannot destroy anything: the schema name is unique per run, every
     # object is created inside one transaction, and the transaction is rolled back
     # unconditionally. Nothing is dropped, so there is nothing to drop by mistake.
-    # `app_role` is created inside the same transaction, so a role that did not
-    # already exist disappears with the rollback.
+    # Every role the DDL grants to is created inside the same transaction, so a
+    # role that did not already exist disappears with the rollback. The role list
+    # is DERIVED from the SQL (2026-08-30) rather than hard-coded to `app_role`:
+    # the cohort's grants name `messaging_role` too, and a hard-coded list would
+    # fail the gate for a reason that is not a schema defect.
     script = (
-        "import secrets, sys, psycopg\n"
+        "import re, secrets, sys, psycopg\n"
         "dsn, sql = sys.argv[1], sys.stdin.read()\n"
+        "roles = sorted(set(re.findall(r'\\bTO\\s+(\\w+_role)\\b', sql, re.I)))\n"
         "schema = 'specddl_' + secrets.token_hex(6)\n"
         "conn = psycopg.connect(dsn)          # NOT autocommit: we need the rollback\n"
         "rc, msg = 0, None\n"
@@ -473,9 +494,10 @@ def _apply_spec_ddl(dsn: str) -> list[str]:
         "    cur = conn.cursor()\n"
         "    cur.execute(f'CREATE SCHEMA {schema}')\n"
         "    cur.execute(f'SET LOCAL search_path TO {schema}')\n"
-        "    cur.execute(\"SELECT 1 FROM pg_roles WHERE rolname='app_role'\")\n"
-        "    if cur.fetchone() is None:\n"
-        "        cur.execute('CREATE ROLE app_role NOLOGIN')   # transactional\n"
+        "    for r in roles:\n"
+        "        cur.execute('SELECT 1 FROM pg_roles WHERE rolname=%s', (r,))\n"
+        "        if cur.fetchone() is None:\n"
+        "            cur.execute(f'CREATE ROLE {r} NOLOGIN')   # transactional\n"
         "    try:\n"
         "        cur.execute(sql)\n"
         "    except Exception as e:\n"
@@ -492,7 +514,7 @@ def _apply_spec_ddl(dsn: str) -> list[str]:
                          capture_output=True, text=True)
     if res.returncode != 0:
         detail = (res.stdout + res.stderr).strip().splitlines()
-        return [f"spec/01-schema.md DDL does not apply to Postgres: "
+        return [f"spec/ DDL does not apply to Postgres: "
                 f"{detail[0] if detail else 'unknown error'}"]
     return []
 

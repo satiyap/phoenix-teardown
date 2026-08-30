@@ -317,13 +317,18 @@ UPDATE effect_ledger SET status='denied'
    AND EXISTS (SELECT 1 FROM approvals a WHERE a.tenant_id=$tenant
                 AND a.action_ref=$key AND a.status='expired');
 
+-- policy denied it in phase 1, before any approval was ever sought (02:189; the
+-- transition 01's diagram draws and this block did not carry until 2026-08-30)
+UPDATE effect_ledger SET status='denied', error_code=$code
+ WHERE tenant_id=$tenant AND idempotency_key=$key AND status='intended';
+
 -- the run ended, or the intent was superseded
 UPDATE effect_ledger SET status='abandoned'
  WHERE tenant_id=$tenant AND idempotency_key=$key
    AND status IN ('intended','awaiting_approval');
 ```
 
-All three move a **never-claimed** row, so none of them can produce `indeterminate`.
+All four move a **never-claimed** row, so none of them can produce `indeterminate`.
 That is the point of the phase split: `indeterminate` now means only *"we took a lease,
 dispatched, and lost contact"* — real uncertainty, never bookkeeping.
 
@@ -394,8 +399,21 @@ BEGIN;
   RETURNING fence_token;
   -- no row => another worker holds it. The history bump is harmless: tokens are
   -- monotonic, not dense.
+
+  -- 3. On the branch where the lease insert returned a row, pin the pricing snapshot
+  --    for this interval (18-cost.md §Pricing). SKIPPED when the insert returned
+  --    nothing: a worker that did not take the lease prices nothing.
+  INSERT INTO run_events (tenant_id, run_id, seq, epoch, event_type, payload, traceparent)
+  VALUES ($tenant, $run, $seq, $epoch, 'cost.snapshot.pinned',
+          jsonb_build_object('price_snapshot_digest', $digest, 'source', $source,
+                             'source_version', $source_version, 'fence_token', $token),
+          $traceparent);
 COMMIT;
 ```
+
+The append is [`18-cost.md`](18-cost.md)'s; it is here because a transaction specified in
+two places is a transaction implemented once. A pricing interval is named by the
+`fence_token` the same transaction issued, which is why the two cannot be separated.
 
 ### Renew
 
@@ -511,11 +529,18 @@ One table, so retry logic lives in one place rather than in every call site.
 | `23505` on `run_events` | lost the seq race | **retry** (bounded, jittered) |
 | `23505` on `effect_ledger` | someone else claimed it | **do not execute**; read the existing row |
 | `23505` on `run_leases` | another worker resumed | raise `ConcurrentResume`; do not retry |
+| `23505` on `channel_envelopes` | the post already landed (`UNIQUE (tenant_id, envelope_id)`) | **do not execute**; read the existing row and return it |
+| `57014` on the accepting statement | blocked on the `channels` row lock | **retry** (bounded, jittered) |
 | `23503` foreign key | cross-tenant or missing reference | **bug** — fail loudly, do not retry |
 | `23514` check violation | invariant breach (e.g. `temp:` write) | **bug** — fail loudly |
 | `40001` serialisation failure | sweeper conflict | retry with backoff |
 | `57014` statement timeout | blocked on a competitor's uncommitted append, or a slow query | **retry** (spike 03: an append blocks *before* it collides, so this is the common contention signal, not an exotic one) |
 | `22023` invalid_parameter_value | the epoch trigger refused the event | **bug** — never retry; the caller named an epoch it may not name |
+
+The `channel_envelopes` row is deliberately **not** `run_events`' semantics. A channel's
+`seq` counter is issued under the `channels` row lock
+([`17-messaging.md`](17-messaging.md) §Dedupe), so a `23505` there is never a lost-seq race
+— it means the post already landed and the answer is the row that is already there.
 
 **`23503` and `23514` are never retried.** They mean the code attempted something the
 schema forbids, and retrying converts a clear bug into an intermittent one.

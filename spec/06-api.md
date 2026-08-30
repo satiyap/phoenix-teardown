@@ -59,7 +59,8 @@ cross-tenant access is not expressible in a request.
 
 ```http
 POST /v1/definitions
-{ "name": "reviewer", "instructions": "...", "tools": [...], "extensions": [...] }
+{ "name": "reviewer", "instructions": "...", "tools": [...], "extensions": [...],
+  "knowledge_package_digest": "e5f6...", "state_schema": {...} }        # both optional
 
 201 { "digest": "a1b2...", "canon_profile": "nfc+intjson/v1" }
 200 { "digest": "a1b2...", "canon_profile": "nfc+intjson/v1" }   # already existed
@@ -75,6 +76,29 @@ GET /v1/definitions/{digest}          → the body, or 404
 
 There is **no PUT or DELETE.** Editing an agent means posting a new definition and
 repointing the name.
+
+`knowledge_package_digest` and `state_schema` are optional and, when declared, participate
+in the definition digest ([§03](03-canonicalisation.md) §`agent_definition`,
+[`16-knowledge.md`](16-knowledge.md) §Digest participation). An undeclared field is
+**absent** from the body, never `null`, so no existing digest moves.
+
+### Knowledge packages — immutable, content-addressed
+
+```http
+POST /v1/knowledge-packages
+{ "bundle_revision": "7", "sources": [{ "source_id": "tenant-kb", "commit_sha": "9ab..." }] }
+
+201 { "digest": "e5f6...", "canon_profile": "nfc+intjson/v1" }
+200 { "digest": "e5f6...", "canon_profile": "nfc+intjson/v1" }   # already existed
+
+GET /v1/knowledge-packages/{digest}   → the manifest projection, or 404
+```
+
+Registration is **admin only** — a package is compiled from layers we operate — while the
+digest is derived from the compiled bytes and never accepted from the caller, for the same
+reason an adapter digest is not. Two layer stacks that compile to the same bytes **are** the
+same package, so `200` and `201` differ only in whether the row already existed
+([`16-knowledge.md`](16-knowledge.md) §What the digest covers).
 
 ### Agents — the mutable pointer
 
@@ -118,7 +142,12 @@ POST /v1/runs/{id}/discard       { "reason": "..." }  → 200, state=discarded
 GET  /v1/runs/{id}
 GET  /v1/runs?state=waiting_input&limit=50&cursor=...
 GET  /v1/runs/{id}/events?since_seq=0
+GET  /v1/runs/{id}/cost
 ```
+
+`GET /v1/runs/{id}/cost` returns `priced_nanos_lower_bound` and `unpriced_calls` **as a
+pair**, never one without the other: a total presented alone would read as the run's cost
+when some calls could not be priced ([`18-cost.md`](18-cost.md) §The cost record).
 
 `cancel` returns `202` and `cancelling`, never `cancelled`. The API does not pretend a
 cancel is instantaneous.
@@ -198,6 +227,67 @@ can read it, so the catalogue is readable by an **agent** token while registrati
 admin-only. The section heading previously said "admin only" for both, which contradicted
 the line above it.
 
+### Tasks (routines) — admin only
+
+```http
+POST  /v1/tasks
+{ "name": "nightly-review", "agent_id": "ag_1", "prompt": "...",
+  "trigger_kind": "cron", "cron_expression": "0 2 * * *", "timezone": "Europe/London",
+  "overlap_policy": "skip", "misfire_grace_seconds": 30 }        → 201
+
+PATCH /v1/tasks/{id}          # prompt, overlap_policy, misfire_grace_seconds only
+POST  /v1/tasks/{id}/pause    → 200, state=paused
+POST  /v1/tasks/{id}/resume   → 200, state=active
+POST  /v1/tasks/{id}/disable  → 200, state=disabled
+POST  /v1/tasks/{id}/fire     → 201 fired, or 200 replayed
+```
+
+Schedule fields are **immutable**: `cron_expression` and `timezone` are inputs to the
+firing key, so changing one would rename every future tick and reopen ticks already
+decided. A PATCH naming either is `422 schedule_immutable`
+([`11-routines.md`](11-routines.md) §Idempotent firing).
+
+There is **no route that writes a `task_firings` row or sets `runs.task_id` directly.** A
+firing is created only inside the transaction that inserts the firing record, and the
+absence of a route is the enforcement — the same argument §05's system transitions use.
+
+### Task catalogue — readable by any authenticated class
+
+```http
+GET /v1/tasks
+GET /v1/tasks/{id}
+GET /v1/tasks/{id}/firings?since=...
+```
+
+An agent may need to know why it is running. Registration and lifecycle stay admin-only for
+the same reason policy registration does; reading is not the governed editing the governor.
+
+### Credentials — admin only
+
+```http
+POST   /v1/credentials
+{ "name": "github-app", "kind": "oauth2", "flow": "on_behalf_of_token_exchange",
+  "egress_host": "api.github.com", "holder_principal_id": "pr_1" }   → 201
+
+GET    /v1/credentials
+GET    /v1/credentials/{id}
+POST   /v1/credentials/{id}/revoke   → 200, revoked_at set
+```
+
+**No route returns `secret_ref`, `material_ref`, or any placeholder value**, in any
+response, at any credential class — a route that can read the pointer is a route that can
+be used to find the secret ([`14-credentials.md`](14-credentials.md) §Credentials never
+enter the sandbox).
+
+The create route **refuses** a row whose `egress_host` names a control-plane host,
+`422 credential_targets_control_plane`. That refusal is the mechanism behind §14's
+invariant "a credential cannot be minted against the control plane": without it the rule
+is prose, because nothing else in the schema forbids the value.
+
+Revocation is a **state**, never a delete (`01-schema.md` §Identity, `revoked_at`): a revoked credential's
+issuances remain readable, which is what makes "what did this reach, and when did it stop"
+answerable.
+
 ---
 
 ## Approval authority — what this API does not do
@@ -214,12 +304,29 @@ external governed system.
 
 ## Idempotency
 
-`Idempotency-Key` is **required** on POST /v1/runs and POST /v1/approvals/{id}/decide.
-It is optional elsewhere. Keys are scoped `(tenant_id, endpoint, key)` and retained 24h.
+`Idempotency-Key` is **required** on POST /v1/runs and POST /v1/approvals/{id}/decide and
+POST /v1/tasks/{id}/fire. It is optional elsewhere. Keys are scoped `(tenant_id, endpoint, key)` and retained 24h.
 
 A replay returns the original response with `Idempotency-Replayed: true`. A key reused
 with a *different* body is `422` — silently returning the first response would hide a
 client bug.
+
+One narrowing, stated by [`11-routines.md`](11-routines.md) §Who may create: on
+POST /v1/tasks/{id}/fire the key is also the firing key's `value`, and the `task_firings`
+record outlives the 24-hour retention. Past that window a reused key **replays the recorded
+firing** rather than being refused `422 idempotency_key_reused` — the route carries no
+request body beyond the task it names, so a reused key and a changed body cannot be told
+apart, and refusing would strand a legitimate retry.
+
+---
+
+## Request headers read on every route
+
+`traceparent` and `tracestate` are read on **every** route as W3C Trace Context, and the
+value is the full header — a bare trace id does not propagate
+([`19-telemetry.md`](19-telemetry.md) §Propagation hop 1). Neither is ever an
+authorization input: `tenant_id` comes from the token and nothing else, so a forged
+`traceparent` joins a trace and buys nothing.
 
 ---
 
@@ -245,6 +352,10 @@ parameter is worth more than one that names an exception class.
 | 409 | `incompatible_checkpoint` | pin mismatch |
 | 422 | `artifact_missing` / `artifact_corrupted` | distinct remedies, distinct codes |
 | 422 | `steer_requires_guidance` | policy validation |
+| 422 | `trigger_kind_unsupported` | `trigger_kind: "event"` has no referent in v0.1 (11) |
+| 422 | `overlap_policy_unsupported` | `overlap_policy: "allow"` is reserved; no defined concurrency behaviour (11) |
+| 422 | `schedule_immutable` | `cron_expression` / `timezone` cannot be PATCHed; the firing key derives from them (11) |
+| 422 | `credential_targets_control_plane` | a `credentials` row whose `egress_host` names a control-plane host (14) |
 | 429 | `rate_limited` | with `Retry-After` |
 
 A `404` for another tenant's resource is deliberate: `403` would confirm the resource

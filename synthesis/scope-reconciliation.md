@@ -315,3 +315,86 @@ interception; spike 06), OQ-044 (multi-party approval as a buyer requirement), O
 (spike-03 docstring, `make check` reproducibility, Postgres-gate isolation), OQ-048/049
 (resolved same day), OQ-050–054 (patterns-file rationale, gate stderr heuristic, two counts
 still hand-compared, what "frozen" means to a tool, whether `scope.yaml` asserts the harness).
+
+---
+
+## 8. The remaining specs (2026-08-30)
+
+Ten documents landed together, closing every row `spec/00-overview.md` §Not yet specified
+carried. That table is now **empty**, `synthesis/scope.yaml`'s `owed_specs` is `[]`, and
+`spec/` holds twenty documents. What each settles, and where it stands:
+
+| # | Document | What it settles | Status |
+|---|---|---|---|
+| 10 | `10-work-bundles.md` | The six nouns — `WorkBundle`, `Resource`, `Action`, `ActionReceipt`, `Verifier`, `effect_class` — the bundle-supplied `type_roles` table, and how an `Action` lands on the effect ledger without duplicating its state | draft |
+| 11 | `11-routines.md` | `tasks`, the trigger taxonomy, the additive `runs.task_id` FK, the firing key that makes a doubled cron tick create one Run, the missed-tick policy, and delegation as a ledgered effect | draft |
+| 12 | `12-harness.md` | The policy over Pydantic AI's seams: history strategy, delegation as a child Run, which hooks write the ledger, `step_id` derivation, context assembly from the compiled knowledge package, and the checkpoint payload's rules | draft |
+| 13 | `13-adapter-sdk-subprocess.md` | The shipped adapter: Go driver as PID 1, the inherited socketpair and its record framing, the pre-spawn resume order split between plane and driver, and the errors the mode adds | draft |
+| 14 | `14-credentials.md` | `Credential` and `credential_issuances`, the three named flows, exchanger/refresher as separate interfaces, delegation depth set by us, and the six obligations of the secretless egress contract | draft |
+| 15 | `15-sandbox.md` | The five-operation provider interface, the three boundaries (process, egress, storage), sandbox identity as distinct from run identity, and what losing a sandbox does and does not decide | draft |
+| 16 | `16-knowledge.md` | The three knowledge layers and their resolution order, compilation and the `manifest.json` projection, digest participation through the definition body, and the `state_entries` scopes | draft |
+| 17 | `17-messaging.md` | The compatibility layer over `ag2.network`, the Envelope as data, channel lifecycle and leases, dedupe, and the retention rule that no correctness predicate may depend on the envelope log | draft |
+| 18 | `18-cost.md` | Usage capture through a fifth typed frame, pricing against a pinned `genai-prices` snapshot, the fail-closed-on-unpriced rule, and attribution to the acting principal | draft |
+| 19 | `19-telemetry.md` | The `phoenix.*` namespace and its experimental tier, the span and metric inventory, the SDK and semconv pins, four-hop propagation, and sampling | draft |
+
+All ten are held at **draft**, deliberately and together. Three of the four the authors
+marked `final` had unresolved preconditions at the time — `10`'s DDL was ungated, `12`
+depended on an edit `16` owed it, `17` cited six OQ numbers the register did not contain —
+and a split cohort is worse than a uniformly honest one. `tools/check_exit_criteria.py`
+counts the literal `<!-- status: final -->` toward D4, so promoting them is a decision to
+take once, when the OQs each document leans on are closed.
+
+### Cross-spec fixes applied
+
+| Contradiction | Resolution |
+|---|---|
+| `13` made the in-container driver a control-plane database client; `14` and `15` say the run container has no database route and no secret but `run_token` | `13` changed. The **control plane** is `05`'s worker and holds the lease; the driver's §6 outcomes are reports the plane turns into worker writes; §7's steps 1-5 are the plane's, and the driver performs only step 4b's in-container tree walk |
+| `12` drew model context from the pinned **bundle**; `16` compiles a **package** that overlays two further layers and drops overridden bundle paths | `12` §8 changed: the universe is the compiled package, and `system/**` is an always-resident set entered alongside the closure, not through it. `16`'s *owed edit* marker deleted |
+| `07` and `12` defined `Start.turn_ordinal_seed` differently, and `12`'s form required parsing a payload `07` forbids anyone to parse | Both changed to one definition over the log alone: live `cost.usage.recorded` events for the run, rewind-superseded ones excluded |
+| `13` and `12` both owned the checkpoint-persistence predicate | `13` §4, §7 and §9 changed: the driver forwards, the **control plane** persists. `12` §9 gained the emission moment `13` supplies, so neither owns half of it |
+| `15` asserted the proxy injects a model-provider key; `14` scopes those keys out and both its injection paths need an `effect_ledger` row a model request has not got | `15` §5 changed to name `14`'s open question, and its test row's key half is marked unassertable until that question is decided |
+| `01` granted on `task_firings`, a table `11` creates — the live Postgres-gate failure on HEAD | The grant deleted from `01`; `11` now cites `01` for the *pattern*, not the statement |
+| `09` said **exactly four** typed frames after `18` added a fifth under `09`'s own test | `09` §6 changed to five with the `Usage` row and a dated marker. `09`'s opening "Six questions" over seven sections corrected in the same pass |
+| `05` and `13` compared `runs.pinned_bundle_*`, which no gated schema carried | The three columns and their all-or-nothing CHECK moved into `01`'s `runs`; only the FK stays in `10`, because `bundles` is created there |
+| `01` and `17` said a caller-supplied key feeds `effect_ledger.idempotency_key`, which `03`'s registered derivation cannot reproduce | Both changed: an explicit key is an input to `request_digest`, never a key. `03`'s four-field rule stays the only derivation |
+| `15` specified a `sandboxes` table, an enum, an index and a five-row state machine that no schema carried | The DDL landed in `01` after `runs`; `15` §2 reduced to its four normative consequences |
+| `11` wrote normative HTTP behaviour into a surface `06` owns and closed differently | `06` and `contracts/openapi.yaml` gained the `/v1/tasks` family (admin writes, catalogue reads outside the admin heading), the narrowed idempotency sentence, and three `422` codes |
+| `16` declared a compile-time role refusal `10`'s schema did not carry, and `16`'s digest participation had no reachable API | `10` gained `node_roles_are_content_or_executable`; `16` now cites it. `06` and the OpenAPI document gained `/v1/knowledge-packages` and the two optional `POST /v1/definitions` fields |
+| `18` added a third statement to a transaction `02` specifies | `02` §Acquire carries the `cost.snapshot.pinned` append on the lease-insert branch; `18` cites the statement rather than describing an addition |
+| `19`'s hop-3 trace carrier had no field in `CreateSpec` | `15` §1's `Bootstrap` comment names `TRACEPARENT`/`TRACESTATE` and the `Create` row states the no-parse rule; `19` names the field its negative control drops |
+| About a dozen `file:line` citations between the new documents landed on unrelated text | Re-resolved, and converted to section names where the target is still moving. The absence of a gate for this is filed as OQ-077 |
+
+### The ungated-DDL decision
+
+`tools/validate_spec.py` `_spec_sql_blocks()` read `spec/01-schema.md` alone, so every
+`sql` fence in specs 10, 11, 14, 16 and 18 was DDL no gate had ever applied — and every
+negative control in those documents naming a CHECK, an index or an FK was inconclusive.
+**The gate was widened** to every `spec/*.md` in filename order, which is dependency order,
+rather than moving six documents' schemas into `01`. Two placements were still made in
+`01`, because that document owns the spine tables the rest reference: `runs`' bundle-pin
+columns and the `sandboxes` table. The fence filter was tightened in the same change — a
+DDL fence opening with a `--` comment was silently skipped before, and a worked example
+parameterised with `$name` is now excluded explicitly rather than by its first keyword.
+Postgres gate: **ok**, with the whole cohort's DDL applied and rolled back.
+
+### Other shared edits
+
+`00`'s Documents table gained ten rows and its "Not yet specified" table is replaced by a
+statement that nothing remains. `scope.yaml`: `spec_docs: 20`, `invariant_rows: 74`,
+`owed_specs: []`. README's two document counts (which had already drifted apart, 10 against
+8) both read 20. `08`'s inventory gained rows 31-52, two or three per new document, and row
+26 was rewritten to the four-participant propagation form — as were `07`:512 and `07`'s own
+test row. `02` gained two messaging error-mapping rows and the policy-deny `UPDATE` from
+`intended` that OQ-067 recorded as missing. `04` gained three run-scoped credential events.
+`01` gained exceptions 4 and 5 to the composite-FK rule and the messaging-role grants that
+are `17` §Retention's stated enforcement. `DESIGN.md` §7a's transport sentence — which
+still carried a banned phrase, surviving the gate only on a line break — now describes the
+socketpair with a dated marker.
+
+### Open questions filed
+
+**OQ-071 to OQ-141**, seventy-one rows, owner Satiya, decide-by 2026-09-30. Twelve are the
+judge's cross-spec questions; the rest are the per-document proposals, deduplicated by
+meaning. The cohort's authors had claimed twelve numbers across three documents with three
+collisions and none of them filed; every in-text reference in `12`, `17` and `18` was
+rewritten to its allocated number. That nothing allocates is itself OQ-082.

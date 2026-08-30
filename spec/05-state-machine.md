@@ -69,6 +69,7 @@ authorization spec; the API in §06 enforces it.
 |---|---|---|---|---|
 | — | `draft` | create run | owner, operator | pin computed and recorded here |
 | `draft` | `queued` | submit | owner, operator | |
+| — → `draft`, `draft` → `queued` | | **routine firing** | **system** | amended 2026-08-30 by [`11-routines.md`](11-routines.md): only inside the transaction that inserts the `task_firings` row; `runs.created_by` is `tasks.created_by` |
 | `draft` | `discarded` | discard | owner, operator | |
 | `queued` | `running` | claim | **worker only** | requires winning the lease |
 | `queued` | `discarded` | discard | owner, operator | only while unclaimed |
@@ -151,12 +152,14 @@ transaction** as the state change.
 | `queued → running` | lease acquired **and** pin matched **and** artifact resolved and verified |
 | `waiting_input → running` | a matching `approvals` row is terminal (`approved` **or** `denied`) with `decided_by` set |
 | `cancelling → cancelled` | no `effect_ledger` row for this run is still `claimed`, **or** the lease has expired |
-| `* → succeeded` | no `effect_ledger` row for this run is `claimed` — an unsettled effect means the run is not done |
+| `* → succeeded` | no `effect_ledger` row for this run is `claimed` **or `indeterminate`** — an unsettled **or uncertain** effect means the run is not done (amended 2026-08-30: [`10-work-bundles.md`](10-work-bundles.md) §Settlement moves a timeout or lost-contact effect out of `claimed` into `indeterminate`, so excluding `claimed` alone let a run succeed carrying an outcome nobody knows) |
 | `* → any terminal` | `ended_at` set in the same statement (schema `CHECK` enforces) |
 | `* → failed` | `error_code` non-null (schema `CHECK` enforces) |
 
 The `succeeded` precondition is easy to miss and it matters: a run that reports success
-while an effect is still claimed has an outcome nobody knows.
+while an effect is still claimed — or has settled `indeterminate` — has an outcome nobody
+knows. `indeterminate` is not a resolution; it is the platform recording that it cannot
+tell, and a run must not report success over it.
 
 ---
 
@@ -168,7 +171,11 @@ Normative, and proven in spike 02:
 1. load run + pin
 2. resolve the artifact from the registry BY DIGEST   → ArtifactMissing
 3. verify the artifact hashes to its own key          → ArtifactCorrupted
-4. compare the pin, field by field                    → Incompatible (names the field)
+4. compare the pin, field by field: definition, adapter, payload schema,
+   the bundle digest where the run pins one (10), and the knowledge
+   package digest THROUGH the definition body (16)    → Incompatible (names the field)
+4b. verify the materialised knowledge tree against manifest.json in
+   both directions, before any process exists (16)    → KnowledgeMissing | KnowledgeCorrupted
 5. (future) check the digest against revoked_definitions → DefinitionRevoked
 6. acquire the fenced lease                           → ConcurrentResume
 7. THEN invoke the adapter, passing the RESOLVED artifact

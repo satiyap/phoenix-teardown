@@ -132,11 +132,33 @@ Every invariant in this spec, with its negative control. Consolidated from §01�
 | 23 | Unset capability reads `UNKNOWN` | treat as `FALSE` ⇒ silent degradation |
 | 24 | `ASSERTED` cannot gate a safety decision | allow it ⇒ unproven claim trusted |
 | 25 | Stable `step_id` across replay | counter-based ⇒ duplicate execution |
-| 26 | One trace id spans client → plane → adapter | drop propagation ⇒ two traces |
+| 26 | One trace id spans client → plane → **driver → harness** (four hops; §19) | drop the hop-3 environment carrier ⇒ two traces. The receiving span must have a REMOTE parent — asserting the variable was written is Omnigent's `get_traceparent_env()` defect |
 | 27 | `tenant_id` never read from a request | read from body ⇒ cross-tenant access |
 | 28 | Agent tokens cannot reach admin routes | drop the class check ⇒ 201 |
 | 29 | `decided_by` from the token, not the body | trust the body ⇒ impersonation |
 | 30 | Cross-tenant read is `404` not `403` | return 403 ⇒ existence leak |
+| 31 | A declared verifier is published by a different principal than the bundle it verifies (§10) | drop `verifier_is_independently_published` ⇒ spike 04 finding 1's co-published verifier is accepted |
+| 32 | A node carrying both a content and an executable role is rejected (§10, §16) | drop `node_roles_are_content_or_executable` ⇒ one artifact is both what the model reads and what the platform executes |
+| 33 | An `Action` never duplicates ledger state (§10) | add `actions.status` ⇒ two authorities disagree after a fenced settle |
+| 34 | A doubled cron tick creates **one** Run (§11) | read-then-act instead of the firing key ⇒ spike 01's `['w1','w2']` at the routine layer |
+| 35 | A Run and its firing record are one transaction (§11) | commit them separately ⇒ a decided tick with no Run, or a Run no tick names |
+| 36 | `system/**` is never silently dropped from a model request (§12, §16) | drop the overflow instead of failing ⇒ the run proceeds on partial system knowledge with no signal |
+| 37 | A nominated node outside the closure and the manifest is refused (§12) | admit it ⇒ discovery where ADR-0012 requires declaration |
+| 38 | Zero processes exist on every pre-spawn failure path (§13) | reorder to lease-before-pin ⇒ a process is created on a mismatch |
+| 39 | A `Start` carrying the wrong `run_token` is refused (§13) | accept any token ⇒ a replayed `Start` drives the run |
+| 40 | No secret reaches the sandbox (§14) | mount the credential for convenience ⇒ the blast radius of a compromised run container becomes the credential |
+| 41 | A placeholder is host-bound and single-use (§14) | present it to a second host, and twice to its own ⇒ a leaked placeholder is a bearer token |
+| 42 | `delegation_depth` is set by us and capped independently of policy (§14) | take the depth from the caller ⇒ the cap is advice |
+| 43 | No control-plane database path from the run container (§15) | inject the database credential into the container ⇒ it connects |
+| 44 | A run holding a non-terminal sandbox cannot acquire a second (§15) | scope `sandboxes_one_live` to `state IN ('creating','live')` ⇒ a suspended row lets a second sandbox in with no violation |
+| 45 | A sandbox event never changes run state (§15) | fold `sandbox.lost` onto `runs.state` ⇒ run identity depends on sandbox identity, which ADR-0016 forbids |
+| 46 | A higher knowledge layer's bytes win and the lower file is absent from the package (§16) | ship both ⇒ two files claim one path and the model reads whichever the walker reached first |
+| 47 | A forbidden state read is refused, not empty (§16) | return an empty `ToolResult` ⇒ "no rows" and "not allowed" are indistinguishable (non-negotiable 10) |
+| 48 | A fenced hub cannot post (§17) | drop the fence predicate ⇒ two hubs write one channel |
+| 49 | The effect claim survives channel-WAL deletion (§17) | derive the effect key from a message field ⇒ retention deletes the basis of idempotency |
+| 50 | An unpriced call fails the **total** closed and is never zero (§18) | price it as 0 ⇒ an under-count that reads as a total |
+| 51 | Every cost record in a pricing interval names that interval's pinned digest (§18) | price against the current dataset ⇒ one interval carries two price bases |
+| 52 | No identifier enters a span name or a metric attribute (§19) | put `run_id` in a metric label ⇒ unbounded cardinality, ADR-0010's stated failure |
 
 **Every row needs both columns implemented.** A test without its negative control is
 unproven: it may be passing for an unrelated reason, which is exactly what happened in

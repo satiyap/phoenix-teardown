@@ -89,20 +89,12 @@ counts:
     total: 16
     accepted: 15
     proposed: 1
-  spec_docs: 10
-  invariant_rows: 52
+  spec_docs: 20
+  invariant_rows: 74
   spike_assertions: 181
 
 # The "Not yet specified" rows of spec/00-overview.md: the part of the v0.1 shipment
 # the spine documents do not yet cover.
-owed_specs:
-  - '`Credential` with separate exchanger/refresher'
-  - 'Sandbox — three boundaries'
-  - 'Knowledge (filesystem skills)'
-  - 'Messaging (`ag2.network`)'
-  - 'Cost measurement (`genai-prices`)'
-  - 'Pydantic AI adapter'
-  - 'OTel semantics'
-  - '`tasks` / `routines`'
-  - 'Agent harness (Pydantic AI) (spec 12)'
-  - 'Work bundles (`10-work-bundles.md`)'
+# Emptied 2026-08-30: specs 10-19 landed and every row is settled. The list stays as a
+# key so `check_scope_source_of_truth()` keeps comparing it against spec/00's table.
+owed_specs: []

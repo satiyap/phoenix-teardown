@@ -58,6 +58,16 @@ message Start {
                                      // parent span and the sampled flag.
   string tracestate            = 6;  // W3C tracestate, may be empty
   Deadline deadline            = 7;
+  string run_token             = 8;  // protocol authentication; minted per spawn by the
+                                     // driver on the socketpair half. ADR-0016:71, spec/13 §3
+  uint64 turn_ordinal_seed     = 9;  // count of LIVE cost.usage.recorded events for
+                                     // (tenant_id, run_id) -- events superseded by a rewind
+                                     // are not counted -- with the resume replaying from the
+                                     // checkpoint's own position, so a turn recorded after
+                                     // the checkpoint is re-derived rather than re-counted.
+                                     // Expressible over the log alone: nothing parses
+                                     // resumed_payload. The adapter seeds its turn counter
+                                     // from it and increments. spec/12 §5
 }
 
 message Input  { bytes data = 1; }
@@ -105,9 +115,10 @@ message AdapterFrame {
   }
 }
 
-// FOUR frames MUST be typed, because the control plane makes decisions about
-// them: ToolCall inbound, ToolResult and ToolDenied outbound, and the Checkpoint
-// ENVELOPE. The rest stay opaque. See "What must be typed, and why" below.
+// FIVE frames MUST be typed, because the control plane makes decisions about
+// them: ToolCall inbound, ToolResult and ToolDenied outbound, the Checkpoint
+// ENVELOPE, and Usage (the control plane prices it; see spec/18).
+// The rest stay opaque. See "What must be typed, and why" below.
 message Output {
   string step_id = 1;      // stable across replay; feeds logical_step_path
 
@@ -116,10 +127,25 @@ message Output {
     Opaque   thought   = 3;   // display only
     ToolCall tool_call = 4;   // TYPED: a REQUEST to execute, not an execution
     Checkpoint checkpoint = 5; // envelope typed, payload opaque
+    Usage    usage     = 6;   // TYPED: one model request's token counts (spec/18)
   }
 }
 
 message Opaque { bytes data = 1; }
+
+// Emitted once per model request as the harness observes it; `requests` counts
+// the provider round-trips behind that observation when the SDK retries
+// internally (normally 1). The harness reports USAGE and never money: pricing
+// is a control-plane act against a pinned snapshot (spec/18).
+message Usage {
+  string provider           = 1;   // e.g. "anthropic"
+  string model_ref          = 2;   // the provider's own model identifier
+  uint64 input_tokens       = 3;
+  uint64 output_tokens      = 4;
+  uint64 cache_read_tokens  = 5;
+  uint64 cache_write_tokens = 6;
+  uint32 requests           = 7;   // provider round-trips behind this observation; normally 1
+}
 
 message ToolCall {
   string tool_name  = 1;   // must match a tool in the pinned definition
@@ -190,6 +216,12 @@ state.
 
 **The platform executes tools. The adapter requests them.** This is the decision review
 correctly identified as unmade, and it determines the direction of every frame above.
+
+The executor's own outbound traffic has no direct route: it is configured through the
+sandbox's `CreateSpec.EgressVia` and is subject to E1-E7 at the same proxy deployment
+([`15-sandbox.md`](15-sandbox.md) §5). There is no second egress path for the executor,
+which is what makes §15's egress boundary a property of the deployment rather than a rule
+stated in one document about another.
 
 The first draft had `ToolCall` *and* `ToolResult` as adapter **outputs**, which is
 incoherent given everything else in this spec: it let an adapter report the result of an
@@ -302,7 +334,7 @@ same typed boundary as a remote one, and Pydantic AI supplies both halves native
 
 ```
 SDK asks for a tool
-   -> adapter emits Output{ToolCall}          (one §07 frame over the pod-local socket)
+   -> adapter emits Output{ToolCall}          (one §07 frame over the inherited socketpair)
    -> control plane: pinned-definition check, policy, intent, approval, claim, dispatch
    -> adapter receives ControlFrame{ToolResult | ToolDenied}
    -> adapter hands the result back to the SDK as that tool's return value
@@ -348,11 +380,15 @@ opaque bytes the control plane cannot:
 | **claim the effect atomically before it runs** | knowing a tool call is happening at all |
 | bind an approval to the action it gates | a `call_id` to correlate |
 | verify the tool is in the pinned definition | the tool name |
+| price a model call | the provider, model and token counts |
 
 So the rule is narrow rather than absolute:
 
 - **Typed**, because the control plane decides on them: `ToolCall` (inbound),
-  `ToolResult` and `ToolDenied` (outbound), and the `Checkpoint` *envelope*.
+  `ToolResult` and `ToolDenied` (outbound), the `Checkpoint` *envelope*, and `Usage` — the
+  control plane prices it against a pinned snapshot, and neither the provider, the model
+  identifier nor the token classes are derivable from opaque bytes
+  ([`18-cost.md`](18-cost.md)).
 - **Opaque**, because only the adapter and the human care: `text`, `thought`, and the
   checkpoint *payload*.
 
@@ -439,9 +475,11 @@ usable for optimisation.
 > provisions sandboxes. The first time we add a remote adapter, this section is the answer
 > already worked out. Treat it as a design commitment, not a v0.1 requirement.
 
-gRPC over TCP or a Unix socket. A remote adapter needs **no co-location** — the reason we
-chose a gRPC shape over ACP-over-stdio, with ACP sitting *behind* an adapter rather than
-being the transport (ADR-0006).
+gRPC over TCP or a Unix socket, **for the remote half only**. A remote adapter needs **no
+co-location** — the reason we chose a gRPC shape over ACP-over-stdio, with ACP sitting
+*behind* an adapter rather than being the transport (ADR-0006). *(Amended 2026-08-30: the
+shipped `sdk_subprocess` half carries the same messages record-framed over the inherited
+socketpair, not gRPC; the carrier is [`13-adapter-sdk-subprocess.md`](13-adapter-sdk-subprocess.md) §2.)*
 
 ### Authentication — both directions
 
@@ -460,7 +498,12 @@ had the same hole.
   socket ownership is the authentication (HumanLayer's model); the sidecar and the driver share a
   pod" — a same-UID process can open a `0600` socket, so ownership was never authentication.)*
 - **Control plane → adapter:** a short-lived bearer token scoped to one `run_id`, so a
-  leaked token cannot start unrelated runs.
+  leaked token cannot start unrelated runs. *(Amended 2026-08-30 by
+  [`13-adapter-sdk-subprocess.md`](13-adapter-sdk-subprocess.md) §3: on the shipped
+  socketpair half the **driver** mints `run_token` per spawn — a token the control plane
+  mints and never verifies stores a secret for no verifier, and checkpoint-and-kill makes
+  several spawns per run ordinary (ADR-0016:75-79). The run-scoped control-plane token is
+  retained for the remote half.)*
 
 ### Limits and backpressure
 
@@ -469,7 +512,7 @@ had the same hole.
 | Max frame size | 4 MiB | stream error; the adapter must chunk |
 | Max outputs per run | 100,000 | run → `failed`, `error_code = output_flood` |
 | `Deadline` | absolute, carried on `Start` | run → `expired` |
-| Flow control | gRPC windowing | — |
+| Flow control | gRPC windowing (remote half); the socket buffer on the inherited pair (amended 2026-08-30; see [`13-adapter-sdk-subprocess.md`](13-adapter-sdk-subprocess.md) §2) | — |
 | Reconnect | **not permitted mid-run** | a dropped stream is a close; see rule 5 |
 
 **No mid-run reconnect.** A reconnecting adapter would have to prove which frames the
@@ -478,8 +521,13 @@ Resumption already exists at the *run* level, with a pin and a lease; a second, 
 mechanism at the stream level would be a way to bypass it.
 
 `traceparent` on `Start` is the full W3C header value, so one trace spans client → control
-plane → adapter. §08 requires a test asserting that, because **a bare trace id does not
-propagate** — without the parent span and sampled flag the adapter starts a new trace.
+plane → **driver → harness** — four participants, because under `sdk_subprocess` the driver
+is PID 1 and is not part of "the adapter" *(amended 2026-08-30 by
+[`19-telemetry.md`](19-telemetry.md) §Propagation, which names the driver hop as hop 3 and
+its carrier as `CreateSpec.Bootstrap`; superseded: the three-participant form
+"client → control plane → adapter")*. §08 requires a test asserting that, because **a bare
+trace id does not propagate** — without the parent span and sampled flag the receiver
+starts a new trace.
 
 ## Tests, with negative controls
 
@@ -494,4 +542,4 @@ propagate** — without the parent span and sampled flag the adapter starts a ne
 | Unset capability reads `UNKNOWN` | omit a capability | treat as `FALSE` ⇒ silent degradation |
 | `ASSERTED` cannot gate a safety decision | assert-only capability on a safety path | allow it ⇒ unproven claim trusted |
 | Stable `step_id` across replay | replay a step, compare effect keys | counter-based ids ⇒ duplicate execution |
-| One trace id end to end | assert propagation client→plane→adapter | drop propagation ⇒ two traces |
+| One trace id end to end | assert propagation client→plane→driver→harness; the receiving span must have a REMOTE parent | drop the hop-3 environment carrier ⇒ two traces |

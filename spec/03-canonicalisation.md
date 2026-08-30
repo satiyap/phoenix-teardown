@@ -98,6 +98,9 @@ happen to canonicalise identically must not be equal. Registered domains:
 | `adapter_contract` | an adapter contract |
 | `effect_key` | an effect ledger key |
 | `checkpoint_payload` | an adapter's checkpoint payload |
+| `work_bundle` | a compiled work-bundle manifest ([`10-work-bundles.md`](10-work-bundles.md)) |
+| `knowledge_package` | a compiled knowledge-package manifest ([`16-knowledge.md`](16-knowledge.md)) |
+| `firing_key` | a routine firing's deterministic name ([`11-routines.md`](11-routines.md)) |
 
 `canonicalization` makes a profile change **visible**. Without it, changing the
 canonicaliser silently invalidates every stored pin, and "changed" is
@@ -195,7 +198,12 @@ What goes into a digest is as load-bearing as how it is serialised.
 ### `agent_definition`
 
 **Included:** `name`, `instructions`, `tools` (sorted by tool name), `extensions`
-(**ordered**, see below).
+(**ordered**, see below), and — when declared — `knowledge_package_digest` and
+`state_schema` ([`16-knowledge.md`](16-knowledge.md) §Digest participation). An undeclared
+field is **absent** from the body, never `null`, so no existing definition digest moves.
+This extends the field-inclusion list only; the rules of the profile are untouched, so
+`nfc+intjson/v1` stands (§Profile evolution governs a change to the *rules*, which this is
+not).
 
 **Excluded:** `declared_version`, `created_at`, and any other metadata.
 
@@ -245,6 +253,39 @@ ExtensionBinding {
 `extensions` is therefore an **array of objects in declared order**, not a sorted array of
 strings. Reordering two extensions changes the digest, because it changes what the agent
 does.
+
+### `work_bundle`
+
+**All of:** `bundle_id`, `source_format`, `published_by`, `type_roles`, `nodes`. `nodes` is
+an array of `{path, content_digest, roles}` **sorted by `path`**, with `roles` sorted within
+each node; `content_digest` is a plain `sha256` of the node's raw bytes, because a node body
+is arbitrary bytes and this profile digests JSON only.
+
+**Excluded:** `revision`, `compiled_at`, `signature`, `signing_key_id`. A re-sign must not
+change the bundle's identity, and a recompile that yields the same digest **is** the same
+bundle — `UNIQUE (tenant_id, digest)` on `bundles` makes that a database fact
+([`10-work-bundles.md`](10-work-bundles.md) §Source format).
+
+### `knowledge_package`
+
+**All of:** `files`, an array of `{path, digest}` **sorted by `path`** in UTF-8 byte order.
+That projection is `manifest.json` in full, so the file neither digests itself nor carries
+anything the digest omits.
+
+**Excluded:** the source `layer`, `commit_sha`, git author, commit message, tree ids, file
+mtimes, modes, the repo remote, `bundle_id` and `bundle_revision`. A commit sha is a label,
+and the `declared_version` reasoning above applies unchanged: two layer stacks that compile
+to the same bytes **are** the same package ([`16-knowledge.md`](16-knowledge.md) §What the
+digest covers).
+
+### `firing_key`
+
+**All of:** `tenant_id`, `task_id`, `source`, `value`.
+
+`source ∈ {cron, manual, webhook}` is a discriminator, not decoration: it keeps a
+caller-supplied idempotency key out of the scheduler's namespace, so a manual key shaped
+like a tick instant cannot read as that tick already decided
+([`11-routines.md`](11-routines.md) §Idempotent firing).
 
 ### `adapter_contract`
 

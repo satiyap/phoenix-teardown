@@ -377,16 +377,20 @@ guarantee it appeared to offer was not one it could keep":
 **Decided 2026-08-28 (OQ-056) — how Go meets the Python harness.** The harness (Pydantic AI)
 runs as a **child process of the Go driver, in one container** *(amended 2026-08-29: was "a
 sidecar in the same pod" — two containers — until spike 05 T2 showed gVisor does not propagate a
-Unix socket across containers; superseded)*, and the two speak `spec/07`'s frames over a Unix
-socket in a `0700` directory the driver creates before spawning it, with `0600` ownership backed by
-process lineage as the authentication. Everything
+Unix socket across containers; superseded)*, and the two speak `spec/07`'s frames over an
+`AF_UNIX` socketpair the driver creates and passes to the child by fd inheritance, with
+`run_token` on `Start` as the protocol authentication *(amended 2026-08-29; the `0700` directory
+and its UID-based `0600` ownership are superseded — Unix permissions check UID, not ancestry, so
+a same-UID sibling could have connected; `ADR-0016:65-70`, `spec/13-adapter-sdk-subprocess.md`
+§3)*. Everything
 Python-by-evidence (harness, `ag2.network`, `genai-prices`) lives in the data plane; everything
 Go is better at (Postgres fencing, gRPC serving, Kubernetes placement, one static binary) is
-control plane. Under checkpoint-and-kill the harness pod is already the disposable unit, so the
-sidecar is the natural shape. Cost accepted: two toolchains, two CI matrices, two release artefacts.
+control plane. Under checkpoint-and-kill the run's container is already the disposable unit, so
+one container with the driver as PID 1 is the natural shape. Cost accepted: two toolchains, two
+CI matrices, two release artefacts.
 
 The spec was already written for a non-Python implementer, which is why adopting Go needs no
-redesign of the contracts (the sidecar's operational cost is the one stated above):
+redesign of the contracts (the operational cost is the one stated above):
 
 - `spec/03-canonicalisation.md` specifies the profile in terms of **UTF-8 byte order** and an
   integers-only number domain, precisely so it does not depend on one language's `json`

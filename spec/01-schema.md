@@ -8,7 +8,7 @@ cross-tenant relationship is a constraint violation, not a silent success.
 Convention: `tenant_id BIGINT` (not UUID) because it appears in every index and
 narrower keys matter. `id` columns are `TEXT` holding a sortable ULID.
 
-**Two exceptions to the composite-FK rule, stated rather than hidden:**
+**Five exceptions to the composite-FK rule, stated rather than hidden:**
 
 1. `state_entries.scope_key` is unconstrained text, because its referent depends on
    `scope` (a principal id, a session id, or empty for app scope). A polymorphic FK is
@@ -16,6 +16,19 @@ narrower keys matter. `id` columns are `TEXT` holding a sortable ULID.
 2. `policies.scope = 'project'` is accepted by the enum but **has no referent in
    v0.1**, because `Project` is not a v0.1 resource. The API rejects it (`422`) until
    `projects` exists. Recorded here so the gap is visible rather than surprising.
+3. `channel_envelopes.audience` holds principal ids inside a JSON array, which SQL cannot
+   constrain. The hub checks membership and refuses `not_a_member`; the database does not.
+   Added 2026-08-30 with the channel DDL — see [`17-messaging.md`](17-messaging.md) §The
+   Envelope, as data.
+4. `knowledge_compilations.sources` and `resolution` hold `knowledge_sources.source_id`
+   inside a JSON array, which SQL cannot constrain. The compiler checks membership; the
+   database does not — the same shape as 3. See
+   [`16-knowledge.md`](16-knowledge.md) §Schema.
+5. `knowledge_compilations.bundle_id` / `bundle_revision` carry no FK, because a
+   compilation may name a bundle revision that is not registered here. The composite FK
+   `(tenant_id, bundle_id, bundle_revision)` to `bundles`
+   ([`10-work-bundles.md`](10-work-bundles.md) §Schema) is the closing condition, and is
+   deliberately not applied in v0.1. (16)
 
 ---
 
@@ -128,7 +141,10 @@ CREATE TABLE adapter_contracts (
     -- subprocess or TUI to adapt. The others are reserved, not supported.
     -- 'sdk_subprocess' MEANS (decided 2026-08-28/29, OQ-056 + spike 05 T2): the Go driver is
     -- PID 1 of the run's container and spawns the Python harness as a child process; the
-    -- two speak the 07 frames over a Unix socket in a 0700 dir the driver created. It is
+    -- two speak the 07 frames over an AF_UNIX socketpair the driver creates and passes to
+    -- the child by fd inheritance, with run_token on Start as the protocol authentication
+    -- (amended 2026-08-29; superseded: "a Unix socket in a 0700 dir the driver created" --
+    -- Unix permissions check UID, not ancestry; ADR-0016:65-70, spec/13). It is
     -- NOT 'cli_subprocess' (a third-party CLI driven from outside; reserved, never shipped).
     -- 'sdk_in_process' and 'sdk_sidecar' stay in the enum as reserved; neither shipped.
     integration_mode TEXT NOT NULL
@@ -166,9 +182,9 @@ CREATE TABLE runs (
     run_id         TEXT   NOT NULL,
     state          run_state NOT NULL DEFAULT 'draft',
 
-    -- intent lives ON the run for now. `Task`/routines are Tier 2 as of 2026-08-27;
-    -- `runs.task_id` arrives as a nullable FK in spec 10/11, and intent stays on the
-    -- run until then.
+    -- intent lives ON the run. `Task`/routines are Tier 2 as of 2026-08-27; `runs.task_id`
+    -- is added as a nullable FK by spec/11 (additive migration), and intent is COPIED onto
+    -- the run at firing rather than read through the task (11 §`runs.task_id`).
     agent_id       TEXT   NOT NULL,
     prompt         TEXT,
     created_by     TEXT   NOT NULL,        -- the acting principal
@@ -180,6 +196,15 @@ CREATE TABLE runs (
     pinned_payload_schema    TEXT NOT NULL,   -- the ADAPTER's own format
     checkpoint_schema_version INTEGER NOT NULL,
 
+    -- The bundle half of the pin, where the run pins one (10). Nullable as a set: a run
+    -- pins a bundle or it does not, and a half-pin is not a state 05 step 4 can compare.
+    -- The composite FK to `bundles` is an ALTER in 10, because `bundles` is created there.
+    pinned_bundle_id       TEXT,
+    pinned_bundle_revision TEXT,
+    pinned_bundle_digest   TEXT,
+    CHECK (num_nulls(pinned_bundle_id, pinned_bundle_revision, pinned_bundle_digest)
+           IN (0, 3)),
+
     FOREIGN KEY (tenant_id, pinned_adapter_identity, pinned_adapter_digest)
         REFERENCES adapter_contracts (tenant_id, identity, digest),
 
@@ -188,6 +213,7 @@ CREATE TABLE runs (
     error_detail   TEXT,
 
     rewind_before_step BIGINT,              -- logical history reduction (ADK)
+    session_id     TEXT,                    -- nullable; binds session-scoped state (16)
 
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     started_at     TIMESTAMPTZ,
@@ -219,6 +245,39 @@ CREATE INDEX runs_live ON runs (tenant_id, state)
 The two `CHECK`s encode invariants people otherwise get wrong: a terminal state
 without `ended_at`, and a `failed` run with no `error_code`.
 
+Sandbox identity is **not** run identity (`ADR-0016`:73;
+[`15-sandbox.md`](15-sandbox.md) §2). The table lives here because this document owns
+schema and the FK target is already above it; the FK points one way only, and `runs`
+gains no `sandbox_id` column — a column there would make run state depend on sandbox
+identity, which is the dependency ADR-0016 forbids.
+
+```sql
+CREATE TYPE sandbox_state AS ENUM ('creating','live','suspended','lost','destroyed');
+
+CREATE TABLE sandboxes (
+    tenant_id       BIGINT NOT NULL,
+    sandbox_id      TEXT   NOT NULL,   -- minted by the plane, opaque; never derived from
+                                       -- a provider name or a pod name
+    run_id          TEXT   NOT NULL,
+    provider        TEXT   NOT NULL,   -- 'k8s-gvisor' in v0.1
+    provider_handle TEXT,              -- the provider's own name for it. NOT an identity:
+                                       -- never a lookup key in either direction
+    state           sandbox_state NOT NULL DEFAULT 'creating',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ended_at        TIMESTAMPTZ,
+
+    PRIMARY KEY (tenant_id, sandbox_id),
+    FOREIGN KEY (tenant_id, run_id) REFERENCES runs (tenant_id, run_id),
+    CHECK ((state IN ('lost','destroyed')) = (ended_at IS NOT NULL))
+);
+
+-- One NON-TERMINAL sandbox per run. The predicate is `ended_at IS NULL`, not a state
+-- list: `suspended` is non-terminal too, and `WHERE state IN ('creating','live')` would
+-- let a run holding a suspended row acquire a second sandbox with no violation.
+CREATE UNIQUE INDEX sandboxes_one_live ON sandboxes (tenant_id, run_id)
+    WHERE ended_at IS NULL;
+```
+
 ---
 
 ## The log — append-only, single-writer by primary key
@@ -231,7 +290,10 @@ CREATE TABLE run_events (
     epoch          INTEGER NOT NULL,       -- rewind generation; see 04 and below
     event_type     TEXT   NOT NULL,        -- from the registry; see 04
     payload        JSONB  NOT NULL,
-    traceparent    TEXT,                   -- full W3C header; context rides the event
+    traceparent    TEXT   NOT NULL,        -- full W3C header; context rides the event.
+                                           -- NOT NULL since 2026-08-30 (19): a sweeper-
+                                           -- originated event opens its own root span, so
+                                           -- every append can carry one.
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     -- (tenant, run, seq) as PK is the single-writer guarantee: two concurrent
@@ -418,9 +480,18 @@ idempotency_key = sha256_hex(canon({
 ```
 
 Position rather than time, so a replay of the same logical step derives the same key
-while a genuinely different call at the same step derives a different one. Two key
-*sources* are supported (Cloudflare's explicit key, AG2's `causation_id`), but both
-feed this one column.
+while a genuinely different call at the same step derives a different one. There is
+**one derivation and no second source**: an explicit key a caller supplies — Cloudflare's,
+or one carried on an envelope ([`17-messaging.md`](17-messaging.md) §Dedupe) — is an input
+to `request_digest`, never a value written to this column. A caller-supplied string is not
+derivable from position, so admitting one as a key would give the ledger two authorities
+for one identity and put a value in the column that [§03](03-canonicalisation.md)'s
+registered `effect_key` rule cannot reproduce. `causation_id` is not a key source either:
+the derivation above contains no message field, and [§02](02-consistency.md) §Claiming and
+performing an effect requires the key be derived "never from a message id, so intent
+survives message-log retention".
+*(Amended 2026-08-30; superseded: "Two key *sources* are supported (Cloudflare's explicit
+key, AG2's `causation_id`), but both feed this one column." Both are digest inputs.)*
 
 ---
 
@@ -436,6 +507,11 @@ CREATE TABLE sessions (
     FOREIGN KEY (tenant_id, principal_id)
         REFERENCES principals (tenant_id, principal_id)
 );
+
+-- `runs.session_id` is declared with `runs` (above) and constrained here, because
+-- `sessions` is created after `runs` in this document's order.
+ALTER TABLE runs ADD CONSTRAINT runs_session_fk
+    FOREIGN KEY (tenant_id, session_id) REFERENCES sessions (tenant_id, session_id);
 
 -- Scope is IN THE KEY, so it cannot be forgotten in a WHERE clause (ADK).
 CREATE TYPE state_scope AS ENUM ('app', 'user', 'session');
@@ -727,6 +803,84 @@ CREATE TABLE run_lease_history (
     FOREIGN KEY (tenant_id, run_id) REFERENCES runs (tenant_id, run_id)
 );
 
+-- Moved here 2026-08-30 from `17-messaging.md`, on the precedent §02 records for the
+-- lease tables: DDL for one resource in two documents is how an implementer builds two
+-- tables. `17-messaging.md` names these and no longer defines them.
+CREATE TABLE channels (
+    tenant_id      BIGINT NOT NULL,
+    channel_id     TEXT   NOT NULL,
+    protocol       TEXT   NOT NULL
+                   CHECK (protocol IN ('conversation','discussion',
+                                       'consulting','workflow')),
+    state          TEXT   NOT NULL DEFAULT 'open'
+                   CHECK (state IN ('open','closed')),
+                   -- two states only, because AG2's close_channel / is_terminal() has
+                   -- two (RESULT.md §Criterion 2; hub/core.py:2907-2911 @ 90f490a)
+    depth_cap      SMALLINT NOT NULL DEFAULT 5,   -- ADR-0003: Rule.limits default
+    created_by     TEXT   NOT NULL,
+    expires_at     TIMESTAMPTZ,                   -- the default a bare envelope takes
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    closed_at      TIMESTAMPTZ,
+    max_seq        BIGINT NOT NULL DEFAULT 0,     -- the seq high-water mark. It outlives
+                                                  -- the envelope rows; see §Retention.
+
+    PRIMARY KEY (tenant_id, channel_id),
+    FOREIGN KEY (tenant_id, created_by)
+        REFERENCES principals (tenant_id, principal_id),
+    CHECK ((state = 'closed') = (closed_at IS NOT NULL))
+);
+
+-- The per-channel WAL, one row per envelope. Every ACCEPTED envelope is recorded
+-- in full regardless of who was notified: audit scope is deliberately wider than
+-- delivery scope (ADR-0003, from AG2's "audit + debug" comment).
+CREATE TABLE channel_envelopes (
+    tenant_id      BIGINT NOT NULL,
+    channel_id     TEXT   NOT NULL,
+    seq            BIGINT NOT NULL,        -- assigned INSIDE the insert, from channels.max_seq
+    envelope_id    TEXT   NOT NULL,        -- stamped on accept, never by the sender
+    sender_id      TEXT   NOT NULL,
+    audience       JSONB,                  -- NULL broadcasts in-channel; array targets
+    event_type     TEXT   NOT NULL,
+    event_data     JSONB  NOT NULL,
+    causation_id   TEXT,                   -- threading ONLY; see §Dedupe
+    run_id         TEXT,
+    task_id        TEXT,                   -- the routine, when the post came from one (11).
+                                           -- The composite FK is added by 11's own DDL,
+                                           -- because `tasks` is created there.
+    traceparent    TEXT,                   -- ADR-0003 carries trace_id; renamed 2026-08-27
+                                           -- to the full W3C header value, as in run_events (04)
+    priority       TEXT   NOT NULL DEFAULT 'normal'
+                   CHECK (priority IN ('background','normal','urgent')),
+    depth          SMALLINT NOT NULL DEFAULT 0 CHECK (depth BETWEEN 0 AND 8),
+    idempotency_key TEXT,                  -- carried for an externally-triggered effect
+    ttl_seconds    INTEGER,
+    accepted_fence BIGINT NOT NULL,        -- the channel-lease fence held at accept
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    PRIMARY KEY (tenant_id, channel_id, seq),
+    UNIQUE (tenant_id, envelope_id),
+    FOREIGN KEY (tenant_id, channel_id) REFERENCES channels (tenant_id, channel_id),
+    FOREIGN KEY (tenant_id, sender_id)
+        REFERENCES principals (tenant_id, principal_id),
+    FOREIGN KEY (tenant_id, run_id) REFERENCES runs (tenant_id, run_id),
+    CHECK (audience IS NULL OR jsonb_typeof(audience) = 'array')
+);
+
+-- Per-subscriber progress. At-least-once falls out of this table: the cursor moves
+-- only after the subscriber has durably handled the envelope.
+CREATE TABLE channel_cursors (
+    tenant_id      BIGINT NOT NULL,
+    channel_id     TEXT   NOT NULL,
+    subscriber_id  TEXT   NOT NULL,
+    acked_seq      BIGINT NOT NULL DEFAULT 0,
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    PRIMARY KEY (tenant_id, channel_id, subscriber_id),
+    FOREIGN KEY (tenant_id, channel_id) REFERENCES channels (tenant_id, channel_id),
+    FOREIGN KEY (tenant_id, subscriber_id)
+        REFERENCES principals (tenant_id, principal_id)
+);
+
 -- One hub per channel (see 02). Same mechanism, different resource.
 CREATE TABLE channel_leases (
     tenant_id      BIGINT NOT NULL,
@@ -735,14 +889,16 @@ CREATE TABLE channel_leases (
     fence_token    BIGINT NOT NULL,
     acquired_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at     TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (tenant_id, channel_id)
+    PRIMARY KEY (tenant_id, channel_id),
+    FOREIGN KEY (tenant_id, channel_id) REFERENCES channels (tenant_id, channel_id)
 );
 
 CREATE TABLE channel_lease_history (
     tenant_id      BIGINT NOT NULL,
     channel_id     TEXT   NOT NULL,
     max_fence_token BIGINT NOT NULL,
-    PRIMARY KEY (tenant_id, channel_id)
+    PRIMARY KEY (tenant_id, channel_id),
+    FOREIGN KEY (tenant_id, channel_id) REFERENCES channels (tenant_id, channel_id)
 );
 ```
 
@@ -761,7 +917,19 @@ GRANT SELECT, INSERT ON run_events TO app_role;   -- no UPDATE, no DELETE
 GRANT SELECT, INSERT ON agent_definitions TO app_role;   -- immutable artifacts
 GRANT SELECT, INSERT, UPDATE ON runs, approvals, effect_ledger TO app_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON run_leases TO app_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON sandboxes TO app_role;
+
+-- The channel tables are the messaging layer's, and the grant IS the enforcement of
+-- [`17-messaging.md`](17-messaging.md) §Retention: no correctness predicate outside
+-- that layer may read the envelope log, so `app_role` is given no SELECT on it.
+GRANT SELECT, INSERT ON channel_envelopes TO messaging_role;   -- no UPDATE, no DELETE
+GRANT SELECT, INSERT, UPDATE ON channels, channel_cursors TO messaging_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON channel_leases TO messaging_role;
 ```
+
+Each table `spec/10`-`spec/18` creates issues its own grants beside its own
+`CREATE TABLE`, which is the only order in which they apply; this section states the
+discipline they follow, not the statements.
 
 ## Migration discipline
 

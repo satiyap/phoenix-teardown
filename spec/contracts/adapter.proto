@@ -36,6 +36,16 @@ message Start {
                                      // parent span and the sampled flag.
   string tracestate            = 6;  // W3C tracestate, may be empty
   Deadline deadline            = 7;
+  string run_token             = 8;  // protocol authentication; minted per spawn by the
+                                     // driver on the socketpair half. ADR-0016:71, spec/13 §3
+  uint64 turn_ordinal_seed     = 9;  // count of LIVE cost.usage.recorded events for
+                                     // (tenant_id, run_id) -- events superseded by a rewind
+                                     // are not counted -- with the resume replaying from the
+                                     // checkpoint's own position, so a turn recorded after
+                                     // the checkpoint is re-derived rather than re-counted.
+                                     // Expressible over the log alone: nothing parses
+                                     // resumed_payload. The adapter seeds its turn counter
+                                     // from it and increments. spec/12 §5
 }
 
 message Input  { bytes data = 1; }
@@ -83,9 +93,10 @@ message AdapterFrame {
   }
 }
 
-// FOUR frames MUST be typed, because the control plane makes decisions about
-// them: ToolCall inbound, ToolResult and ToolDenied outbound, and the Checkpoint
-// ENVELOPE. The rest stay opaque. See "What must be typed, and why" below.
+// FIVE frames MUST be typed, because the control plane makes decisions about
+// them: ToolCall inbound, ToolResult and ToolDenied outbound, the Checkpoint
+// ENVELOPE, and Usage (the control plane prices it; see spec/18).
+// The rest stay opaque. See "What must be typed, and why" below.
 message Output {
   string step_id = 1;      // stable across replay; feeds logical_step_path
 
@@ -94,10 +105,25 @@ message Output {
     Opaque   thought   = 3;   // display only
     ToolCall tool_call = 4;   // TYPED: a REQUEST to execute, not an execution
     Checkpoint checkpoint = 5; // envelope typed, payload opaque
+    Usage    usage     = 6;   // TYPED: one model request's token counts (spec/18)
   }
 }
 
 message Opaque { bytes data = 1; }
+
+// Emitted once per model request as the harness observes it; `requests` counts
+// the provider round-trips behind that observation when the SDK retries
+// internally (normally 1). The harness reports USAGE and never money: pricing
+// is a control-plane act against a pinned snapshot (spec/18).
+message Usage {
+  string provider           = 1;   // e.g. "anthropic"
+  string model_ref          = 2;   // the provider's own model identifier
+  uint64 input_tokens       = 3;
+  uint64 output_tokens      = 4;
+  uint64 cache_read_tokens  = 5;
+  uint64 cache_write_tokens = 6;
+  uint32 requests           = 7;   // provider round-trips behind this observation; normally 1
+}
 
 message ToolCall {
   string tool_name  = 1;   // must match a tool in the pinned definition

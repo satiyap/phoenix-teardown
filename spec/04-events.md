@@ -49,7 +49,7 @@ carry arbitrary user data; the *type* may not be invented by a caller. An unknow
 
 | `event_type` | payload | folds to |
 |---|---|---|
-| `run.created` | `{agent_id, prompt, created_by, pin{...}}` | `state=draft` |
+| `run.created` | `{agent_id, prompt, created_by, pin{...}, task_id?, firing_key?}` | `state=draft` |
 | `run.queued` | `{}` | `state=queued` |
 | `run.started` | `{adapter_identity, lease_fence}` | `state=running`, `started_at` |
 | `run.progressed` | `{note?}` | `last_activity_at` |
@@ -65,6 +65,10 @@ carry arbitrary user data; the *type* may not be invented by a caller. An unknow
 is not a fact, and the owner may decline. `state=cancelling` is the honest interval
 between them (HumanLayer's `interrupting`).
 
+`task_id` and `firing_key` are present on `run.created` exactly when the Run was created by
+a routine firing ([`11-routines.md`](11-routines.md) §Idempotent firing), and absent
+otherwise — absent, never `null`.
+
 ### Pin and compatibility
 
 | `event_type` | payload | folds to |
@@ -72,9 +76,13 @@ between them (HumanLayer's `interrupting`).
 | `run.incompatible` | `{field, pinned_value, current_value}` | `state=incompatible`, `ended_at` |
 | `run.artifact_missing` | `{digest}` | `state=failed`, `error_code=artifact_missing` |
 | `run.artifact_corrupted` | `{digest, recomputed}` | `state=failed`, `error_code=artifact_corrupted` |
+| `run.knowledge_missing` | `{digest}` | `state=failed`, `error_code=knowledge_missing` |
+| `run.knowledge_corrupted` | `{digest, path, recomputed}` | `state=failed`, `error_code=knowledge_corrupted` |
 
-Three distinct events because the operator remedies differ — restore the prior
-definition, restore the artifact, or re-fetch after an integrity incident.
+Five distinct events because the operator remedies differ — restore the prior
+definition, restore the artifact, re-fetch after an integrity incident, recompile and
+re-register the knowledge package, or re-materialise the mount and investigate it
+([`16-knowledge.md`](16-knowledge.md) §Materialisation).
 
 ### Effects
 
@@ -89,6 +97,23 @@ definition, restore the artifact, or re-fetch after an integrity incident.
 `effect.replayed` records that a duplicate was **recognised and not executed** — the
 `accepted: false` signal from Cloudflare, made durable. Without it, a replay is
 invisible in the log and looks like nothing happened.
+
+### Credentials
+
+| `event_type` | payload |
+|---|---|
+| `credential.exchanged` | `{credential_id, issuance_id, flow, subject_principal_id, delegation_depth}` |
+| `credential.refreshed` | `{credential_id, issuance_id, refresh_count}` |
+| `credential.placeholder_rejected` | `{placeholder_prefix, host, reason}` |
+
+Three types and not one, because the operator remedies differ: re-exchange, re-refresh, or
+investigate a placeholder presented where it was not minted to be used
+([`14-credentials.md`](14-credentials.md)). All three are **run-scoped**, so they fit
+`run_events`' foreign key. Credential *creation* and *revocation* have no run and therefore
+have no home here; that gap is an open question against the admin audit surface, not an
+omission from this registry. No payload names `secret_ref`, `material_ref`, or a
+placeholder's value — only its prefix, which is what makes the rejection diagnosable
+without making the log a place to find secrets.
 
 ### Human interaction
 
@@ -120,9 +145,51 @@ policy; on an ask it names every policy that asked, in order.
 
 | `event_type` | payload |
 |---|---|
-| `adapter.frame` | `{kind, data}` — one frame from the stream (§07) |
+| `adapter.frame` | `{kind, data}` — one frame from the stream (§07). `data` excludes `Start.run_token`, which is minted per spawn and is never an input to the fold ([`13-adapter-sdk-subprocess.md`](13-adapter-sdk-subprocess.md) §3) |
 | `adapter.checkpointed` | `{payload_ref, payload_schema_digest}` |
 | `adapter.ended` | `{terminal_state, error?}` |
+
+### Cost
+
+| `event_type` | payload |
+|---|---|
+| `cost.snapshot.pinned` | `{price_snapshot_digest, source, source_version, fence_token}` |
+| `cost.usage.recorded` | `{fence_token, step_id, provider, model_ref, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, requests}` |
+| `cost.usage.priced` | `{usage_seq, price_snapshot_digest, amount_nanos, currency}` |
+| `cost.usage.unpriced` | `{usage_seq, price_snapshot_digest?, unpriced_reason}` |
+
+Usage and price are separate events because usage is a fact the harness observed and a
+price is a judgement made against a dataset that changes — the same split as
+`run.cancel_requested` / `run.cancelled`. Exactly one of `cost.usage.priced` /
+`cost.usage.unpriced` follows each `cost.usage.recorded`, in the same transaction.
+`snapshot_unresolved` is the only `unpriced_reason` that carries no digest, because there
+is none to carry. All money in a payload is an integer ([§03](03-canonicalisation.md)
+rejects non-integral floats), and no cost event folds onto `runs.state`
+([`18-cost.md`](18-cost.md)).
+
+### Sandbox
+
+| `event_type` | payload | folds to |
+|---|---|---|
+| `sandbox.created` | `{sandbox_id, provider, target}` | — |
+| `sandbox.suspended` | `{sandbox_id, reason}` | — |
+| `sandbox.resumed` | `{sandbox_id, from_sandbox_id}` | — |
+| `sandbox.destroyed` | `{sandbox_id}` | — |
+| `sandbox.lost` | `{sandbox_id, provider_detail}` | — |
+
+Every sandbox event folds to **nothing** in run state ([`15-sandbox.md`](15-sandbox.md) §2).
+A folding rule here would make run state depend on sandbox identity, which is the dependency
+ADR-0016 forbids: a resumed sandbox is not a resumed run.
+
+### State
+
+| `event_type` | payload |
+|---|---|
+| `state.written` | `{scope, scope_key, key, value_digest}` |
+| `state.deleted` | `{scope, scope_key, key}` |
+
+Neither folds onto `runs.state`, and the payload carries the value's **digest**, not the
+value — the `state_entries` row is the value ([`16-knowledge.md`](16-knowledge.md) §State).
 
 ---
 

@@ -30,24 +30,27 @@ deferred. **Amended 2026-08-27:** `Task` was listed here as deferred and is now 
 | 07 | [`07-adapter-protocol.md`](07-adapter-protocol.md) | The southbound stream contract |
 | 08 | [`08-conformance.md`](08-conformance.md) | The offline bench, what CI enforces, and the required invariant tests |
 | 09 | [`09-decisions.md`](09-decisions.md) | **Seven** design questions, decided with reasoning |
+| 10 | [`10-work-bundles.md`](10-work-bundles.md) | Work bundles: the six nouns, the compiled package, and how an Action lands on the effect ledger |
+| 11 | [`11-routines.md`](11-routines.md) | Routines/`Task`: schedule or trigger → Run, firing idempotency, delegation |
+| 12 | [`12-harness.md`](12-harness.md) | The policy over Pydantic AI's seams: history, delegation, hooks, context assembly, checkpoint payload |
+| 13 | [`13-adapter-sdk-subprocess.md`](13-adapter-sdk-subprocess.md) | The `sdk_subprocess` adapter: driver/harness process model, record framing, resume checks |
+| 14 | [`14-credentials.md`](14-credentials.md) | `Credential`, the three flows, exchanger/refresher, the secretless egress contract |
+| 15 | [`15-sandbox.md`](15-sandbox.md) | Sandbox: provider interface, the three boundaries, sandbox identity, loss |
+| 16 | [`16-knowledge.md`](16-knowledge.md) | Knowledge packages and `state_entries`: layers, compilation, digest participation, scopes |
+| 17 | [`17-messaging.md`](17-messaging.md) | Messaging: the compatibility layer over `ag2.network`, the Envelope as data, channel leases |
+| 18 | [`18-cost.md`](18-cost.md) | Usage capture, pricing from a pinned `genai-prices` snapshot, fail-closed-on-unpriced, attribution |
+| 19 | [`19-telemetry.md`](19-telemetry.md) | OTel: the `phoenix.*` namespace, span and metric inventory, the version pins, propagation, sampling |
 
 ## Not yet specified — the rest of the v0.1 shipment
 
-Each is in `v01-boundary.md` Tier 1–3 and is **not** covered by documents 01–08. Listing
-them is the difference between an incomplete spec and a spec that pretends otherwise.
+**None, as of 2026-08-30.** All ten areas this table listed are settled by documents 10-19
+above, and `synthesis/scope.yaml`'s `owed_specs` is empty to match. What remains open is
+recorded question by question in [`../open-questions.md`](../open-questions.md), and in
+each document's own *What this does not guarantee* section — which is a different claim
+from "unspecified", and is made where the specification that raises it lives.
 
-| Area | Boundary tier | Needs |
-|---|---|---|
-| `Credential` with separate exchanger/refresher | 1 | resource schema, OAuth2 flows, the secretless egress-proxy contract |
-| Sandbox — three boundaries | 2 | provider interface, egress guard blocklist, storage-boundary rule |
-| Knowledge (filesystem skills) | 2 | layout, resolution order, digest participation |
-| Messaging (`ag2.network`) | 3 | the compatibility layer's public surface, channel-lease integration |
-| Cost measurement (`genai-prices`) | 3 | usage capture, the fail-closed-on-unpriced rule |
-| **Pydantic AI adapter** | 1 | the concrete mapping from §07 frames onto Pydantic AI. Tools are declared through `ExternalToolset`, so **the SDK is never given an executable body** — there is no executor to disable *(corrected 2026-08-27 by spike 06, which found the "disable the executor" framing described a mechanism we do not use)*. One harness, not two |
-| OTel semantics | 2 | span names, attribute namespace, semconv version |
-| **`tasks` / `routines`** | 2 | schedule *or* trigger → Run. The unit customers buy, un-deferred 2026-08-27. Owner: spec 10 or 11. Needs the resource, the trigger taxonomy, and the rule that a routine creates Runs but never becomes one |
-| **Agent harness (Pydantic AI)** (spec 12) | 1 | **the policy over Pydantic AI's seams**, not the seams themselves. It supplies `capabilities/hooks.py`, `process_history.py` (compaction), `wrapper.py`, `toolsets/` (nested agents) and `CapabilityPosition` (ordering). We own: which history strategy runs and when, how a delegated agent inherits a `Principal` and a pinned bundle, which hooks write to the effect ledger, and context assembly from the compiled bundle. *(Corrected 2026-08-27: this said these primitives are "ours to build"; they exist — the integration policy is ours.)* |
-| **Work bundles** (`10-work-bundles.md`) | 1–2 | `WorkBundle`, `Resource`, `Action`, `ActionReceipt`, `Verifier`, and `effect_class ∈ {observation, idempotent_mutation, non_idempotent_mutation, long_running_operation}`. The domain-`type` → behavioural-role table is **bundle-supplied**, never core. A verifier must be pinned by a **different publisher** than the bundle it verifies (spike 04 finding 1). Freshness is **evidence**, not bundle state (finding 2). `indeterminate` retains `external_operation_id` as a recovery handle and inspection is a **separate Action** (finding 4) |
+For the ten rows this table used to carry and the document that closed each,
+see `synthesis/scope-reconciliation.md` §8.
 
 **Sequencing note.** Documents 01–08 are the spine because everything above depends on
 them: a credential is held by a `Principal`, a sandbox is entered by a `Run`, a cost is

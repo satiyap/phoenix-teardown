@@ -111,7 +111,7 @@ answered, all six synthesis deliverables final.
 | 5 Synthesis | domain model, reference architecture, build/reuse map, v0.1 boundary |
 | 6 Handoff | `DESIGN.md` + developer journey |
 | 7 Spikes | AG2 storage swap, definition pin, **Postgres concurrency**, **work-bundle generality**, **tool interception** — 5 spikes, **181 gate assertions**, verification rules |
-| 8 Spec | **10 documents** + compiling `.proto` and OpenAPI contracts; 52 required invariant tests with negative controls |
+| 8 Spec | **20 documents** + compiling `.proto` and OpenAPI contracts; 74 required invariant tests with negative controls |
 
 **How the assertion count is derived.** The sum of the `**Gate assertions: n**` line each
 spike's `RESULT.md` declares; `make check` asserts that sum against the table above, the
@@ -183,7 +183,7 @@ the only evidence that counts.
 
 ### Read next
 
-**To build: [`spec/`](spec/)** — the implementation specification (8 documents).
+**To build: [`spec/`](spec/)** — the implementation specification (20 documents).
 **To understand why: [`DESIGN.md`](DESIGN.md)** — the v0.1 architecture and design document,
 including the ideal developer journey. It is the handoff artefact; everything below is
 the evidence behind it.

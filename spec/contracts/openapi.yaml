@@ -26,6 +26,10 @@ tags:
     description: admin only
   - name: adapters
     description: admin only
+  - name: knowledge
+  - name: tasks
+  - name: credentials
+    description: admin only
 components:
   securitySchemes:
     agentToken:
@@ -136,6 +140,59 @@ components:
         extensions:
           type: array
           items: { $ref: '#/components/schemas/ExtensionBinding' }
+        knowledge_package_digest:
+          type: string
+          description: |
+            Optional. When declared it participates in the definition digest
+            (spec/16-knowledge.md Digest participation). ABSENT when undeclared,
+            never null, so no existing digest moves.
+        state_schema:
+          type: object
+          additionalProperties: true
+          description: Optional; participates in the definition digest when declared.
+    Task:
+      type: object
+      required: [name, agent_id, trigger_kind]
+      additionalProperties: false
+      description: |
+        A routine. It CREATES Runs and never becomes one (ADR-0002). `event` is reserved
+        in `trigger_kind` and refused 422 until an observable surface exists; `allow` is
+        reserved in `overlap_policy` for the same reason.
+      properties:
+        task_id:               { type: string, readOnly: true }
+        name:                  { type: string }
+        agent_id:              { type: string }
+        prompt:                { type: string }
+        state:                 { type: string, enum: [active, paused, disabled], readOnly: true }
+        trigger_kind:          { type: string, enum: [cron, manual, webhook, event] }
+        cron_expression:       { type: string, description: 5-field; immutable after create }
+        timezone:              { type: string, description: IANA; immutable after create }
+        overlap_policy:        { type: string, enum: [skip, queue, allow] }
+        misfire_grace_seconds: { type: integer, minimum: 0, maximum: 86400 }
+    Credential:
+      type: object
+      required: [name, kind, flow, egress_host, holder_principal_id]
+      additionalProperties: false
+      description: |
+        Southbound material an agent presents to a customer system. NOT a northbound
+        credential class (spec/06 Two credential classes) and NOT an identity
+        (ADR-0007 amendment). No property here names or points at secret material:
+        `secret_ref`, `material_ref` and placeholder values are unrepresentable in this
+        schema, which is why no route can return one.
+      properties:
+        credential_id:       { type: string, readOnly: true }
+        name:                { type: string }
+        kind:                { type: string, enum: [oauth2, api_key, mtls] }
+        flow:
+          type: string
+          enum: [as_itself, user_federation, on_behalf_of_token_exchange]
+        egress_host:
+          type: string
+          description: |
+            Exactly one host. It is what makes the proxy's leak guard bindable, and a
+            value naming a control-plane host is refused at create.
+        holder_principal_id: { type: string }
+        revoked_at:          { type: string, format: date-time, readOnly: true, nullable: true }
     DigestResponse:
       type: object
       required: [digest, canon_profile]
@@ -659,3 +716,323 @@ paths:
                             properties:
                               value:      { type: string, enum: [VALUE_UNKNOWN, TRUE, FALSE] }
                               confidence: { type: string, enum: [CONFIDENCE_UNKNOWN, ASSERTED, VERIFIED] }
+  /v1/knowledge-packages:
+    post:
+      tags: [knowledge]
+      operationId: registerKnowledgePackage
+      security: [{ adminToken: [] }]
+      summary: Compile-and-register; the digest is DERIVED, never client-supplied
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bundle_revision, sources]
+              properties:
+                bundle_revision: { type: string }
+                sources:
+                  type: array
+                  items:
+                    type: object
+                    required: [source_id, commit_sha]
+                    properties:
+                      source_id:  { type: string }
+                      commit_sha: { type: string }
+      responses:
+        '201':
+          description: compiled and registered
+          content: { application/json: { schema: { $ref: '#/components/schemas/DigestResponse' } } }
+        '200':
+          description: these layers already compiled to these bytes
+          content: { application/json: { schema: { $ref: '#/components/schemas/DigestResponse' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/knowledge-packages/{digest}:
+    get:
+      tags: [knowledge]
+      operationId: getKnowledgePackage
+      parameters: [{ name: digest, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200':
+          description: the manifest projection
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [digest, files]
+                properties:
+                  digest: { type: string }
+                  files:
+                    type: array
+                    items:
+                      type: object
+                      required: [path, digest]
+                      properties:
+                        path:   { type: string }
+                        digest: { type: string }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
+  /v1/runs/{id}/cost:
+    get:
+      tags: [runs]
+      operationId: getRunCost
+      summary: Totals for one run; the lower bound and the unpriced count travel together
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      responses:
+        '200':
+          description: |
+            `priced_nanos_lower_bound` and `unpriced_calls` are BOTH required. A total
+            presented without the unpriced count reads as the run's cost
+            (spec/18-cost.md).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [priced_nanos_lower_bound, currency, unpriced_calls, calls,
+                           input_tokens, output_tokens]
+                properties:
+                  priced_nanos_lower_bound: { type: integer }
+                  currency:                 { type: string, description: ISO 4217 }
+                  unpriced_calls:           { type: integer }
+                  calls:                    { type: integer }
+                  input_tokens:             { type: integer }
+                  output_tokens:            { type: integer }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
+  /v1/tasks:
+    post:
+      tags: [tasks]
+      operationId: createTask
+      security: [{ adminToken: [] }]
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKeyRequired' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Task' }
+      responses:
+        '201':
+          description: created
+          content: { application/json: { schema: { $ref: '#/components/schemas/Task' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: |
+            `trigger_kind_unsupported` (an `event` trigger has no referent in v0.1) or
+            `overlap_policy_unsupported` (`allow` is reserved and has no defined
+            concurrency behaviour). spec/11-routines.md.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    get:
+      tags: [tasks]
+      operationId: listTasks
+      responses:
+        '200':
+          description: the routines this tenant has registered
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Task' }
+  /v1/tasks/{id}:
+    patch:
+      tags: [tasks]
+      operationId: updateTask
+      security: [{ adminToken: [] }]
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      description: |
+        `prompt`, `overlap_policy` and `misfire_grace_seconds` only. `cron_expression`
+        and `timezone` are inputs to the firing key, so changing one would rename every
+        future tick and reopen ticks already decided.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                prompt:                { type: string }
+                overlap_policy:        { type: string, enum: [skip, queue] }
+                misfire_grace_seconds: { type: integer, minimum: 0, maximum: 86400 }
+      responses:
+        '200':
+          description: updated
+          content: { application/json: { schema: { $ref: '#/components/schemas/Task' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: '`schedule_immutable`: a schedule field was named.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    get:
+      tags: [tasks]
+      operationId: getTask
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      responses:
+        '200':
+          description: the routine
+          content: { application/json: { schema: { $ref: '#/components/schemas/Task' } } }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
+  /v1/tasks/{id}/pause:
+    post:
+      tags: [tasks]
+      operationId: pauseTask
+      security: [{ adminToken: [] }]
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      responses:
+        '200':
+          description: state=paused
+          content: { application/json: { schema: { $ref: '#/components/schemas/Task' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/tasks/{id}/resume:
+    post:
+      tags: [tasks]
+      operationId: resumeTask
+      security: [{ adminToken: [] }]
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      responses:
+        '200':
+          description: state=active
+          content: { application/json: { schema: { $ref: '#/components/schemas/Task' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/tasks/{id}/disable:
+    post:
+      tags: [tasks]
+      operationId: disableTask
+      security: [{ adminToken: [] }]
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      responses:
+        '200':
+          description: state=disabled
+          content: { application/json: { schema: { $ref: '#/components/schemas/Task' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/tasks/{id}/fire:
+    post:
+      tags: [tasks]
+      operationId: fireTask
+      security: [{ adminToken: [] }]
+      description: |
+        The Idempotency-Key is ALSO the firing key's `value` (source `manual`), and the
+        task_firings record outlives the 24h idempotency retention. Past that window a
+        reused key REPLAYS the recorded firing (200) rather than 422: the route carries
+        no body beyond the task it names, so a reused key and a changed body cannot be
+        told apart. spec/11-routines.md.
+      parameters:
+        - { $ref: '#/components/parameters/RunId' }
+        - { $ref: '#/components/parameters/IdempotencyKeyRequired' }
+      responses:
+        '201':
+          description: fired; a Run was created in the same transaction as the firing row
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [firing_key, run_id]
+                properties:
+                  firing_key: { type: string }
+                  run_id:     { type: string }
+        '200':
+          description: this firing key was already decided; the recorded firing is replayed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [firing_key, run_id]
+                properties:
+                  firing_key: { type: string }
+                  run_id:     { type: string }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/tasks/{id}/firings:
+    get:
+      tags: [tasks]
+      operationId: listTaskFirings
+      parameters:
+        - { $ref: '#/components/parameters/RunId' }
+        - { name: since, in: query, required: false, schema: { type: string } }
+      responses:
+        '200':
+          description: the decided ticks, append-only
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [firing_key, outcome]
+                      properties:
+                        firing_key: { type: string }
+                        outcome:    { type: string }
+                        run_id:     { type: string }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
+  /v1/credentials:
+    post:
+      tags: [credentials]
+      operationId: createCredential
+      security: [{ adminToken: [] }]
+      description: |
+        REFUSES a row whose `egress_host` names a control-plane host
+        (422 `credential_targets_control_plane`). That refusal is the mechanism behind
+        spec/14's "a credential cannot be minted against the control plane"; without it
+        the rule is prose. No response on this resource EVER carries `secret_ref`,
+        `material_ref`, or a placeholder value.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Credential' }
+      responses:
+        '201':
+          description: created
+          content: { application/json: { schema: { $ref: '#/components/schemas/Credential' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: '`credential_targets_control_plane`'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    get:
+      tags: [credentials]
+      operationId: listCredentials
+      security: [{ adminToken: [] }]
+      responses:
+        '200':
+          description: credentials, without any pointer to material
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Credential' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/credentials/{id}:
+    get:
+      tags: [credentials]
+      operationId: getCredential
+      security: [{ adminToken: [] }]
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      responses:
+        '200':
+          description: the credential, without any pointer to material
+          content: { application/json: { schema: { $ref: '#/components/schemas/Credential' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
+  /v1/credentials/{id}/revoke:
+    post:
+      tags: [credentials]
+      operationId: revokeCredential
+      security: [{ adminToken: [] }]
+      description: |
+        Revocation is a STATE, never a delete (spec/01-schema.md:52): issuances stay
+        readable, which is what makes "what did this reach, and when did it stop"
+        answerable.
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      responses:
+        '200':
+          description: revoked_at set
+          content: { application/json: { schema: { $ref: '#/components/schemas/Credential' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }

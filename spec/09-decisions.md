@@ -1,9 +1,10 @@
 # 09 — Open design questions, decided
 <!-- status: final -->
 
-Six questions raised in review of the first spec draft. Each gets a decision and its
+Seven questions raised in review of the first spec draft. Each gets a decision and its
 reasoning, because leaving them implicit means an implementer guesses — and two of them
-have answers that are not obvious.
+have answers that are not obvious. *(Amended 2026-08-30: this said "Six" over seven
+numbered sections; `00-overview.md` said seven. The count was wrong, not the document.)*
 
 ---
 
@@ -131,7 +132,9 @@ whole v0.1 specification was not.
 
 ## 6. Which adapter messages must be typed?
 
-**Exactly four, and no more.** §07 gives the shapes; this is the rule for deciding.
+**Exactly five, and no more.** §07 gives the shapes; this is the rule for deciding.
+*(Amended 2026-08-30: this said "Exactly four" before [`18-cost.md`](18-cost.md) added the
+`Usage` frame under this section's own test; the rule is unchanged, the count is not.)*
 
 A frame must be typed **iff the control plane makes a decision about it.**
 
@@ -141,6 +144,7 @@ A frame must be typed **iff the control plane makes a decision about it.**
 | `ToolResult` | **yes** | settle the claim |
 | `ToolDenied` (outbound) | **yes** | tell the adapter it was refused, and why |
 | `Checkpoint` **envelope** | **yes** | pin `payload_schema_digest` |
+| `Usage` (outbound) | **yes** | price the model call against the pinned snapshot: neither the provider, the model identifier nor the token classes are derivable from opaque bytes (spec/18) |
 | `Checkpoint` **payload** | no | opaque — the adapter's own format |
 | `text`, `thought` | no | display only |
 | `Start.config` | no | opaque — the control plane must not parse adapter config |
