@@ -256,6 +256,19 @@ def main() -> int:
               "scope control did not fire")
         sy.write_text(saved_sy)
 
+        # OQ-054 (2026-08-30): scope.yaml's `harness` key must match spec/07's stated
+        # pin. Without this control the check could pass by reading a key it never
+        # compares against anything -- exactly the hole OQ-054 was raised over.
+        sy2 = base / "synthesis" / "scope.yaml"
+        saved_sy2 = sy2.read_text()
+        sy2.write_text(saved_sy2.replace("harness: 'pydantic-ai 2.35.0'",
+                                          "harness: 'LangGraph 9.9.9'", 1))
+        out = run_full(base)
+        check("a harness key that disagrees with spec/07's pin fails the scope check",
+              "harness=" in out and "LangGraph 9.9.9" in out,
+              "harness-pin control did not fire")
+        sy2.write_text(saved_sy2)
+
         # empty pattern file must not silently pass
         pf = base / "tools" / "superseded-patterns.txt"
         saved = pf.read_text()

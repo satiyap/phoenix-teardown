@@ -64,10 +64,17 @@ its checker. A `Verifier` is **not** a bundle node — it is a row in `verifiers
 own digest, signature and `published_by` — and `bundle_nodes` carries both publishers as
 columns, each pinned by a composite foreign key, so one `CHECK` compares two values the
 database vouches for, the redundancy `approvals.decided_by_kind` uses in `01`. That is
-structural **for a verifier declared on a bundle node**. The other path —
-`action_receipts.verifier_digest`, the verifier that actually graded a given `Action` — is
-**unknown — OQ**: the receipt names a verifier by digest with no relation to the publisher
-of the bundle whose executable it graded, so finding 1's co-publication is reachable there.
+structural **for a verifier declared on a bundle node**. **Amended 2026-08-30 (OQ-086): the
+customer nominates the verifier publisher** — not a first-party verifier registry we operate
+— so onboarding a bundle must produce a distinct, customer-designated `verifiers.published_by`
+before any of that bundle's graded results are trusted; a bundle with no nominated verifier
+publisher has no independent grading.
+
+The other path — `action_receipts.verifier_digest`, the verifier that actually graded a given
+`Action` — was **unknown — OQ**: the receipt named a verifier by digest with no relation to
+the publisher of the bundle whose executable it graded, so finding 1's co-publication was
+reachable there. **Amended 2026-08-30 (OQ-087): fixed, with a trigger** — see
+§Verifier independence on the receipt path.
 
 ## Freshness is evidence, never bundle state
 
@@ -96,7 +103,8 @@ CREATE TYPE effect_class AS ENUM (
     'long_running_operation'); -- even ACCEPTANCE is unknown
 -- finding 4 for 'inspects'; 'verifies' is the same shape applied to
 -- VerifierVerdict (map_bundle.py:146 @ abfb206)
-CREATE TYPE action_relation   AS ENUM ('inspects','verifies');
+-- 'retries' added 2026-08-30 (OQ-088): points a re-attempt Action at its predecessor.
+CREATE TYPE action_relation   AS ENUM ('inspects','verifies','retries');
 CREATE TYPE transport_outcome AS ENUM ('response','timeout','disconnect');
 CREATE TYPE verifier_verdict  AS ENUM ('pass','fail','unverified');
 
@@ -178,11 +186,18 @@ CREATE TABLE bundle_nodes (
     -- Content the model reads and code the platform executes must not be the same
     -- artifact. `16-knowledge.md` §Layers states the rule; it is enforced here, so a
     -- both-roles node never reaches the compiler (16 compiles what this table admits).
+    -- Relaxed 2026-08-30 (OQ-076, amended): the real bundle carries 150 role assignments
+    -- over 133 nodes, so a node MAY carry several roles -- the blanket refusal was too
+    -- strict for that. The rule narrows to the literal artifact-identity conflict this
+    -- comment states: only the 'executable' role (an executable body) is mutually
+    -- exclusive with a content role. 'executor' and 'verifier' may now co-occur with one,
+    -- because neither names an artifact the model reads AS knowledge (an 'executor' is a
+    -- platform-side role over other nodes; a 'verifier' is graded by its own independent-
+    -- publisher CHECK above, a different risk).
     CONSTRAINT node_roles_are_content_or_executable
         CHECK (NOT (roles && ARRAY['knowledge','procedure','template',
                                    'resource_descriptor']::behavioural_role[]
-                AND roles && ARRAY['executable','executor',
-                                   'verifier']::behavioural_role[]))
+                AND roles && ARRAY['executable']::behavioural_role[]))
 );
 CREATE INDEX bundle_nodes_by_role ON bundle_nodes USING GIN (roles);
 CREATE TABLE actions (          -- status, claim, lease, request_digest and
@@ -201,8 +216,8 @@ CREATE TABLE actions (          -- status, claim, lease, request_digest and
     bundle_revision   TEXT,
     executable_path   TEXT,
     executable_digest TEXT,
-    relation             action_relation,  -- an inspection or a verification is
-    relates_to_action_id TEXT,             -- its own Action (finding 4)
+    relation             action_relation,  -- an inspection, a verification or a retry is
+    relates_to_action_id TEXT,             -- its own Action (finding 4; 'retries' added 2026-08-30)
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, action_id),
     UNIQUE (tenant_id, idempotency_key),         -- one Action per ledger row
@@ -219,7 +234,9 @@ CREATE TABLE actions (          -- status, claim, lease, request_digest and
     CHECK (num_nulls(bundle_id, bundle_revision, executable_path, executable_digest) IN (0,4)),
     CHECK ((relation IS NULL) = (relates_to_action_id IS NULL)),
     CHECK (relates_to_action_id IS NULL OR relates_to_action_id <> action_id),
-    CHECK (relation IS NULL OR effect_class = 'observation'),
+    -- 'retries' (2026-08-30, OQ-088) points at a predecessor of ANY effect_class; only
+    -- 'inspects'/'verifies' are restricted to 'observation' (finding 4's own shape).
+    CHECK (relation IS NULL OR relation = 'retries' OR effect_class = 'observation'),
     -- an idempotent mutation with no external token cannot be re-attempted safely
     CHECK (effect_class <> 'idempotent_mutation' OR external_idempotency_token IS NOT NULL)
 );
@@ -281,6 +298,54 @@ ordering, field by field, with the same terminal `INCOMPATIBLE` outcome: a bundl
 the executables *and* the `type_roles` table, so a changed bundle changes what the run may
 do.
 
+## Verifier independence on the receipt path
+
+**Amended 2026-08-30 (OQ-087): fixed.** `action_receipts.verifier_digest` named a verifier by
+digest with no relation to the publisher of the bundle whose executable it graded, so spike
+04 finding 1's co-publication — the same principal publishing both the sanctioned computation
+and its checker — was reachable on the receipt path even though `bundle_nodes`'
+`verifier_is_independently_published` closed it on the declared-node path. A `CHECK` alone
+cannot express this: it needs the bundle publisher of the `Action`'s pinned executable, reached
+through `actions` and `bundle_nodes`, which is a join a `CHECK` cannot perform. A trigger does:
+
+```sql
+CREATE FUNCTION check_receipt_verifier_independent() RETURNS trigger AS $$
+DECLARE bundle_pub TEXT; verifier_pub TEXT;
+BEGIN
+  IF NEW.verifier_digest IS NULL THEN RETURN NEW; END IF;
+
+  SELECT bn.bundle_published_by INTO bundle_pub
+    FROM actions a
+    JOIN bundle_nodes bn
+      ON bn.tenant_id = a.tenant_id AND bn.bundle_id = a.bundle_id
+     AND bn.revision = a.bundle_revision AND bn.path = a.executable_path
+   WHERE a.tenant_id = NEW.tenant_id AND a.action_id = NEW.action_id;
+
+  IF bundle_pub IS NULL THEN RETURN NEW; END IF;   -- no bundle pin: nothing to compare
+
+  SELECT published_by INTO verifier_pub FROM verifiers
+   WHERE tenant_id = NEW.tenant_id AND verifier_digest = NEW.verifier_digest;
+
+  IF verifier_pub = bundle_pub THEN
+    RAISE EXCEPTION 'action_receipts.verifier_digest (published by %) must not be published '
+                    'by the same principal as the bundle whose executable it graded (%)',
+                    verifier_pub, bundle_pub
+      USING ERRCODE = 'invalid_parameter_value';       -- 22023, as in 01 and 14
+  END IF;
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+
+CREATE TRIGGER action_receipts_verifier_independent
+  BEFORE INSERT OR UPDATE ON action_receipts
+  FOR EACH ROW EXECUTE FUNCTION check_receipt_verifier_independent();
+```
+
+Structural now on both paths: the declared-node path by `verifier_is_independently_published`
+(§Schema above), the receipt path by this trigger. A trigger is weaker than a `CHECK` in the
+usual way ([`01-schema.md`](01-schema.md) §Polymorphic scope enforcement makes the same
+point) — it does not run under `session_replication_role`-suppressed replication — which is
+why the exception is stated here rather than assumed structural.
+
 ## An `Action` is one `effect_ledger` row
 
 The ledger in `01` and `02` is the authority. Status, claim, lease, completion and the
@@ -337,6 +402,24 @@ no verdict**, reading `unverified` and never `fail` — the `action_receipts` CH
 not a convention (ADR-0012 rule 2: an implementation that could not be asked must never be
 recorded as having answered no).
 
+## Resource registration is a ledgered effect
+
+**Amended 2026-08-30 (OQ-083, owner override, reversing the registry-first rule this section
+stated until today): a connector MAY auto-register a `Resource` on first sight.** The
+registry-first requirement — every `Resource` exists before an `Action` may target it, an
+admin approves what a connector proposes — is dropped. In its place: **`Resource` creation is
+itself a ledgered, policy-evaluated effect**, `kind = 'resource_registration'` on
+`effect_ledger` (open text, `01-schema.md` §Effect ledger, alongside `tool_call` and
+`delegation`), going through the same intend → policy → claim → dispatch → settle path as any
+other effect. The consequence is stated because it is the one the registry-first rule existed
+to avoid, and the override accepts it deliberately: **an agent's first call can create what
+policy then governs** — the `INSERT INTO resources` is the dispatch, `environment` and
+`classification` are what the connector observed and reported, and Cedar evaluates the
+registration exactly as it would evaluate the `Action` that depends on it, so an
+unauthorised-by-policy first sight is refused before the row exists rather than after.
+`resources.registered_by` already carries the acting principal; nothing about the table
+changes, only who may cause the insert and under what governance.
+
 ## `effect_class`, and what each value changes
 
 `effect_class` is **derived from the bundle, not guessed**: the real bundle's executor
@@ -364,7 +447,12 @@ into a dispatch. Narrowness is enforced at bundle registration, on the operation
 executable declares — not by the schema, where `operation` is open text; whether it can be
 enforced mechanically is **unknown — OQ**. **A retry is a new `Action`:** v0.1 never
 re-attempts a settled effect, so a second attempt takes a new key and follows a human
-decision.
+decision. **Amended 2026-08-30 (OQ-088):** that new `Action` carries `relation = 'retries'`
+and `relates_to_action_id` naming its predecessor — the same shape `inspects`/`verifies` use,
+now open to any `effect_class` rather than only `observation` — so the chain is a query over
+`action_relation` rather than a connector convention. Carrying the predecessor's
+`external_idempotency_token` forward is still the connector's business, not the platform's:
+this ties the two `Action` rows together; it does not decide what the retry sends.
 
 ## Trust grading
 
@@ -378,21 +466,21 @@ finding 3).
 
 ## Open questions
 
-- May a connector auto-register a `Resource` on first sight, or must every `Resource` exist
-  before an `Action` may target it? The schema requires the row; who may create it is
-  **unknown — OQ**.
+- **Amended 2026-08-30 (OQ-083, owner override):** yes — a connector may auto-register a
+  `Resource` on first sight. See §Resource registration is a ledgered effect above.
 - Signing-key lifecycle for bundle and verifier publishers — rotation, revocation, and what
   a revoked key means for an already-pinned bundle. **unknown — OQ**.
 - The verifier calling convention — what `verifiers.interface` names, and how a grader is
   invoked against a completed `Action` — **unknown — OQ**, alongside that signature scheme.
-- Who supplies the second publisher: a first-party verifier registry we operate, or one the
-  customer nominates? **unknown — OQ**; the constraint holds either way.
-- How independence is enforced on the receipt path: the verifier that graded an `Action`
-  versus the publisher of the bundle its executable came from. **unknown — OQ**.
+- **Amended 2026-08-30 (OQ-086):** the customer nominates the second (verifier) publisher —
+  see §A verifier declared on a node is pinned by a different publisher above. Onboarding
+  must produce one before any trusted result.
+- **Amended 2026-08-30 (OQ-087):** independence on the receipt path is now enforced — see
+  §Verifier independence on the receipt path above.
 - Nothing here ties a re-attempt `Action` to its predecessor's
-  `external_idempotency_token`: a retry takes a new deterministic key and `action_relation`
-  admits only `inspects|verifies`, so reusing the token is a connector convention, not a
-  platform guarantee. **unknown — OQ**.
+  `external_idempotency_token`: **amended 2026-08-30 (OQ-088)**, the linkage itself is
+  `relation = 'retries'` / `relates_to_action_id` (§Schema); carrying the token forward
+  remains a connector convention.
 
 ## Tests, with negative controls
 

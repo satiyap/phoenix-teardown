@@ -170,6 +170,14 @@ is drawn at platform *decisions*, which is narrow, stable, and justifiable line 
 > must delegate authorization to an external governed system, or must not run through
 > Phoenix.
 
+**Amended 2026-08-30 (OQ-044): that delegation now has a binding.** `decided_by` may name a
+`service` principal standing for the external system, carrying its ticket reference in
+`decision_rationale` ([`01-schema.md`](01-schema.md) §Approval, `decided_by_kind` widened to
+`human | service`; [`06-api.md`](06-api.md) §Approval authority). Still **one** attributable
+decision, never m-of-n — the widening records who made it when that "who" is a governed
+system rather than a person, and does not reopen any question in the table above. Trigger for
+a real quorum engine: the first finance/legal pack.
+
 ### Why restraint, when the requirement is real
 
 The requirement is real. The *design* is not available from evidence, and building it anyway

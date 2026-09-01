@@ -90,7 +90,11 @@ Six rules:
 4. **`decided_by` is a `Principal` and is mandatory on any terminal decision.** An
    approval that cannot name its approver does not satisfy audit. Where the platform
    runs single-user, the principal is the local operator — still recorded, not
-   implied.
+   implied. **Amended 2026-08-30 (OQ-044, spec/09 §7):** the principal named may be
+   `kind = 'service'`, standing for a customer's own external finance/legal approval
+   system, with the ticket it decided against carried in `decision_rationale`. This is
+   still one attributable decision, not a quorum — `human` remains the kind for a
+   decision made directly by a person, and no m-of-n engine is added.
 
 5. **Rationale is durable on approve as well as deny.** HumanLayer's single
    `comment` column serves "denial reasons or approval notes". The interesting audit

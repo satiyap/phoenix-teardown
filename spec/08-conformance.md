@@ -40,7 +40,12 @@ Every commit:
 
 1. **Declaration completeness.** Every registered adapter declares every capability in
    the registry. A missing declaration is `UNKNOWN`, which is *allowed* — but it must be
-   explicit, not absent.
+   explicit, not absent. **Amended 2026-08-30 (OQ-107):** the registry this check
+   enumerates holds two keys, both defined in
+   [`07-adapter-protocol.md`](07-adapter-protocol.md) §Idempotent step ids —
+   `effect_ledger_participation ∈ {verified, asserted, unsupported}` and
+   `resumable_after_process_loss ∈ {verified, asserted, unsupported}` — named here because
+   this document defines no enumerated registry of its own.
 2. **Every declared capability has a probe defined.** A capability nobody can test is a
    claim, not a capability.
 3. **Declaration coverage is reported**, per adapter, as a number. Omnigent's tri-state

@@ -52,6 +52,22 @@ message Usage {
   uint64 cache_read_tokens  = 5;
   uint64 cache_write_tokens = 6;
   uint32 requests           = 7;   // provider round-trips behind this observation; normally 1
+  // Amended 2026-08-30 (OQ-131, override from a catch-all field): every token class
+  // Pydantic AI 2.35.0's usage object exposes as a NAMED field, read from
+  // `pydantic_ai/usage.py`'s `UsageBase` (installed, sha256-addressable under the
+  // spike 06 pin's SDK tree) rather than guessed. `input_tokens`/`output_tokens`
+  // above are INCLUSIVE parents: the SDK documents that audio and cache tokens are
+  // already counted inside them, and these three fields exist so the harness mapping
+  // can report the breakdown without inventing a fourth "other" bucket:
+  uint64 input_audio_tokens      = 8;   // included in input_tokens
+  uint64 cache_audio_read_tokens = 9;   // included in cache_read_tokens AND input_audio_tokens
+  uint64 output_audio_tokens     = 10;  // included in output_tokens
+  // A new token class is a FRAME change, not a silent drop into a catch-all: the SDK's
+  // own `UsageBase.details` dict is an open bag for provider-specific extras (e.g. a
+  // reasoning-token count some providers report only there) that this frame
+  // deliberately does not carry, so a class living only in `details` is invisible
+  // here until it earns its own numbered field. The owner is the Pydantic AI adapter
+  // mapping (spec/12), which is where such a promotion is made.
 }
 ```
 
@@ -78,9 +94,13 @@ first.
 | `event_type` | payload |
 |---|---|
 | `cost.snapshot.pinned` | `{price_snapshot_digest, source, source_version, fence_token}` |
-| `cost.usage.recorded` | `{fence_token, step_id, provider, model_ref, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, requests}` |
+| `cost.usage.recorded` | `{fence_token, step_id, provider, model_ref, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, requests, input_audio_tokens, cache_audio_read_tokens, output_audio_tokens}` |
 | `cost.usage.priced` | `{usage_seq, price_snapshot_digest, amount_nanos, currency}` |
 | `cost.usage.unpriced` | `{usage_seq, price_snapshot_digest?, unpriced_reason}` |
+
+**Amended 2026-08-30 (OQ-131):** the last three `cost.usage.recorded` fields are the `Usage`
+frame's audio-token classes (§Where usage comes from), carried through unchanged — this event
+mirrors the frame, it does not re-derive it.
 
 **Usage and price are separate events on purpose.** Usage is a fact the harness observed;
 a price is a judgement the control plane made against a dataset that changes underneath it.
@@ -215,8 +235,8 @@ harness mapping — the same reason §04 splits `run.incompatible` / `run.artifa
 that carries no digest — there is none to carry.
 
 Whether `genai-prices` is maintained on a cadence that makes it safe for *enforcement* rather
-than reporting is **OQ-028, still open**. v0.1 does not depend on the answer, because v0.1 does
-not enforce. A cap would.
+than reporting is **OQ-130** (**amended 2026-08-30**: OQ-028 merged into it). v0.1 does not
+depend on the answer, because v0.1 does not enforce. A cap would.
 
 ---
 
@@ -247,6 +267,12 @@ CREATE TABLE cost_records (
     output_tokens  BIGINT NOT NULL,
     cache_read_tokens  BIGINT NOT NULL DEFAULT 0,
     cache_write_tokens BIGINT NOT NULL DEFAULT 0,
+    -- Added 2026-08-30 (OQ-131): the Usage frame's three named audio-token classes,
+    -- each already included in one of the columns above; carried separately so the
+    -- breakdown is queryable, not because the total changes.
+    input_audio_tokens      BIGINT NOT NULL DEFAULT 0,
+    cache_audio_read_tokens BIGINT NOT NULL DEFAULT 0,
+    output_audio_tokens     BIGINT NOT NULL DEFAULT 0,
     requests       INTEGER NOT NULL DEFAULT 1,
 
     price_snapshot_digest TEXT,          -- NULL only when the snapshot never resolved
@@ -288,6 +314,8 @@ CREATE TABLE cost_records (
     CHECK (currency IS NULL OR currency ~ '^[A-Z]{3}$'),
     CHECK (input_tokens >= 0 AND output_tokens >= 0
            AND cache_read_tokens >= 0 AND cache_write_tokens >= 0
+           AND input_audio_tokens >= 0 AND cache_audio_read_tokens >= 0
+           AND output_audio_tokens >= 0
            AND requests >= 1)
 );
 
@@ -380,10 +408,11 @@ and `run_events` is where cost lives.
 | Not done | Why |
 |---|---|
 | Budgets, caps, ask-thresholds, model downgrade | Tier 3 is measurement (`v01-boundary.md` 14). Omnigent's `cost_budget` is the design to copy when a cap is specified, including its documented overshoot limit |
+| Refuse an unpriced model at run admission (`draft → queued`) | **Amended 2026-08-30 (OQ-132, override): decided NO.** Run admission is not a pricing gate; an unpriced pinned model is admitted and its usage recorded with `unpriced_reason = model_not_in_snapshot` (or the applicable reason) exactly as any other unpriced call — §Fail closed on an unpriced model already states the record-time half, and this closes the admission-time half the same way rather than the reporting-time way |
 | Block a run because a model is unpriced | Nothing to block: the tokens are spent before the frame arrives. The closed half is the total, not the call |
 | Reprice historical records | Append-only. A corrected snapshot changes the next interval, never a written row |
 | Price non-model spend (sandbox time, tool vendors, egress) | No evidence base in the study; a separate unit of account |
-| Enforce a per-principal daily aggregate | Needs the cap that v0.1 does not have (OQ-016) |
+| Enforce a per-principal daily aggregate | Needs the cap that v0.1 does not have (**amended 2026-08-30**: OQ-016 merged into OQ-098) |
 
 ---
 

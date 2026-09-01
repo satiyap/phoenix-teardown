@@ -33,8 +33,14 @@ knowledge 108 · resource_descriptor 24 · executable 6 · procedure 6
 template 3 · executor 2 · verifier 1
 ```
 
-Every one of the 133 nodes mapped to one of the fixed 7 behavioural roles, from
-15 open domain `type` values. The `type → roles` table is **bundle-supplied
+Every one of the 133 nodes mapped onto the fixed 7 behavioural roles, from
+15 open domain `type` values. *(Corrected 2026-08-30, OQ-076, superseding "mapped to
+one of the fixed 7 behavioural roles": the distribution above sums to **150**, not
+133 — several nodes carry more than one role — so "to one of" overclaimed a
+one-role-per-node shape the mapping never had. `spec/10-work-bundles.md`'s
+`node_roles_are_content_or_executable` CHECK was relaxed the same day to admit a node
+carrying several roles, narrowed to forbid only the literal content+`executable`
+artifact-identity conflict.)* The `type → roles` table is **bundle-supplied
 metadata**, not core logic: another domain ships a different table and the core is
 untouched. That is the concrete form of "the platform must not add a database
 table for every domain noun".

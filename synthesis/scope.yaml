@@ -98,3 +98,16 @@ counts:
 # Emptied 2026-08-30: specs 10-19 landed and every row is settled. The list stays as a
 # key so `check_scope_source_of_truth()` keeps comparing it against spec/00's table.
 owed_specs: []
+
+# Added 2026-08-30 (OQ-054, decided: yes -- a scope-level assertion, not just a
+# placeholder). `check_scope_source_of_truth()` in tools/validate_spec.py asserts this
+# against the pin stated in prose at spec/07-adapter-protocol.md:290
+# ("pydantic-ai-slim == 2.35.0"), so a harness bump that forgets this file, or this file
+# drifting from spec/07, fails the build instead of drifting silently -- the same
+# discipline `spec_docs`, `invariant_rows` and the tier tables already get.
+harness: 'pydantic-ai 2.35.0'
+
+# Added 2026-08-30 (OQ-093): the tzdata release every scheduler replica resolves IANA
+# zones against (spec/11-routines.md §Trigger taxonomy). Not yet asserted by a check --
+# there is no second document stating it to compare against, unlike `harness` above.
+tzdata: 'unset — pin at first deploy'

@@ -111,15 +111,21 @@ silently overwriting a forged field teaches a caller that it worked.
 | `unknown_event_type` | `event_type` is outside the closed set compiled into the build ([§04](04-events.md) naming rule; ADR-0003 rule 3) |
 | `not_a_member` | a listed `audience` principal is not a member of the channel |
 
-None of these refusals reaches a `run_events` row in v0.1, though non-negotiable 10 of
-[§00](00-overview.md) requires refusals to be as observable as successes. The registry is
-a closed set added in code and owned by [§04](04-events.md) (§Naming rule), so the entries
-are owed to §04 rather than invented here: **unknown — OQ-125**.
+**Amended 2026-08-30 (OQ-125),** superseding "None of these refusals reaches a `run_events`
+row in v0.1 … the entries are owed to §04 rather than invented here: unknown — OQ-125": one
+`message.refused {code}` event, `code` one of the nine
+refusals in the table above, registered in [§04](04-events.md)'s closed set and appended to
+`run_events` wherever the refused `post` names a `run_id` (a refusal on a run-attributed
+post has somewhere to land; a refusal on a post with no `run_id` — none exists in v0.1, since
+an agent never calls this surface itself, §Where the layer sits — is out of scope). Non-negotiable
+10 is satisfied by the one event type rather than nine.
 
-Channel **membership**, which `not_a_member` reads, is defined by no resource in this
-spec: AG2 carries passports in hub memory and nothing here makes them durable. The
-membership record is **unknown — OQ-126**; until it exists, `not_a_member` is a rule
-without a table.
+Channel **membership**, which `not_a_member` reads, is now a table: **amended 2026-08-30
+(OQ-126)**, superseding "defined by no resource in this spec … The membership record is
+unknown — OQ-126; until it exists, `not_a_member` is a rule without a table":
+`channel_members (tenant_id, channel_id, principal_id, role)`, defined in
+[§01](01-schema.md) §Leases beside `channels`. AG2 keeps passports in hub memory only; this
+makes membership durable and queryable, and `not_a_member` is a rule with a table behind it.
 
 ---
 
@@ -272,9 +278,9 @@ Consequences, normative:
 
 ## Retention
 
-`channel_envelopes` rows may be deleted or compacted past a horizon. The horizon's
-default value is **unknown — OQ-124**; it is a tenant-configurable policy, and picking a
-number here would be invention.
+`channel_envelopes` rows may be deleted or compacted past a horizon. **Amended 2026-08-30
+(OQ-124): 90 days per tenant, default.** It stays a tenant-configurable policy; 90 days is
+the value a tenant gets until it configures another.
 
 **Compaction never lowers `channels.max_seq`.** Seq is monotonic for the life of the
 channel, not for the life of its rows: an emptied channel still issues its next seq

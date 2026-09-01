@@ -166,6 +166,13 @@ CREATE TABLE adapter_contracts (
 argument for `native_tui` — adapting a third-party agent (superseded 2026-08-27)
 that offers no API by driving its terminal.
 
+**Amended 2026-08-30 (OQ-109):** the deploy pipeline writes one `adapter_contracts` row
+**per tenant** at provisioning time, derived from the driver image manifest — not a single
+platform-wide row every tenant reads. `(tenant_id, identity, digest)` is already the primary
+key, so the row shape does not change; what was open was who writes it and how many rows
+exist, and the answer is one insert per tenant, done by the deploy pipeline rather than the
+control plane's first sight of an image.
+
 ---
 
 ## Run — the execution unit
@@ -674,8 +681,13 @@ CREATE TABLE approvals (
     -- `decided_by` is any principal, and "one attributable human decision"
     -- (spec/09 7) is prose the schema does not enforce. Found 2026-08-27 while
     -- applying decision D-A.
+    -- Widened 2026-08-30 (OQ-044, ADR-0015 amendment 4): a `service` principal may
+    -- decide, standing for a customer's external finance/legal approval system with
+    -- the ticket ref in decision_rationale below -- still ONE attributable decision,
+    -- never a quorum. `human` stays the only kind for a decision made directly by a
+    -- person at the keyboard; the class is chosen at decide time, not guessed.
     decided_by_kind principal_kind
-        CHECK (decided_by_kind IS NULL OR decided_by_kind = 'human'),
+        CHECK (decided_by_kind IS NULL OR decided_by_kind IN ('human', 'service')),
     decision_rationale TEXT,               -- durable on APPROVE as well as deny
 
     PRIMARY KEY (tenant_id, approval_id),
@@ -742,7 +754,18 @@ CREATE TABLE policies (
     -- a steer that cannot say how to comply is invalid (Agent Control)
     CHECK (decision <> 'steer' OR steering_guidance IS NOT NULL)
 );
+```
 
+**Amended 2026-08-30 (OQ-079):** a platform rule with no Cedar policy behind it — the `app`-scope
+default deny ([`16-knowledge.md`](16-knowledge.md) §State), the `temp:` refusal, and messaging's
+scope checks ([`17-messaging.md`](17-messaging.md) §Public surface) — is recorded against a
+**reserved `policies` row seeded per tenant at provisioning**, named `platform:<rule>` (e.g.
+`platform:app_scope_deny`), `cedar_source` a comment stating the rule is enforced in code, not
+Cedar. `policy_decisions.policy_id`'s `NOT NULL` FK holds unchanged and every platform refusal is
+aggregable through the same table a Cedar verdict lands in, rather than a nullable FK carving an
+exception into it.
+
+```sql
 -- Every evaluation, including refusals, aggregable (AG2 + Agent Control).
 CREATE TABLE policy_decisions (
     tenant_id      BIGINT NOT NULL,
@@ -769,6 +792,46 @@ CREATE INDEX policy_decisions_shadow
 
 `enforced` is what makes `observe` mode measurable: shadow verdicts are recorded in
 the same table as enforced ones and can be aggregated per policy over time.
+
+---
+
+## Admin audit
+
+**Amended 2026-08-30 (OQ-078).** Credential and routine administration have nowhere to land:
+`run_events` requires a `run_id` FK to `runs`, so creating or revoking a `Credential`
+([`14-credentials.md`](14-credentials.md)) and pausing, resuming or disabling a routine
+([`11-routines.md`](11-routines.md), which keeps only `state_changed_by`/`state_changed_at`)
+have no run to append against. `admin_events` is the tenant-scoped, non-run-scoped audit log
+for exactly this: every admin write that is not a `run_events` row.
+
+```sql
+CREATE TABLE admin_events (
+    tenant_id      BIGINT NOT NULL,
+    admin_event_id TEXT   NOT NULL,       -- sortable ULID
+    principal_id   TEXT   NOT NULL,       -- who acted; the system actor is a principal too
+    action         TEXT   NOT NULL,       -- OPEN: 'credential.created', 'task.paused', ...
+    target_kind    TEXT   NOT NULL,       -- 'credential' | 'task' | ...
+    target_id      TEXT   NOT NULL,
+    detail         JSONB  NOT NULL DEFAULT '{}'::jsonb,
+    at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    PRIMARY KEY (tenant_id, admin_event_id),
+    FOREIGN KEY (tenant_id, principal_id)
+        REFERENCES principals (tenant_id, principal_id)
+);
+CREATE INDEX admin_events_by_target ON admin_events (tenant_id, target_kind, target_id, at);
+
+GRANT SELECT, INSERT ON admin_events TO app_role;   -- no UPDATE, no DELETE: an audit row
+                                                     -- that can be edited is not an audit row
+```
+
+`action` is open text, in `01-schema.md`'s `effect_ledger.kind` and `10-work-bundles.md`'s
+`actions.operation` style — a closed enum here would need a migration for every new admin
+route. `detail` carries whatever the action needs that the four typed columns do not: a
+scheduler summary row (`task.catchup_skipped {from, to, count}`,
+[`11-routines.md`](11-routines.md) §Missed ticks, OQ-097) and an auto-pause's failure count
+(§Who may create, pause and disable a routine, OQ-095) both live here rather than forcing a
+column per action.
 
 ---
 
@@ -866,6 +929,21 @@ CREATE TABLE channel_envelopes (
     CHECK (audience IS NULL OR jsonb_typeof(audience) = 'array')
 );
 
+-- Amended 2026-08-30 (OQ-126): the durable membership record `not_a_member` reads.
+-- AG2 keeps passports in hub memory only; this makes membership a row instead.
+CREATE TABLE channel_members (
+    tenant_id      BIGINT NOT NULL,
+    channel_id     TEXT   NOT NULL,
+    principal_id   TEXT   NOT NULL,
+    role           TEXT   NOT NULL DEFAULT 'member',   -- OPEN: 'member', 'admin', ...
+    added_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    PRIMARY KEY (tenant_id, channel_id, principal_id),
+    FOREIGN KEY (tenant_id, channel_id) REFERENCES channels (tenant_id, channel_id),
+    FOREIGN KEY (tenant_id, principal_id)
+        REFERENCES principals (tenant_id, principal_id)
+);
+
 -- Per-subscriber progress. At-least-once falls out of this table: the cursor moves
 -- only after the subscriber has durably handled the envelope.
 CREATE TABLE channel_cursors (
@@ -925,6 +1003,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON sandboxes TO app_role;
 GRANT SELECT, INSERT ON channel_envelopes TO messaging_role;   -- no UPDATE, no DELETE
 GRANT SELECT, INSERT, UPDATE ON channels, channel_cursors TO messaging_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON channel_leases TO messaging_role;
+GRANT SELECT, INSERT, DELETE ON channel_members TO messaging_role;   -- membership can be revoked
 ```
 
 Each table `spec/10`-`spec/18` creates issues its own grants beside its own

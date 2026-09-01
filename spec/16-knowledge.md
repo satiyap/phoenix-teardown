@@ -47,24 +47,51 @@ b48ee38`) — ADR-0008 evidence log.
 
 ### Layers and resolution order
 
-Three layers, resolved per **exact path**, highest precedence first:
+**Amended 2026-08-30 (OQ-081, owner override): five layers, not three.** `team` and `persona`
+are added between `tenant` and `agent`. Resolved per **exact path**, highest precedence
+first:
 
 | Precedence | Layer | Source | Owner |
 |---|---|---|---|
-| 3 (highest) | `agent` | a git commit registered in `knowledge_sources` | the agent's operator |
+| 5 (highest) | `agent` | a git commit registered in `knowledge_sources` | the agent's operator |
+| 4 | `persona` | a git commit registered in `knowledge_sources`, keyed by `persona_key` | the persona |
+| 3 | `team` | a git commit registered in `knowledge_sources`, keyed by `team_id` | the team |
 | 2 | `tenant` | a git commit registered in `knowledge_sources` | the tenant |
 | 1 (lowest) | `bundle` | nodes of the pinned `WorkBundle` (spec 10) | the bundle publisher |
+
+Resolution falls back **persona → team → tenant → bundle** beneath `agent`, unchanged at the
+top: the highest layer that declares a path wins, exactly as the three-layer rule already
+worked, extended over two more layers.
+
+**Two new nouns, defined here because owner decision 2026-08-30 introduces them and no other
+document does:**
+
+- **`team`** is a principal-group id — an uninterpreted `TEXT` naming a group of principals,
+  with no `teams` resource of its own in v0.1 (the same shape `state_entries.scope_key` takes
+  for `user`/`session` scope, [§01](01-schema.md) exception 1 — a value this table stores and
+  does not resolve).
+- **`persona`** is a role label — an uninterpreted `TEXT` naming a role an agent may be
+  operating under, likewise not a resource in its own right.
+
+Both are stored, not enforced: `knowledge_sources.team_id` and `.persona_key` carry them, and
+nothing in v0.1 validates that a `team_id` names a real group of principals or that a
+`persona_key` names a real role — the same trust the `agent_id`-scoped `agent` layer already
+places in its git remote, extended to two more open identifiers.
 
 The layer set is the evidence log's, not an invention: the tenant layer is OpenHands'
 org-level skills from a git repository (`agent_server/skills_router.py:62,96 @ 760eea2`),
 the agent layer is AG2's per-agent `SKILL.md` plus `knowledge/` package
 (`ag2/network/identity.py:15-16 @ 90f490a`), both ADR-0008, and the bundle layer is spec
 10's pinned `WorkBundle`. Precedence runs narrowest-owner-first because the narrower owner
-is the one accountable for the override.
+is the one accountable for the override; `team` and `persona` extend that same rule rather
+than break it — a persona override is narrower than a team's and wider than one agent's.
 
-Three layers, not four: a layer between `tenant` and `agent` would need a resource neither
-the boundary nor the ADRs name, and `policies.scope = 'project'` has no v0.1 referent
-([§01](01-schema.md), exception 2). Whether one is needed is **unknown — OQ**.
+**Amended 2026-08-30 (OQ-081, owner override),** superseding "Three layers, not four: a layer
+between `tenant` and `agent` would need a resource neither the boundary nor the ADRs name,
+and `policies.scope = 'project'` has no v0.1 referent ([§01](01-schema.md), exception 2).
+Whether one is needed is unknown — OQ": that question is moot for v0.1 now that `team` and
+`persona` are added. The trigger that raised it — the first customer with two teams on one
+bundle — is likewise moot; it fired.
 
 **Whole-file override, never a merge.** The file is the unit because it is what carries a
 digest and a diff — Letta's file-granular memory (`projects/letta/teardown.md:39-43`).
@@ -81,9 +108,11 @@ bundle-supplied behavioural roles — `knowledge 108 · resource_descriptor 24 �
 (`spikes/04-work-bundle/RESULT.md`). `roles` is an **array**
 ([`10-work-bundles.md`](10-work-bundles.md) §Schema, `bundle_nodes.roles`, indexed GIN at `:181`), so the rule is over the whole set: a
 node compiles into the package **iff** its roles intersect {`knowledge`, `procedure`,
-`template`, `resource_descriptor`} **and** are disjoint from {`executable`, `executor`,
-`verifier`}. A node carrying both a content role and an executable one is refused by
-`bundle_nodes`' `node_roles_are_content_or_executable` CHECK
+`template`, `resource_descriptor`} **and** are disjoint from {`executable`} (**amended
+2026-08-30, OQ-076**, superseding "disjoint from {`executable`, `executor`, `verifier`}":
+`executor` and `verifier` may now co-occur with a content role; only `executable`, an
+executable body, is mutually exclusive with one). A node carrying both a content role and
+an `executable` one is refused by `bundle_nodes`' `node_roles_are_content_or_executable` CHECK
 ([`10-work-bundles.md`](10-work-bundles.md) §Schema), so it never reaches the compiler —
 content the model reads and code the platform executes must not be the same artifact, and
 one document states that rule while one enforces it. The executable side is Actions, pinned by spec 10, and a
@@ -112,6 +141,20 @@ rather than dropping files. [§12](12-harness.md) §8 carries this as a set of i
 entered alongside the symbolic closure rather than through it, and draws both from the
 compiled package rather than from the pinned bundle.
 
+### Closure selection
+
+**Amended 2026-08-30 (OQ-080): owned here, beside `manifest.json`.**
+[`12-harness.md`](12-harness.md) §8 names the **closure selection** — the entry nodes and the
+admitted digests that `Start.config` carries, a projection of `manifest.json` — without
+defining it or naming an owner; that gap is closed by this paragraph. The closure selection
+is: the set of entry-node paths a step declares, together with the `content_digest` each
+resolved to in the compiled package at closure time. It is a *projection* in exactly
+§What the digest covers' sense — a derived view of `manifest.json`, not a new artifact — and
+`Start.config`'s byte layout stays opaque to the control plane by design ([§07](07-adapter-protocol.md)
+§`config` is opaque), so this paragraph names what the projection *is*, not its wire shape.
+[`12-harness.md`](12-harness.md) §8 rules 3-4 govern how it constrains context; this document
+governs where it comes from.
+
 ### Path rules, enforced at compile time
 
 - Relative POSIX paths only: a leading `/`, any `..` segment, or a symlink is a compile
@@ -126,9 +169,13 @@ compiled package rather than from the pinned bundle.
   the same invariant, and the bidirectional walk of §Materialisation would then find one
   tree path for two manifest entries.
 - Package size, file count and single-file size are bounded, and the compiler rejects a
-  package that exceeds a bound rather than truncating it. **The values are `unknown — OQ`**
-  (spike 04's real bundle is 133 nodes / 108 `knowledge`, which is a scale datum and not a
-  limit); until they are set, the compiler has no bound to enforce.
+  package that exceeds a bound rather than truncating it. **Amended 2026-08-30 (OQ-121):
+  provisional limits — 64 MiB per package, 10 000 files, 8 MiB per file.** Configuration, not
+  schema: no column enforces them, the compiler does, and they move without a migration.
+  Spike 04's real bundle (133 nodes / 108 `knowledge`) sits far under all three, so the
+  numbers are provisional against no real ceiling pressure yet, not a measured limit.
+  **Amended 2026-08-30 (OQ-121):** a compiled package persists until explicitly removed;
+  no horizon expires one.
 
 ### Compilation
 
@@ -136,7 +183,9 @@ Deterministic, and re-runnable offline from its inputs:
 
 ```
 1. resolve the bundle layer from the pinned WorkBundle (bundle_id, revision) — spec 10
-2. resolve the tenant and agent layers at their registered commit_sha
+2. resolve the tenant, team, persona and agent layers at their registered commit_sha
+   (**amended 2026-08-30, OQ-081**, superseding "resolve the tenant and agent layers at
+   their registered commit_sha": team and persona are two more layers this step resolves)
 3. apply the path rules; reject on any violation
 4. overlay by precedence, per exact path
 5. emit manifest.json: [{path, digest}], sorted by path in UTF-8 byte order (03 step 4)
@@ -276,13 +325,16 @@ internal write has neither of.
 | Scope | A run may write | Rule |
 |---|---|---|
 | `app` | **not at all** for a `kind='agent'` principal in v0.1 | refused at the tool boundary with `ToolDenied{SCOPE_FORBIDDEN}` |
-| `user` | `scope_key = runs.created_by` only | a cross-principal write is refused |
+| `user` | `scope_key ∈ {self, parent}` | **amended 2026-08-30 (OQ-123):** `self` is `runs.created_by`, unchanged; `parent` is `principals.on_behalf_of` for that principal — the run's delegation parent, Letta's `{self, parent}` cross-agent guard. Any other `scope_key`, including a grandparent, is refused |
 | `session` | the run's own session only | `scope_key = runs.session_id`; refused when it is NULL |
 
-The `app` refusal is a **platform rule, not a policy verdict**: `policy_decisions.policy_id`
-is `NOT NULL` with an FK to `policies` ([§01](01-schema.md) §Policy), so a refusal that names
-no policy cannot be recorded as `policy.evaluated` ([§04](04-events.md) §Policy). It is recorded
-as the `ToolDenied` on the run's log.
+The `app` refusal is a **platform rule, not a Cedar verdict**. **Amended 2026-08-30 (OQ-079),
+superseding "a refusal that names no policy cannot be recorded as `policy.evaluated` … It is
+recorded as the `ToolDenied` on the run's log":** `policy_decisions.policy_id`'s `NOT NULL` FK
+to `policies` ([§01](01-schema.md) §Policy) is satisfied by the reserved, per-tenant-seeded
+`platform:app_scope_deny` row ([§01](01-schema.md), the platform-rule seeding amendment) —
+the refusal is recorded as `policy.evaluated` ([§04](04-events.md) §Policy) against that row,
+in addition to the `ToolDenied` on the run's log.
 
 Cedar decides `deny | steer | observe` ([§01](01-schema.md) §Policy) and has no `allow`
 value, so a *grant* cannot be expressed in v0.1 — the default-deny is a platform rule, and
@@ -332,6 +384,20 @@ concurrent state writes is decomposition rather than locking
 (`projects/google-agent-platform/teardown.md:380`), and scoping is that decomposition —
 it shrinks the surface where a conflict is possible instead of resolving conflicts.
 
+### Retrieval authorisation
+
+**Amended 2026-08-30 (OQ-103): owner named, one paragraph, not the full design — to be
+written before the analytics pack.** [`12-harness.md`](12-harness.md) §8 constrains *which*
+package nodes may enter context (rule 3, the closure and the always-resident set) but not
+*who* may see a node's content once it is admitted; spike 04 names this the largest untested
+area in the study. The shape this document owes before the analytics pack: a Cedar `read`
+decision over the node's `classification` (the same field `10-work-bundles.md`'s `Resource`
+already carries for a different noun) filters the closure **before** content reaches the
+model or an embedding index — not after, and not as a second veto on top of rule 3, but as a
+precondition rule 3's admission check also evaluates. The full policy shape — what principal,
+what classification levels, what the refusal looks like on a `system/**` file the run cannot
+function without — is deliberately not decided here.
+
 ---
 
 ## Schema
@@ -350,7 +416,9 @@ CREATE TABLE knowledge_packages (
     CHECK (digest ~ '^[0-9a-f]{64}$')
 );
 
-CREATE TYPE knowledge_layer AS ENUM ('bundle', 'tenant', 'agent');
+-- Amended 2026-08-30 (OQ-081, owner override): 'team' and 'persona' added between
+-- 'tenant' and 'agent'.
+CREATE TYPE knowledge_layer AS ENUM ('bundle', 'tenant', 'team', 'persona', 'agent');
 
 -- The git-backed layers we register. The `bundle` layer is NOT here: it arrives with
 -- the pinned WorkBundle (spec 10), so the enum value exists only for the manifest.
@@ -359,18 +427,25 @@ CREATE TABLE knowledge_sources (
     source_id      TEXT   NOT NULL,
     layer          knowledge_layer NOT NULL,
     agent_id       TEXT,                 -- NULL unless layer = 'agent'
+    -- Added 2026-08-30 (OQ-081): a principal-group id and a role label, both
+    -- uninterpreted TEXT -- new nouns with no resource of their own in v0.1, the
+    -- same shape state_entries.scope_key takes (01 exception 1).
+    team_id        TEXT,                 -- NULL unless layer = 'team'
+    persona_key    TEXT,                 -- NULL unless layer = 'persona'
     git_remote     TEXT   NOT NULL,
     commit_sha     TEXT   NOT NULL,
     subpath        TEXT   NOT NULL DEFAULT '',
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, source_id),
     FOREIGN KEY (tenant_id, agent_id) REFERENCES agents (tenant_id, agent_id),
-    CHECK (layer IN ('tenant','agent')),
+    CHECK (layer IN ('tenant','team','persona','agent')),
     CHECK ((layer = 'agent') = (agent_id IS NOT NULL)),
+    CHECK ((layer = 'team') = (team_id IS NOT NULL)),
+    CHECK ((layer = 'persona') = (persona_key IS NOT NULL)),
     CHECK (commit_sha ~ '^[0-9a-f]{40}$'),
-    -- one source per layer per agent; NULLS NOT DISTINCT (PG15+, within 01's PG16
-    -- floor) makes the tenant-layer NULLs collide
-    UNIQUE NULLS NOT DISTINCT (tenant_id, layer, agent_id)
+    -- one source per layer per agent/team/persona; NULLS NOT DISTINCT (PG15+, within
+    -- 01's PG16 floor) makes the tenant-layer NULLs collide
+    UNIQUE NULLS NOT DISTINCT (tenant_id, layer, agent_id, team_id, persona_key)
 );
 
 -- Provenance, append-only. Two compilations may produce the SAME package digest from
@@ -425,8 +500,8 @@ public boundary, each with a control proving the test fails when its guard is re
 
 | Invariant | Test | Negative control |
 |---|---|---|
-| Layer precedence is agent > tenant > bundle | same path in all three layers; read the compiled bytes | reverse the overlay ⇒ the bundle file wins |
-| Compilation is deterministic | compile the same three layers in two processes, compare digests | emit files in filesystem order ⇒ digests differ across machines |
+| Layer precedence is agent > persona > team > tenant > bundle (**amended 2026-08-30, OQ-081**, superseding "agent > tenant > bundle") | same path in all five layers; read the compiled bytes | reverse the overlay ⇒ the bundle file wins |
+| Compilation is deterministic | compile the same five layers (**amended 2026-08-30, OQ-081**, superseding "the same three layers") in two processes, compare digests | emit files in filesystem order ⇒ digests differ across machines |
 | A commit that changes no bytes changes no digest | recommit identical content, recompile | put `commit_sha` in the digest payload ⇒ the digest moves and pins break |
 | A knowledge edit does not move a pinned run | edit one file, recompile, repoint the agent, resume the run | compare against `agents.current_digest` ⇒ the run refuses to resume on a cosmetic edit (the behaviour `09-decisions.md` §2 reversed) |
 | Definitions declaring neither new field are unchanged | recompute a stored definition digest after both fields are added | serialise either as `null` ⇒ every existing pin breaks |
@@ -438,8 +513,8 @@ public boundary, each with a control proving the test fails when its guard is re
 | The knowledge mount is read-only to the runtime | from inside the run, open a manifest path `O_WRONLY` and a new path under the package root | mount it read-write ⇒ the write succeeds and the tree stops matching its manifest |
 | `system/**` is never silently dropped ([§12](12-harness.md) §8's always-resident set) | compile a package whose `system/` tree exceeds the context budget, start a run | drop the overflow files instead ⇒ the run proceeds on partial system knowledge with no signal |
 | A `temp:` write never persists | write `temp:x` through the tool boundary | drop the boundary refusal ⇒ the `CHECK` catches it; drop both ⇒ it persists |
-| Cross-principal `user` write is refused | run owned by A writes `scope_key = B` | drop the scope check ⇒ it succeeds |
-| A forbidden read is refused, not empty | read `user` state for a principal that is not `runs.created_by` | return an empty `ToolResult` instead of `ToolDenied` ⇒ "no rows" and "not allowed" are indistinguishable (non-negotiable 10) |
+| Cross-principal `user` write is refused | run owned by A writes `scope_key = B`, where B is not A's `on_behalf_of` delegation parent (**amended 2026-08-30, OQ-123**, superseding "run owned by A writes `scope_key = B`") | drop the scope check ⇒ it succeeds |
+| A forbidden read is refused, not empty | read `user` state for a principal that is neither `runs.created_by` nor its `on_behalf_of` parent (**amended 2026-08-30, OQ-123**, superseding "a principal that is not `runs.created_by`": a `parent` read is now permitted, so the old input would wrongly assert a refusal) | return an empty `ToolResult` instead of `ToolDenied` ⇒ "no rows" and "not allowed" are indistinguishable (non-negotiable 10) |
 | `app` write by an agent principal is denied by default | agent-owned run writes `app` scope with no allow policy | default to allow ⇒ one run rewrites tenant-wide state |
 | An undeclared `session` key is refused | write a key absent from `state_schema` | skip validation ⇒ a typo becomes durable state |
 | State write and log event are atomic | crash between them | commit them separately ⇒ a mutation with no log record |

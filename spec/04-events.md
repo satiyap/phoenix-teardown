@@ -110,10 +110,14 @@ Three types and not one, because the operator remedies differ: re-exchange, re-r
 investigate a placeholder presented where it was not minted to be used
 ([`14-credentials.md`](14-credentials.md)). All three are **run-scoped**, so they fit
 `run_events`' foreign key. Credential *creation* and *revocation* have no run and therefore
-have no home here; that gap is an open question against the admin audit surface, not an
-omission from this registry. No payload names `secret_ref`, `material_ref`, or a
-placeholder's value — only its prefix, which is what makes the rejection diagnosable
-without making the log a place to find secrets.
+have no home here; **amended 2026-08-30 (OQ-078): they are `admin_events` rows**
+(`action = 'credential.created' | 'credential.revoked'`, [§01](01-schema.md) §Admin audit),
+a tenant-scoped log parallel to this one for exactly the writes that have no run to attach to
+— routine pause/resume/disable (`action = 'task.paused'` etc., [§11](11-routines.md)) and the
+missed-tick summary (`action = 'task.catchup_skipped'`, `detail = {from, to, count}`,
+[§11](11-routines.md) §Missed ticks) land there too, never as `run_events` rows. No payload
+names `secret_ref`, `material_ref`, or a placeholder's value — only its prefix, which is what
+makes the rejection diagnosable without making the log a place to find secrets.
 
 ### Human interaction
 
@@ -180,6 +184,18 @@ rejects non-integral floats), and no cost event folds onto `runs.state`
 Every sandbox event folds to **nothing** in run state ([`15-sandbox.md`](15-sandbox.md) §2).
 A folding rule here would make run state depend on sandbox identity, which is the dependency
 ADR-0016 forbids: a resumed sandbox is not a resumed run.
+
+### Messaging
+
+| `event_type` | payload |
+|---|---|
+| `message.refused` | `{code}` |
+
+**Amended 2026-08-30 (OQ-125).** `code` is one of the nine refusals
+[`17-messaging.md`](17-messaging.md) §Public surface names (`channel_lease_not_held`,
+`channel_closed`, `unknown_channel`, `channel_exists`, `stamped_field_supplied`,
+`expectation_violated`, `depth_exceeded`, `unknown_event_type`, `not_a_member`), appended
+when the refused `post` names a `run_id` — the only case `run_events`' foreign key admits.
 
 ### State
 

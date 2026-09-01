@@ -59,7 +59,9 @@ type Provider interface {
 }
 
 type Handle struct{ SandboxID, ProviderHandle string }
-type Limits struct{ CPUMillis, MemoryBytes, PIDs int } // values unknown — OQ (§3)
+type Limits struct{ CPUMillis, MemoryBytes, PIDs int } // amended 2026-08-30, OQ-119:
+                                                        // provisional 1 CPU / 2 GiB,
+                                                        // unmeasured; PIDs still unknown — OQ
 type Report struct{ Gone bool; Detail string }         // named so it is not the method name
 
 // ADR-0009:111 (isolation AND IPC semantics surfaced), :104 (availability reported
@@ -161,9 +163,9 @@ would be depending on placement.
 
 | Knob | Default | Visible to the harness |
 |---|---|---|
-| Warm window (keep the pod for short waits) | **unknown — OQ**; ADR-0016:80-82 says "configurable" and names no number | never |
-| Warm pool size | unknown — OQ | never |
-| Image pre-pull | **unknown — OQ**; ADR-0016:80-82 names pre-pull as configuration and no default | never |
+| Warm window (keep the pod for short waits) | **10 minutes** (amended 2026-08-30, OQ-119: provisional, unmeasured — see ADR-0016's config table) | never |
+| Warm pool size | **2 per `WorkerPool`** (amended 2026-08-30, OQ-119: provisional, unmeasured) | never |
+| Image pre-pull | **a `DaemonSet`** (amended 2026-08-30, OQ-119: provisional, unmeasured) | never |
 
 ### Pod-spec constraints, each tied to a boundary
 
@@ -229,14 +231,13 @@ sides of the boundary.
 
 **Model-provider requests are ordinary egress.** The harness issues them from inside the run
 container (`12-harness.md` §1), so they leave through `EgressVia` and are subject to E1-E6
-like any tool fetch. Whether the proxy can inject a model-provider key **at all** is
-[`14-credentials.md`](14-credentials.md)'s **unknown — OQ** (§What it deliberately does not
-settle): both of its injection paths require an `effect_ledger` row — obligation 2 keys the
-rewrite entry on the dispatch's `idempotency_key`, and `credential_placeholders.effect_key`
-is `NOT NULL` with a composite FK to the ledger — and a model request has none. Until that
-OQ is decided, `12-harness.md` §1's "no credential" and "no egress path of its own" are
-requirements stated here, not properties the deployment enforces — the pattern this section
-uses for its other owed edits.
+like any tool fetch. **Amended 2026-08-30 (OQ-075): the proxy injects a model-provider key**,
+per [`14-credentials.md`](14-credentials.md) §What it deliberately does not settle — the egress
+proxy is a Phoenix component holding and injecting the credential keyed on `run_token`/`run_id`
+rather than on an `effect_ledger` row, because a model call is not an effect. This is the one
+egress class in this document whose credential path is not `14-credentials.md`'s
+ledger-keyed placeholder rewrite table: it is the proxy's own configuration, resolved by
+`run_token` rather than by `effect_key`.
 
 ### The rules
 
@@ -362,7 +363,7 @@ tested through the public boundary, and each control must make the suite go red.
 | Teredo-obfuscated forms are blocked | request the `2001::/32` form of a blocked address | remove the E4 decode ⇒ allowed |
 | The guard connects to the address it checked | resolve a hostname to a public address, flip the DNS answer to `169.254.169.254` between check and connect, request it | re-resolve at connect ⇒ the connection lands on the metadata address and E5 never sees a hostname it can block |
 | The tool executor has no second egress path | run a platform-executed fetch tool against `169.254.169.254` from the executor | give the executor a direct route ⇒ it connects and no proxy log line exists |
-| A model request leaves only through the proxy | run a turn; assert the proxy logged the model host. **The "and the container holds no API key" half cannot be asserted** while [`14-credentials.md`](14-credentials.md)'s injection OQ is open — a model request has no `effect_ledger` row, so neither injection path is available and no document says where the key is | give the container a direct route ⇒ the turn still succeeds with no proxy log line |
+| A model request leaves only through the proxy | run a turn; assert the proxy logged the model host and the run container's environment, mounts and outbound headers carry no provider key (amended 2026-08-30, OQ-075: the proxy injects it, keyed on `run_token`/`run_id`, not an `effect_ledger` row) — **unproven**, since this document's own §Status table marks the provider's gates unrun | give the container a direct route ⇒ the turn still succeeds with no proxy log line |
 | Unboundable encodings are rejected | server returns `zstd` despite `Accept-Encoding` | accept it ⇒ a few compressed bytes expand to multi-MiB |
 | A run mounts only the knowledge package and one scratch | from inside the run container, read `/proc/self/mountinfo` and assert exactly the two, with the package read-only | permit an extra volume in admission ⇒ a `hostPath` appears in `mountinfo` and the assertion must fail |
 | Scratch does not survive suspend | write to scratch, suspend past the warm window, resume, read | back scratch with a PersistentVolume instead of `emptyDir` ⇒ the written bytes are still readable after resume and the assertion must fail |

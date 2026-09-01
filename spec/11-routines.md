@@ -45,6 +45,9 @@ CREATE TABLE tasks (
     timezone       TEXT,                 -- IANA name, e.g. 'Asia/Kolkata'
     overlap_policy TEXT NOT NULL DEFAULT 'skip' CHECK (overlap_policy IN ('skip','allow')),
     misfire_grace_seconds INTEGER NOT NULL DEFAULT 30 CHECK (misfire_grace_seconds BETWEEN 0 AND 86400),
+    -- Amended 2026-08-30 (OQ-099): a webhook task's own fire credential, KMS-referenced
+    -- exactly as 14-credentials.md's secret_ref; NULL for every other trigger_kind.
+    fire_key_ref   TEXT   CHECK (fire_key_ref LIKE 'kms://%'),
     created_by     TEXT   NOT NULL,      -- every Run this task creates is attributed here
     state_changed_by TEXT,               -- the LAST transition only; there is no task log
     state_changed_at TIMESTAMPTZ,
@@ -58,7 +61,8 @@ CREATE TABLE tasks (
     FOREIGN KEY (tenant_id, state_changed_by) REFERENCES principals (tenant_id, principal_id),
     CONSTRAINT task_cron_fields_together CHECK ((trigger_kind = 'cron')
         = (cron_expression IS NOT NULL AND timezone IS NOT NULL)),
-    CONSTRAINT task_next_fire_only_cron CHECK (trigger_kind = 'cron' OR next_fire_at IS NULL)
+    CONSTRAINT task_next_fire_only_cron CHECK (trigger_kind = 'cron' OR next_fire_at IS NULL),
+    CONSTRAINT task_fire_key_only_webhook CHECK (trigger_kind = 'webhook' OR fire_key_ref IS NULL)
 );
 CREATE INDEX tasks_due ON tasks (tenant_id, next_fire_at)   -- the system actor's access path
     WHERE state = 'active' AND trigger_kind = 'cron';
@@ -103,7 +107,7 @@ disabled, and an edited prompt must not retroactively change what a completed Ru
 |---|---|---|---|
 | `cron` | a tick of a 5-field cron expression in an IANA timezone arrives | **shipped** | Omnigent (`rrule` + timezone, `db_models.py:1434 @ ba9e371`); Letta (timezone-aware IANA schedules, `projects/letta/teardown.md:346`) |
 | `manual` | a person fires it | **shipped** | Letta's `one_off_due` run reason (`cron-file.ts:26-43 @ 852ca24`) |
-| `webhook` | an external caller fires it through a relay we operate | **shipped, without a per-webhook secret** | v0.1 has no unauthenticated endpoint and no per-webhook secret; the kind records only that a fire arrived from outside, through an admin-credentialed relay. Evidence: none — a naming choice, and whether it earns its own credential is **unknown — OQ** |
+| `webhook` | an external caller fires it through a relay we operate | **shipped, with a per-task API key** (**amended 2026-08-30, OQ-099**, superseding "shipped, without a per-webhook secret": v0.1 has no unauthenticated endpoint and no per-webhook secret; the kind records only that a fire arrived from outside, through an admin-credentialed relay, and whether it earns its own credential was `unknown — OQ`) | the fire endpoint for a `webhook` task authenticates with a key minted for that task, held via [`14-credentials.md`](14-credentials.md), instead of the admin bearer token every other task route requires; the route stays unauthenticated to the general API otherwise |
 | `event` | a metric or observation crosses a predicate | **reserved; `422 trigger_kind_unsupported`** | see below |
 
 **Cron rather than RFC 5545 `rrule`.** Omnigent uses `rrule`, Letta uses cron; both work. Cron is chosen because
@@ -113,7 +117,11 @@ expression plus an IANA zone yields one UTC instant per tick with no library-dep
 unchanged. The residual dependency is tzdata: the expression and the zone are library-free, but the zone → UTC
 resolution is not. Every scheduler replica resolves against **one pinned tzdata release**, recorded alongside
 `canon_profile`, and a release change is a deployment event — two replicas straddling it would derive two names
-for one tick.
+for one tick. **Amended 2026-08-30 (OQ-093):** the release will be pinned in the deploy image
+and recorded in `synthesis/scope.yaml`'s `tzdata` key, alongside the `harness` key that
+`check_scope_source_of_truth()` (`tools/validate_spec.py`) asserts against — a release bump is
+a deployment event gated the same way a harness bump is. The `tzdata` key itself holds a
+placeholder pending the first deploy; no check compares it yet (§`synthesis/scope.yaml`).
 
 **`event` is in the enum and refused by the API.** v0.1 has no metric or observation resource for a predicate to
 bind to — OTel semantics are owed, cost measurement is Tier 3 — so the kind is reserved and `POST /v1/tasks`
@@ -240,7 +248,11 @@ The vocabulary is Letta's nine cron run reasons, the most careful failure-mode e
    ticks are neither fired nor enumerated. The horizon is 24 hours because an enumeration window is a **scan
    cost, not a correctness window**: `task_firings` is permanent, so a recorded decision stays recognisable
    forever, and the horizon bounds only how far back a restarting scanner will manufacture `missed` rows for
-   ticks nobody was watching.
+   ticks nobody was watching. **Amended 2026-08-30 (OQ-097):** for an outage older than the horizon, a scan
+   writes one summary `admin_events` row instead of enumerating what it cannot name —
+   `action = 'task.catchup_skipped'`, `target_kind = 'task'`, `detail = {from, to, count}` where `count` is the
+   scan's own estimate of ticks in `[from, to)` ([§01](01-schema.md) §Admin audit) — because no Run and no
+   per-tick `task_firings` row exists for a tick outside the horizon, so `run_events` cannot carry it either.
 
 ### One borrowed constraint
 
@@ -268,18 +280,26 @@ row.**
 | `paused` | `active` | resume | owner, operator | no catch-up; §Missed ticks applies |
 | `active` / `paused` | `disabled` | disable | owner, operator | **terminal** |
 | `disabled` | — | — | **nobody** | create a new task |
-| any | any | any | **not the system** | v0.1 has no automatic transition on a task |
+| `active` | `paused` | 3 consecutive failed Runs | **system** | amended 2026-08-30, OQ-095: auto-pause; owner notified; see below |
+| any other | any | any | **not the system** | **amended 2026-08-30 (OQ-095)**, superseding "v0.1 has no automatic transition on a task": no other automatic transition exists — the one above is the sole exception |
 
 **owner** is the principal in `tasks.created_by`, **operator** one with tenant-level admin authority; both terms
-are §05's. The system actor fires ticks (§Idempotent firing) and never moves a task between states. **Every
+are §05's. The system actor fires ticks (§Idempotent firing) and (**amended 2026-08-30, OQ-095**,
+superseding "never moves a task between states") moves a task only on the auto-pause transition
+below — no other system-initiated state change exists. **Every
 write to a task requires an admin credential**: an agent credential may read a task and may not create, pause,
 disable or fire one. A routine is *standing authority to create Runs attributed to another principal*, so it
 sits on the governor's side of `06-api.md`'s rule that the governed cannot edit the governor — the reasoning
 that keeps approvals away from agent credentials (`synthesis/scope-reconciliation.md` §7a, D-A). A fire acts as
-`tasks.created_by`, which is why it is admin-only though an ordinary Run is not. **No system transition in
-v0.1**: a routine whose Runs fail every night keeps firing, its failures queryable through `runs.error_code` and
-work in flight stopped by `POST /v1/runs/{id}/cancel` (`06-api.md` §Runs); auto-pausing after repeated failure
-needs a threshold nobody has evidence for, **unknown — OQ**.
+`tasks.created_by`, which is why it is admin-only though an ordinary Run is not. **Amended
+2026-08-30 (OQ-095): the system pauses a routine after 3 consecutive failed Runs** (`state:
+'active' → 'paused'`, `state_changed_by` = the system actor, an `admin_events` row
+`action = 'task.auto_paused'`, `detail = {consecutive_failures: 3}`, [§01](01-schema.md)
+§Admin audit), and the owner is notified. Resuming is an admin act like any other `resume`
+(§Who may create, pause and disable a routine above); there is no auto-resume. "Consecutive"
+counts the task's own `runs.state = 'failed'` Runs back from the most recent, reset by any
+non-`failed` terminal state. Ticks recorded while paused are `skipped` / `task_paused`
+(§Reason vocabulary), exactly as an owner-initiated pause.
 
 Routes are owed to `06-api.md` and `contracts/openapi.yaml`: `POST /v1/tasks`, `PATCH /v1/tasks/{id}`, `POST
 /v1/tasks/{id}/{pause,resume,disable,fire}` (admin), and `GET /v1/tasks`, `/v1/tasks/{id}`,
@@ -375,12 +395,18 @@ Binding form: `spikes/VERIFICATION-RULES.md`, rules 1, 3 and 4 in particular.
 
 ## What this does not guarantee
 
-- **Ticks older than 24 hours are not enumerated.** After a longer outage the firing history has a hole, and the
-  hole is the only evidence; a summary row for it is **unknown — OQ**.
-- **`webhook` is a label, not a mechanism.** A `webhook` fire is an ordinary admin-credentialed `POST
-  /v1/tasks/{id}/fire` through a relay we operate; the kind records provenance and nothing more. A real external
-  source usually cannot present an admin token; whether the kind earns its own credential and endpoint is
-  **unknown — OQ**.
+- **Ticks older than 24 hours are not enumerated.** After a longer outage the firing history has a hole; amended
+  2026-08-30 (OQ-097), superseding "the hole is the only evidence; a summary row for it is unknown — OQ": the
+  hole now carries one summary `admin_events` row (§Missed ticks 3) rather than being only inferable.
+- **`webhook` carries its own key, amended 2026-08-30 (OQ-099)**, superseding "`webhook` is a label, not a
+  mechanism. A `webhook` fire is an ordinary admin-credentialed `POST /v1/tasks/{id}/fire` through a relay we
+  operate; the kind records provenance and nothing more. A real external source usually cannot present an admin
+  token; whether the kind earns its own credential and endpoint is unknown — OQ."
+  `tasks.fire_key_ref` (§Schema)
+  holds a per-task API key via [`14-credentials.md`](14-credentials.md)'s KMS-reference storage; a
+  `webhook` task's `POST /v1/tasks/{id}/fire` authenticates with that key instead of the admin
+  bearer token every other task route requires, and the route is otherwise unauthenticated — a real
+  external source presents the task's own key, never a platform admin credential.
 - **No per-firing budget.** Omnigent caps a scheduled task with `max_cost_usd` (`db_models.py:1434 @ ba9e371`)
   and we cannot: cost measurement is Tier 3, so there is no priced usage to charge against, and a runaway
   routine is bounded only by its Runs' deadlines.
@@ -399,7 +425,10 @@ Binding form: `spikes/VERIFICATION-RULES.md`, rules 1, 3 and 4 in particular.
   `task_firings` stores no `request_digest` (§Who may create, pause and disable a routine).
 - **One trigger per task.** A nightly-AND-webhook routine is two tasks in v0.1; a second trigger changes the
   `firing_key` derivation, since two triggers can name one instant. **unknown — OQ**.
-- **No automatic transition on a task.** A routine whose Runs fail every night keeps firing (§Who may create);
-  auto-pause needs a threshold with no evidence behind it. **unknown — OQ**.
+- **One automatic transition on a task, and it is a pause, not a fix.** Amended 2026-08-30 (OQ-095),
+  superseding "No automatic transition on a task. A routine whose Runs fail every night keeps firing (§Who may
+  create); auto-pause needs a threshold with no evidence behind it. unknown — OQ": 3
+  consecutive failed Runs pauses the routine (§Who may create); nothing resumes it but an admin, and nothing
+  diagnoses why it failed.
 - **No Task-level retry.** ADR-0002 records Task-level and Run-level idempotency as different problems; this
   document answers only the firing side. Retrying a failed Run is a new firing with a new key, or a new Run.

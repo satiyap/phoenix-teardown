@@ -939,6 +939,24 @@ def check_scope_source_of_truth() -> list[str]:
         got = [r[0].replace("**", "") for r in rows if r[0] != "Area"]
         compare("spec/00-overview.md owed_specs", list(scope["owed_specs"]), got)
 
+    # 4. harness pin: scope.yaml `harness` vs spec/07's stated pin (OQ-054, added
+    # 2026-08-30). Unlike 1-3 above this is prose vs prose, not table vs table, so it
+    # is a direct version-string comparison rather than a `compare()` list diff.
+    sp07 = SPEC / "07-adapter-protocol.md"
+    if not sp07.exists():
+        errs.append("spec/07-adapter-protocol.md is missing, so the harness pin is UNVERIFIED")
+    else:
+        m = re.search(r"pydantic-ai-slim\s*==\s*([0-9][\w.]*)", sp07.read_text())
+        if not m:
+            errs.append("spec/07-adapter-protocol.md states no pydantic-ai-slim pin to "
+                        "compare with scope.yaml's harness key")
+        else:
+            want_version = m.group(1)
+            got_harness = str(scope.get("harness", ""))
+            if "pydantic-ai" not in got_harness.lower() or want_version not in got_harness:
+                errs.append(f"scope.yaml harness={got_harness!r} does not match spec/07's "
+                            f"pinned pydantic-ai-slim == {want_version}")
+
     return errs
 
 

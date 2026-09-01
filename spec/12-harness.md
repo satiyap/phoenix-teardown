@@ -270,8 +270,9 @@ verified against `manifest.json` before the spawn ([`16-knowledge.md`](16-knowle
 §Materialisation, [`15-sandbox.md`](15-sandbox.md) §6 Boundary 3 — storage). `Start.config` carries only
 the **closure selection** — the entry nodes and the admitted digests, a projection of
 `manifest.json` — and stays opaque to the control plane
-(`spec/07-adapter-protocol.md:394-400`). That term is proposed here, not yet owned by any
-document — OQ-080. The package does not travel in a frame: the ceiling is 4 MiB
+(`spec/07-adapter-protocol.md:394-400`). **Amended 2026-08-30 (OQ-080): the term is owned by
+[`16-knowledge.md`](16-knowledge.md), beside `manifest.json`**, which this document names
+without defining — see [`16-knowledge.md`](16-knowledge.md) §Closure selection. The package does not travel in a frame: the ceiling is 4 MiB
 (`spec/07-adapter-protocol.md` §Limits and backpressure) and spike 04's real bundle is 133 nodes. The harness
 never resolves, fetches, or crawls at run time; it reads the mount and the selection.
 
@@ -298,8 +299,11 @@ Retrieval is allowed, and it is subordinate:
 Rule 3 is what makes the assembly checkable, and why the bundle is compiled rather than
 queried: the platform must be able to say, from the pin alone, what could have been in
 context. Retrieval **filtering by authorisation**, before content reaches a model or an
-embedding index, is `unknown — OQ`: spike 04 names it the largest untested area and this
-document cannot close it by assertion.
+embedding index, was `unknown — OQ`: spike 04 names it the largest untested area and this
+document cannot close it by assertion. **Amended 2026-08-30 (OQ-103): owner named** —
+[`16-knowledge.md`](16-knowledge.md) owes a Cedar `read`-on-classification amendment before
+the analytics pack, not this document; see [`16-knowledge.md`](16-knowledge.md) §Retrieval
+authorisation.
 
 ## 9. The checkpoint payload
 

@@ -429,6 +429,16 @@ asserted, unsupported}`. An adapter that cannot provide stable step ids declares
 `unsupported` and gets at-most-once-*attempted* semantics, with that limitation recorded
 in its contract rather than hidden.
 
+**Amended 2026-08-30 (OQ-107): a second capability key,
+`resumable_after_process_loss ∈ {verified, asserted, unsupported}`.** It declares whether
+the adapter's checkpoint payload is sufficient, on its own, to rebuild harness state after
+the process that held it is gone — the property [`15-sandbox.md`](15-sandbox.md) §6 and
+ADR-0016's fallback gate (spike 05 gate 4) depend on. `sdk_subprocess` declares `asserted`
+until spike 05 gate 4 promotes it to `verified` per [§08](08-conformance.md)'s live-layer
+rule (`ASSERTED → VERIFIED` on a passing probe). These two keys are the registry
+[§08](08-conformance.md)'s declaration-completeness check enumerates — stated here because
+no other document wrote it down, which is why that check was unrunnable.
+
 ---
 
 ## Capability declaration

@@ -398,3 +398,84 @@ judge's cross-spec questions; the rest are the per-document proposals, deduplica
 meaning. The cohort's authors had claimed twelve numbers across three documents with three
 collisions and none of them filed; every in-text reference in `12`, `17` and `18` was
 rewritten to its allocated number. That nothing allocates is itself OQ-082.
+
+## 9. Open-question triage (2026-08-30)
+
+`OQ-TRIAGE-2026-08-30.md`'s proposal, as overridden by its own "Decisions taken 2026-08-30"
+section, applied to `open-questions.md` and to the spec/decision files each DECIDE row
+names. The triage's header line reads "114 open" and "CLOSE 38 · DECIDE 34 · BUILD 28 ·
+SPIKE 14"; `open-questions.md` itself carried **113** rows in an `open` status at the time
+of this pass, four of them already `open — parked` (**amended 2026-08-30, OQ-019/OQ-042/OQ-055/OQ-070**,
+superseding "four of them already `open — parked`": only OQ-019 and OQ-042 — two rows — were
+already `open — parked`; OQ-055 and OQ-070 were plain `open` before this pass). The counts below are recounted from the
+document's own rows rather than copied from the triage's header, on this repository's own
+rule that a stated count is checked against the artifact, not against another count
+(OQ-052, OQ-060).
+
+| Bucket | Rows | Applied as |
+|---|---|---|
+| CLOSE | 40 (incl. 5 spike-06/spec-02 residue rows) | `status: closed 2026-08-30 — <reason>` |
+| MERGE | 2 (OQ-016 → OQ-098, OQ-028 → OQ-130) | `status: merged 2026-08-30 into OQ-NNN` |
+| DECIDE | 29 | `status: decided 2026-08-30 — <decision>`, plus the spec/decision amendment named per row |
+| BUILD (incl. tooling and deferred-with-trigger rows) | 29 | `status: open — at build (2026-08-30) — <owner/trigger>` |
+| SPIKE | 9 (5 to spike 05, 2 to spike 07, 2 to the new spike 08) | `status: open — spike NN gate (2026-08-30) — <what>` |
+| PARK | 4 (OQ-019, OQ-042, OQ-055, OQ-070) | left as the triage found them |
+| **Total** | **113** | |
+
+No row was deleted; every status change is a dated addition to the Status cell, per this
+repository's amend-never-erase rule.
+
+**Amended 2026-08-30 (the "buckets" row):** the paragraph above disclaims only the triage's
+header line, but the authoritative "Decisions taken 2026-08-30" table's `buckets` row itself
+reads "CLOSE 38 / BUILD 28 / SPIKE 14 accepted as proposed" — and the applied totals
+(40/29/29/9/2/4 = 113) depart from that row's digits too, not only from the header's. "Accepted
+as proposed" endorsed the per-OQ dispositions the triage assigned, not the header's summed
+digits; every per-OQ disposition was applied as assigned, then the buckets above were counted
+directly off `open-questions.md` itself, per the same OQ-052/OQ-060 rule this section already
+states — so the `buckets` decision row was not applied as written, only its constituent rows
+were.
+
+**The seven owner overrides** (**amended 2026-08-30, OQ-081/083/086/099/111/131/132**,
+superseding "The eight owner overrides."): the triage's "Decisions taken" table says
+"overrides in bold" without a count, and never states "eight" anywhere in the document — that
+number was this section's own miscount. **Seven** rows carry the bold marker — recorded here
+rather than silently matched, the same discipline the count reconciliation above applies:
+
+| OQ | Proposal | Override |
+|---|---|---|
+| 081 | no fourth knowledge layer in v0.1 | **team and persona layers added now**: bundle → tenant → team → persona → agent |
+| 083 | registry-first; a connector may only *propose* a `Resource` | **a connector may auto-register a `Resource`** on first sight; registration is itself a ledgered, policy-evaluated effect |
+| 086 | Phoenix is always the second (verifier) publisher | **the customer nominates** the verifier publisher |
+| 099 | an HMAC-signed unauthenticated webhook endpoint | **a per-task API key** on the fire endpoint |
+| 111 | an approval of `kind = 'consent'` | **OAuth consent is out of scope for v0.1**; no `kind`, no state change |
+| 131 | add a catch-all `other_tokens` field | **enumerate every named token class** the SDK exposes |
+| 132 | refuse an unpriced model at run admission | **do not refuse**; run it and record unpriced usage |
+
+**Files amended applying the DECIDE rows** (dated 2026-08-30 sentences, plus DDL where a
+row named a table or column): `spec/01-schema.md` (`admin_events`, `channel_members`,
+`decided_by_kind` widened, adapter_contracts per-tenant note, platform `policies` seeding
+note), `spec/04-events.md` (admin-events cross-reference, `message.refused`),
+`spec/06-api.md` (fire-key auth note, external-approver note), `spec/07-adapter-protocol.md`
+(`resumable_after_process_loss`), `spec/09-decisions.md` (§7 amendment),
+`spec/10-work-bundles.md` (`node_roles_are_content_or_executable` relaxed, `retries`,
+Resource auto-registration, verifier-publisher nomination, receipt-independence trigger),
+`spec/11-routines.md` (tzdata pin, auto-pause, `catchup_skipped`, `fire_key_ref`),
+`spec/12-harness.md` (closure-selection and retrieval-authorisation cross-references),
+`spec/14-credentials.md` (egress-proxy model-provider credentials, fire-key storage note),
+`spec/15-sandbox.md` (scheduler-default values, model-credential injection cross-ref),
+`spec/16-knowledge.md` (`team`/`persona` layers, closure selection, retrieval authorisation,
+package limits, `{self, parent}` state scope), `spec/17-messaging.md` (envelope retention,
+`message.refused`, `channel_members`), `spec/18-cost.md` (`Usage` audio-token fields,
+no-admission-refusal), `decisions/ADR-0015-approval-is-a-resource-with-an-approver.md`
+(amendment 4), `decisions/ADR-0016-sandbox-placement-is-control-plane.md` (config-defaults
+table), `synthesis/scope.yaml` (`harness`, `tzdata` keys), `tools/validate_spec.py`
+(harness-pin assertion in `check_scope_source_of_truth()`), `tools/test_validate_spec.py`
+(its mutation control), and, outside `spec`/`decisions`/`synthesis`,
+`spikes/04-work-bundle/RESULT.md` (dated correction to the 133-vs-150 sentence) and
+`spikes/03-postgres/test_postgres.py` + `RESULT.md` (scenario 9 updated for the widened
+`decided_by_kind`). OQ-111 is the one DECIDE row with **no** file touched, per the triage's
+own instruction: it moves v0.1 further out of scope, not into it.
+
+Not applied: OQ-085 (verifier interface) and OQ-103's full design (only the one paragraph
+the triage asked for landed; the analytics-pack design itself is still owed) remain BUILD
+and partial-DECIDE respectively, as the triage marks them — neither is a gap in this pass.

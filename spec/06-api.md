@@ -251,6 +251,13 @@ There is **no route that writes a `task_firings` row or sets `runs.task_id` dire
 firing is created only inside the transaction that inserts the firing record, and the
 absence of a route is the enforcement — the same argument §05's system transitions use.
 
+**Amended 2026-08-30 (OQ-099).** `POST /v1/tasks/{id}/fire` on a `trigger_kind = 'webhook'`
+task is the one route in this document that does **not** take the admin bearer token: it
+authenticates with the task's own `fire_key_ref` key ([`11-routines.md`](11-routines.md)
+§Schema, [`14-credentials.md`](14-credentials.md)), presented however the relay convention
+requires (e.g. a header), and is otherwise unauthenticated. Every other `trigger_kind`'s
+`/fire` keeps the admin-only rule above.
+
 ### Task catalogue — readable by any authenticated class
 
 ```http
@@ -300,7 +307,14 @@ The single rule that *is* enforced is the approver's identity — an admin crede
 principal of kind `human`, pinned by a composite foreign key in §01. That is a deliberate
 refusal on the evidence, recorded 2026-08-27 — see
 [§09](09-decisions.md) 7 — and workloads requiring more must delegate authorization to an
-external governed system.
+external governed system. **Amended 2026-08-30 (OQ-044, ADR-0015 amendment 4):** binding an
+external approval system as the approver does not need a quorum engine — `decided_by` may
+now also name a `service` principal, standing for the external system itself, with the
+ticket reference it decided against carried in `decision_rationale`
+([§01](01-schema.md) §Approval, `decided_by_kind` widened to `human | service`). No
+"first among many" and no m-of-n: one attributable decision, exactly as for a human approver,
+just made by a governed external system instead of a person at a keyboard. Trigger for
+building a real quorum engine: the first finance/legal pack.
 
 ## Idempotency
 

@@ -141,8 +141,10 @@ CREATE TABLE approvals (
     status      TEXT   NOT NULL
         CHECK (status IN ('pending','approved','denied','expired','superseded')),
     decided_by  TEXT,
+    -- Widened 2026-08-30 (OQ-044, ADR-0015 amendment 4): a 'service' principal may
+    -- decide, standing for a customer's external finance/legal approval system.
     decided_by_kind principal_kind
-        CHECK (decided_by_kind IS NULL OR decided_by_kind = 'human'),
+        CHECK (decided_by_kind IS NULL OR decided_by_kind IN ('human', 'service')),
     decided_at  TIMESTAMPTZ,   -- spec/01 name; `responded_at` was the spike's own drift
     expires_at  TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (tenant_id, approval_id),

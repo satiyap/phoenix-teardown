@@ -916,6 +916,11 @@ paths:
         reused key REPLAYS the recorded firing (200) rather than 422: the route carries
         no body beyond the task it names, so a reused key and a changed body cannot be
         told apart. spec/11-routines.md.
+
+        Amended 2026-08-30 (OQ-099): the `security` block above is the admin-caller case
+        only. A `webhook` task instead authenticates this route with the per-task key held
+        at `tasks.fire_key_ref` (spec/11-routines.md, spec/14-credentials.md) rather than
+        the admin bearer token; that key scheme is not yet modeled in `components` here.
       parameters:
         - { $ref: '#/components/parameters/RunId' }
         - { $ref: '#/components/parameters/IdempotencyKeyRequired' }

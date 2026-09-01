@@ -10,16 +10,24 @@ how delegation depth is set and capped, the separation of the `Exchanger` from t
 **What it deliberately does not settle.** The egress proxy's *placement* is
 [§15](15-sandbox.md)'s and is already settled there — **one proxy deployment per tenant
 data plane** ([`15-sandbox.md`](15-sandbox.md) §5 Placement); this states only the contract that boundary
-must honour. The platform's own model-provider keys are out of scope: not held by a tenant
-principal, not `credentials` rows. They necessarily traverse the same proxy — §15's egress
-policy admits one destination and no second path ([`15-sandbox.md`](15-sandbox.md) §3
-Pod-spec constraints and §5 Placement) —
-but whether they ride this document's **rewrite table** or the proxy's own configuration is
-**unknown — OQ**.
+must honour. **Amended 2026-08-30 (OQ-075): the platform's own model-provider keys are now
+in scope for their injection, not for their custody.** They are not held by a tenant
+principal and not `credentials` rows — that half is unchanged, and no `Credential`,
+`credential_issuances` or `credential_placeholders` row is minted for one. Instead: **the
+egress proxy is a Phoenix component**, and it holds and injects the model-provider
+credential for a model request, keyed on the request's `run_token`/`run_id` rather than on
+an `effect_ledger` row — a model call is not an effect ([`12-harness.md`](12-harness.md) §1,
+[`15-sandbox.md`](15-sandbox.md) §5), so no ledger row is required or created for it. They
+necessarily traverse the same proxy — §15's egress policy admits one destination and no
+second path ([`15-sandbox.md`](15-sandbox.md) §3 Pod-spec constraints and §5 Placement) —
+and now ride the proxy's own configuration, keyed by `run_token`, rather than this
+document's ledger-keyed rewrite table.
 
 It also does not settle: the mapping of the three flows onto RFC 6749/8693 grant types (the
 `Exchanger` interface is ours, the grant is the implementation's, and the interactive half
-is blocked on the consent OQ below); the admin HTTP surface, [§06](06-api.md)'s and its
+— **amended 2026-08-30 (OQ-111), superseding "is blocked on the consent OQ below"** — is out
+of scope for v0.1 rather than blocked, per §Consent is not modelled here below); the admin
+HTTP surface, [§06](06-api.md)'s and its
 OpenAPI contract's, subject to the constraint that no route may return `secret_ref`,
 `material_ref` or any placeholder value; and the `credential.exchanged` /
 `credential.refreshed` / `credential.placeholder_rejected` rows, which belong to
@@ -203,10 +211,12 @@ login, and a boolean would put an exchange and a login on one code path.
 
 **Consent is not modelled here.** AgentCore drives `USER_FEDERATION` through a browser
 consent with an `on_auth_url` callback, a poller, and `custom_state` for callback
-validation (`projects/aws-agentcore/teardown.md:156-160 @ 826416a`). Where an interactive
-consent surfaces in the run state machine is **unknown — OQ**: `waiting_input → running`
-requires a terminal `approvals` row ([§05](05-state-machine.md)), and consent is not
-approval. Any callback we implement **must** carry the equivalent of `custom_state`.
+validation (`projects/aws-agentcore/teardown.md:156-160 @ 826416a`). **Amended 2026-08-30
+(OQ-111, owner override, superseding "Where an interactive consent surfaces in the run state
+machine is unknown — OQ"):** user-federated OAuth consent is out of scope for v0.1 — no
+`approvals.kind`, no run-state change; `waiting_input → running` keeps requiring only a
+terminal `approvals` row ([§05](05-state-machine.md)), and no OAuth-consent path writes one.
+Any callback we implement **must** carry the equivalent of `custom_state` if this is revisited.
 
 ## Exchanger and Refresher are separate components
 
@@ -372,6 +382,13 @@ spike 05 T2), and a child inherits its parent's environment. The driver therefor
 secret but `run_token`: no credential env var, no mounted secret file, no KMS decrypt grant
 on the container's identity. A credential mounted for the driver's convenience is one the
 harness reads out of `/proc/1/environ`.
+
+**Amended 2026-08-30 (OQ-099): a second kind of held secret, outside the `credentials`
+resource.** A `webhook`-triggered task's fire key (`tasks.fire_key_ref`,
+[`11-routines.md`](11-routines.md) §Schema) is not a `Credential` — it authenticates a caller
+*to* Phoenix, the reverse direction of everything else in this document, which is what an
+action carries *outward*. It is stored the same way regardless: a `kms://` URI, never a
+plaintext column, under this document's §Storage rule below.
 
 ## Storage: a KMS reference, never a column
 

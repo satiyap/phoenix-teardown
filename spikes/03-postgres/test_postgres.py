@@ -618,8 +618,14 @@ def s9_approver_must_be_human():
     `decided_by_kind` and pins it inside the foreign key.
 
     Invariant: an approval can only be decided by a principal of kind='human'.
+
+    Amended 2026-08-30 (OQ-044, ADR-0015 amendment 4, superseding "an approval can
+    only be decided by a principal of kind='human'"): `decided_by_kind` now admits
+    'service' too, standing for a customer's external finance/legal approval
+    system -- still one attributable decision, never a quorum. 'agent' remains
+    refused: only a human or a governed external system may decide.
     """
-    print("\n9. the approver must be a human (ADR-0015)")
+    print("\n9. the approver must be a human or a bound external system (ADR-0015)")
     conn = psycopg.connect(DSN)
     fresh(conn)                       # correct delete order lives in one place
     with conn.cursor() as c:
@@ -646,7 +652,8 @@ def s9_approver_must_be_human():
 
     attempt("a HUMAN principal can be the approver", "alice", "human", True)
     attempt("an AGENT principal cannot", "bot", "agent", False)
-    attempt("a SERVICE principal cannot", "svc", "service", False)
+    attempt("a SERVICE principal can, standing for an external system (2026-08-30)",
+            "svc", "service", True)
     attempt("an agent cannot masquerade by claiming kind='human'", "bot", "human", False)
 
     try:

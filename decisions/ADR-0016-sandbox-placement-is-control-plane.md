@@ -80,6 +80,19 @@ continue?" inside a component that cannot name the tenant asking.
   idle cost is zero and resume is seconds, which is invisible behind a human wait. Warm-tier
   policy (keep the pod for short waits), a small warm pool, and pre-pull are scheduler
   configuration under this ADR, never visible to the harness.
+
+  **Amended 2026-08-30 (OQ-119): provisional defaults, given below — unmeasured.**
+
+  | Config | Default | Status |
+  |---|---|---|
+  | Warm window | 10 minutes | provisional, unmeasured |
+  | Warm pool size | 2 per `WorkerPool` | provisional, unmeasured |
+  | Image pre-pull | a `DaemonSet` | provisional, unmeasured |
+  | Sandbox quota (`CreateSpec.Limits`) | 1 CPU / 2 GiB | provisional, unmeasured |
+
+  Provisional because no measurement in this repository fixes any of the four; they are what
+  spike 05 gate 1 ("idle costs nothing") needs a number to assert against, and are expected to
+  move once that gate runs against real traffic.
 - **No upgrade provider is named** (amended 2026-08-27: an earlier bullet listed candidates;
   removed — that is a future decision, taken on evidence when utilisation becomes a
   measured problem). What *is* fixed now is the rule that keeps the choice open: **the

@@ -27,7 +27,7 @@ cross-process contention and Postgres error codes were assumptions.
 | 6 | Sweeper vs late settlement | the `indeterminate` verdict survives a late fenced settle |
 | 7 | Run lease acquire / renew / reclaim | monotonic-but-not-dense tokens; non-holder cannot renew; fenced write rejected |
 | 8 | `ON CONFLICT ... RETURNING` and isolation | `no row` is the reliable ownership signal; `REPEATABLE READ` protects the fold and `READ COMMITTED` does not |
-| 9 | **The approver must be a human** (added redo 3) | `decided_by` alone did not enforce it; pinning `kind` inside the FK does. An agent, a service account, and an agent claiming `kind='human'` are all refused |
+| 9 | **The approver must be a human or a bound external system** (added redo 3; amended 2026-08-30, OQ-044) | `decided_by` alone did not enforce it; pinning `kind` inside the FK does. An agent and an agent claiming `kind='human'` are refused; a service account is now admitted, standing for an external finance/legal approval system (ADR-0015 amendment 4) |
 
 The DDL in `spec/01-schema.md` applied to a real server **unchanged** — table names,
 composite keys, both `CHECK` constraints, the partial indexes and the trigger.
@@ -109,8 +109,10 @@ applying decision D-A, which forced the question "what actually stops an agent d
 The fix carries `decided_by_kind` on the row and pins it *inside* the foreign key
 (`(tenant_id, decided_by, decided_by_kind) → principals (tenant_id, principal_id, kind)`),
 which needs a `UNIQUE (tenant_id, principal_id, kind)` on `principals` to be legal. Scenario 9
-proves an agent, a service account, and an agent claiming `kind='human'` are all refused, and
-its negative control shows an agent **is** recorded as approver once the kind leaves the FK.
+proves an agent and an agent claiming `kind='human'` are refused, and its negative control
+shows an agent **is** recorded as approver once the kind leaves the FK. *(Amended 2026-08-30,
+OQ-044: a service account is no longer refused here — `decided_by_kind` was widened to admit
+`service`, standing for an external finance/legal approval system, ADR-0015 amendment 4.)*
 
 **4. `schema.sql` was not idempotent, and that produced a false PASS.**
 `CREATE FUNCTION check_event_epoch()` aborted on a second apply, so re-running the file left a
