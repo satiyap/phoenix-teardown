@@ -239,6 +239,30 @@ egress class in this document whose credential path is not `14-credentials.md`'s
 ledger-keyed placeholder rewrite table: it is the proxy's own configuration, resolved by
 `run_token` rather than by `effect_key`.
 
+### The proxy may embed a model router; it may not become a gateway
+
+**Added 2026-09-03 (OQ-147).** "The proxy's own configuration" above is where a provider router
+belongs if one is adopted: **linked into the proxy as a library**, so that the router's virtual-key
+table *is* the configuration this section already describes, and `run_token` maps to a router key
+rather than to a hand-maintained provider entry. Nothing in this document changes if it is — which
+is the test, and the reason the shape is a library rather than a service.
+
+A router deployed as its own service fails that test three ways, each of which this section
+already forbids for other reasons:
+
+| The deployed shape does | Which this document already forbids |
+|---|---|
+| adds a second destination the run container or the executor must reach | one permitted destination, `CreateSpec.EgressVia` (§3 pod-spec constraints) |
+| routes the router's own provider calls outside the guard | `ADR-0009`:86-89 requires the guard on **every** outbound request an agent can cause |
+| gives provider credentials a second holder | the credential swap is at the proxy so the secret never enters the sandbox (§Placement) |
+
+The router's own outbound traffic is the proxy's outbound traffic and is subject to E1-E6 with no
+exemption: an embedded router does not acquire a private socket by being a library. **A router
+must not terminate or originate tool traffic** — the connector path is
+[`07-adapter-protocol.md`](07-adapter-protocol.md) §Who executes a tool's, downstream of dispatch,
+and a router that speaks MCP to a tool host has moved execution off the ledger
+(OQ-151, and `07-adapter-protocol.md` §Who executes a tool as amended 2026-09-03).
+
 ### The rules
 
 | # | Rule | Evidence |

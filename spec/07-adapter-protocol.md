@@ -282,6 +282,23 @@ asserted (`UninterceptableTool`, gate 6). Any future admission must be stated as
 owns, must require a durable provider receipt for anything stronger, and must carry egress
 and confidentiality constraints — not only a mutation-pack restriction.
 
+**A gateway-hosted tool host is the same finding under a new name (added 2026-09-03, OQ-151).**
+The proposal is drawn as a model gateway that speaks MCP to a connector host beside it, so that a
+tool call is answered inside the model request. It is an instance of the paragraph above rather
+than an exception to it: the platform has no local body to withhold, so `ExternalToolset` cannot
+express the tool, `UninterceptableTool` (gate 6) refuses to register it, and the eight-step
+handshake — pin check, Cedar, effect key, INTENT, approval, claim, dispatch, fenced settle — is
+skipped in full. The three commitments in the table above break identically, and the retraction
+this section records on 2026-08-27 (redo 2) already ruled on the strongest available repair.
+
+Connector hosts are not thereby refused; their **position** is fixed. A tool host runs
+**downstream of step 7, dispatch** — the platform executes the tool by calling it, and its egress
+traverses `CreateSpec.EgressVia` with the rest of the executor's traffic (§Who executes a tool,
+above). What it may never be is a peer of the model path. One consequence is worth stating because
+a catalogue makes it easy to forget: step 1 tests `tool_name` against the **pinned** definition, so
+a host offering hundreds of servers is a menu a definition draws from at authoring time, never a
+registry a run discovers at execution time (ADR-0012).
+
 ### In-process SDK adapters route tool calls the same way
 
 `sdk_subprocess` (renamed from `sdk_in_process` 2026-08-29) is the only mode shipped, and it is the mode most likely to cheat: the SDK

@@ -22,6 +22,17 @@ necessarily traverse the same proxy — §15's egress policy admits one destinat
 second path ([`15-sandbox.md`](15-sandbox.md) §3 Pod-spec constraints and §5 Placement) —
 and now ride the proxy's own configuration, keyed by `run_token`, rather than this
 document's ledger-keyed rewrite table.
+**Amended 2026-09-03 (OQ-147): that configuration may be a
+router's.** If a provider router is embedded in the proxy ([`15-sandbox.md`](15-sandbox.md) §5),
+`run_token` maps to a router-side key that carries the allowed providers and models rather than to
+a provider entry this document specifies, and the real provider secret is held once, by the proxy,
+exactly as here. Three obligations are unchanged and are the whole of what this document asks of
+that shape: no `credentials`, `credential_issuances` or `credential_placeholders` row is minted for
+a model call; no material is ever returned to a caller; and the key is resolved from `run_token`
+and never from anything the run supplies. A router-side key is **not** a `Credential` and carries
+no delegation depth — it names no principal, which is why it is configuration and not a resource
+(OQ-150 holds the question of whether that layer may carry a *budget*, which would make it a
+policy point and is not settled here).
 
 It also does not settle: the mapping of the three flows onto RFC 6749/8693 grant types (the
 `Exchanger` interface is ours, the grant is the implementation's, and the interactive half

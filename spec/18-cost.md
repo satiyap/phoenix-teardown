@@ -26,6 +26,28 @@ only the harness: Pydantic AI calculates cost from `genai-prices`
 (`:382`, S9). Per-model-request granularity is OUR requirement on the harness mapping, not
 something the teardown evidences — **OQ-131**.
 
+**Amended 2026-09-03 (OQ-149): a router in the model path does not become a second usage
+source.** The sentence above says the control plane never sees a model request; if a provider
+router is embedded in the egress proxy ([`15-sandbox.md`](15-sandbox.md) §5, OQ-147) then something
+on the platform's side of the boundary *does* see one, and the temptation is to price from there
+because the wire is more trustworthy than a self-report. It is refused. The `Usage` frame stays
+the only path, for a reason that is not preference: the harness reports usage per **logical model
+request within a run**, and the proxy sees HTTP requests to a host with no run structure — two
+sources would disagree at every retry, every internal SDK round-trip (`requests` below) and every
+cached call, and there is no rule for which wins.
+
+The second half is a live constraint on the router rather than a rule about this document:
+
+| Router behaviour | Effect on this document |
+|---|---|
+| preserves the provider-native protocol | none; `provider` and `model_ref` remain true |
+| normalises to one vendor's shape | `cache_read_tokens`/`cache_write_tokens` flatten — the under-count that looks like a total, above |
+| fails over to a different provider transparently | `provider` and `model_ref` name what the harness was **configured** with, not what answered; the cost record is priced against the wrong snapshot |
+
+A router that cannot preserve the first row does not ship in front of this frame. Cross-provider
+failover is therefore **off in v0.1** unless the harness is told, which is a frame change and not
+a configuration change.
+
 [§07](07-adapter-protocol.md) carries no usage, and none of its bodies can be repurposed:
 `text` and `thought` are opaque by rule, and the control plane never parses `Start.config`.
 Cost therefore needs **one new typed frame**, and it qualifies under §07's own narrow test —
