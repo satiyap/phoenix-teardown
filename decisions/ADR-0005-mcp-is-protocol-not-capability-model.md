@@ -60,4 +60,15 @@ Append one row per project as evidence lands. Keep the reasoning, not just the v
 
 ## Open questions
 
--
+- **The Implications above are unbuilt, and nothing had noticed (recorded 2026-09-03,
+  OQ-153).** This ADR requires four things: a capability registry distinct from a tool/server
+  registry, a capability → implementation mapping layer, policy evaluated at capability
+  granularity, and one capability with several implementations. `spec/01-schema.md` declares
+  twenty-four tables and none of them is `mcp_servers`, `tools` or `capabilities` — a tool
+  exists only as a binding inside `agent_definitions.body`, so there is no registry, no
+  mapping layer, and policy is evaluated at *tool-name* granularity at `spec/07`'s handshake
+  step 2. The decision is uncontested and unimplemented, which are different states and were
+  being read as one.
+- **The falsification condition remains untested for a related reason.** "If MCP's own scoping
+  evolves to express capability-level policy adequately, the extra layer is redundant
+  indirection" cannot be assessed while the extra layer does not exist to compare against.

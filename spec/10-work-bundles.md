@@ -6,7 +6,12 @@ This settles the six nouns `00-overview.md` owes — `WorkBundle`, `Resource`, `
 the effect ledger `01` and `02` already define, and fixes the compile boundary: OKF v0.2
 in, a signed content-addressed package out. Registration of bundles, verifiers and
 resources is a northbound surface `06` owns; this fixes the tables and the constraints
-registration must satisfy, not its routes, status codes or credential class. It does
+registration must satisfy, not its routes, status codes or credential class.
+**Amended 2026-09-03 (OQ-154): `06` owns it and does not yet carry it** — no route for
+bundles, verifiers or resources exists in [`06-api.md`](06-api.md) or in
+`contracts/openapi.yaml`. The sentence above states an assignment, and it was being read
+as a delivery. `06` §Registration surfaces this document is owed now names the gap from
+its own side, and `00-overview.md` §Not yet specified carries the row again. It does
 **not** settle `tasks`/`routines` (spec 11), knowledge retrieval or its access control,
 connector authentication, or artifact storage, and it adds no scheduler: nothing here
 polls, waits, or drives an external operation toward settlement.

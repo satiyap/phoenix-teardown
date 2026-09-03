@@ -97,7 +97,10 @@ counts:
 # the spine documents do not yet cover.
 # Emptied 2026-08-30: specs 10-19 landed and every row is settled. The list stays as a
 # key so `check_scope_source_of_truth()` keeps comparing it against spec/00's table.
-owed_specs: []
+# Added 2026-09-03 (OQ-154): empty from 2026-08-30 until the onboarding surface was found
+# unowned -- spec/10 assigns it to spec/06 and spec/06 does not carry it.
+owed_specs:
+  - 'Registration and onboarding surface'
 
 # Added 2026-08-30 (OQ-054, decided: yes -- a scope-level assertion, not just a
 # placeholder). `check_scope_source_of_truth()` in tools/validate_spec.py asserts this

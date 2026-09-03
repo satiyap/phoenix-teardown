@@ -43,11 +43,19 @@ deferred. **Amended 2026-08-27:** `Task` was listed here as deferred and is now 
 
 ## Not yet specified — the rest of the v0.1 shipment
 
-**None, as of 2026-08-30.** All ten areas this table listed are settled by documents 10-19
-above, and `synthesis/scope.yaml`'s `owed_specs` is empty to match. What remains open is
-recorded question by question in [`../open-questions.md`](../open-questions.md), and in
-each document's own *What this does not guarantee* section — which is a different claim
-from "unspecified", and is made where the specification that raises it lives.
+**Amended 2026-09-03 (OQ-154), superseding "None, as of 2026-08-30":** the ten areas this
+table listed are indeed settled by documents 10-19 above, and that claim stands. One area
+was never on the list and is owed — found by reading `10-work-bundles.md`'s own statement
+of who owns it against what `06-api.md` actually carries.
+
+| Area | Owed by | The gap |
+|---|---|---|
+| **Registration and onboarding surface** | [`06-api.md`](06-api.md), and a registry `01-schema.md` does not yet declare | `10-work-bundles.md` §Preamble says registration of bundles, verifiers and resources "is a northbound surface `06` owns". No such route exists, in this spec or in `contracts/openapi.yaml`, for bundles, resources, verifiers or knowledge **sources**; and ADR-0005's Implications require a server/tool registry distinct from a capability registry, of which neither table exists (OQ-153, OQ-154). |
+
+Everything else that remains open is recorded question by question in
+[`../open-questions.md`](../open-questions.md), and in each document's own *What this does
+not guarantee* section — which is a different claim from "unspecified", and is made where
+the specification that raises it lives.
 
 For the ten rows this table used to carry and the document that closed each,
 see `synthesis/scope-reconciliation.md` §8.

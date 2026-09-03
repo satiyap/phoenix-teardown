@@ -45,6 +45,19 @@ b48ee38`) — ADR-0008 evidence log.
 
 ## Knowledge
 
+**The word `skill` is overloaded, and this document owns only one sense of it (added
+2026-09-03, OQ-152).** Here a skill is **Knowledge**: files, git-backed, compiled to a
+content-addressed package, **read-only at run time**, resolved over the five layers below.
+That is ADR-0008's sense and the one seven projects converged on. It is *not*
+[`10-work-bundles.md`](10-work-bundles.md)'s `executable`, `procedure` or `executor`
+behavioural roles, which are the invocable sense a customer usually means by "turn this skill
+on" — different owner (`bundle_nodes`, not `knowledge_sources`), different digest
+(`work_bundle`, not `knowledge_package`, [`03-canonicalisation.md`](03-canonicalisation.md)),
+and a different enablement mechanism: a knowledge skill is enabled by a `knowledge_sources`
+row at the right layer, an invocable one by a binding in the **pinned** definition. Nothing in
+this document governs the second sense, and a control written here believing otherwise governs
+nothing.
+
 ### Layers and resolution order
 
 **Amended 2026-08-30 (OQ-081, owner override): five layers, not three.** `team` and `persona`

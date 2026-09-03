@@ -28,9 +28,11 @@ paragraph made it:
 
 - **Credential class** (`agent` | `admin`) says what a *token* may do. There are two, and
   adding a third for approvals would have been wrong.
-- **Principal kind** (`human` | `agent` | `service` | `remote`) says what the *actor* is.
+- **Principal kind** (`human` | `agent` | `service`) says what the *actor* is.
   `approvals.decided_by` must reference a principal of kind **`human`** — enforced in the
-  schema by a composite foreign key (§01), not merely by this route.
+  schema by a composite foreign key (§01), not merely by this route. *(Amended
+  2026-09-03: this read `human | agent | service | remote`; `remote` was dropped from
+  `principal_kind` — see [§01](01-schema.md) for the reasoning.)*
 
 **Deciding an approval requires an admin credential AND a principal of kind `human`.** The
 credential class is checked by the route; the kind is pinned by a composite foreign key in
@@ -294,6 +296,29 @@ is prose, because nothing else in the schema forbids the value.
 Revocation is a **state**, never a delete (`01-schema.md` §Identity, `revoked_at`): a revoked credential's
 issuances remain readable, which is what makes "what did this reach, and when did it stop"
 answerable.
+
+### Registration surfaces this document is owed and does not yet carry
+
+**Added 2026-09-03 (OQ-154).** [`10-work-bundles.md`](10-work-bundles.md) §Preamble assigns
+registration of bundles, verifiers and resources to this document. It is not here, and it is
+not in `contracts/openapi.yaml` either — nor is any route for **knowledge sources**, the git
+remotes [`16-knowledge.md`](16-knowledge.md) §Schema stores in `knowledge_sources`, as distinct
+from `POST /v1/knowledge-packages`, which registers the compiled artifact and not the source it
+was compiled from. Naming the gap here rather than leaving it to be discovered is the point:
+every customer-onboarding step in the platform is currently asserted by one document and
+implemented by none.
+
+Two constraints bind whatever fills it, and both come from rules already stated:
+
+| Constraint | Source |
+|---|---|
+| Registration is **admin class**; an agent credential may not register what governs it | §Two credential classes — the governed cannot edit the governor |
+| Admitting a thing is not activating it — a registered server, bundle or source is reachable by nothing until a **pinned definition** binds it | `01-schema.md` §Agent definition (`tools`/`extensions` are bindings carrying `artifact_digest`), `07-adapter-protocol.md` handshake step 1 |
+
+The registry that the MCP half of this needs does not exist in [`01-schema.md`](01-schema.md)
+at all — ADR-0005's Implications require a server/tool registry distinct from a capability
+registry and neither table was built (OQ-153). So this section is owed a route set *and* the
+resource it would operate on.
 
 ---
 
