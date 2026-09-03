@@ -137,8 +137,10 @@ into stats and timeseries (Agent Control).
 ### Identity — Principal and Credential, separately
 Two subsystems, because four projects have exactly one half.
 
-**Principal**: who is acting, with `kind: human | agent | service | remote` so
+**Principal**: who is acting, with `kind: human | agent | service` so
 humans and agents are the same type with a discriminator (AG2's `PassportKind`).
+*(Amended 2026-09-03: a fourth kind `remote` was dropped — it had no referent once
+foreign agents left scope on 2026-08-27, and nothing read it; see `spec/01`.)*
 The agent has a **workload identity of its own** and can obtain a token as itself,
 for a federated JWT, or for a named user, with `ON_BEHALF_OF_TOKEN_EXCHANGE` as a
 named flow (AgentCore). Delegation depth is bounded by policy (AG2).

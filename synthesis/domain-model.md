@@ -14,7 +14,7 @@ load-bearing as the additions.
 Tenant  (tenant_id)                     in every composite PRIMARY key
  │                                      AND in composite FOREIGN keys
  ├── Principal                          who is acting
- │    ├── kind: human | agent | service | remote
+ │    ├── kind: human | agent | service
  │    ├── authenticated_by
  │    ├── delegation: on_behalf_of, depth (bounded by policy)
  │    └── revoked_at                    a lifecycle state, not a delete

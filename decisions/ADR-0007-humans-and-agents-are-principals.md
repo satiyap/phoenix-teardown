@@ -73,9 +73,20 @@ Omnigent and AG2 have principals; ADK has credentials; none has both well.
 
 **1. `Principal`** — who is acting.
 
+> **Amended 2026-09-03 — the fourth kind is dropped.** `principal_kind` is
+> **`human | agent | service`**. This block below read `delegated` while `spec/01`
+> implemented `remote`, so the ADR and the schema had disagreed since they were written.
+> `remote` came from AG2's `remote_agent` (an agent on another hub) and lost its referent
+> on 2026-08-27, when foreign agents, ACP and A2A interop all left the shipped scope;
+> `delegated` was always redundant with `on_behalf_of` + bounded `delegation_chain` in the
+> same block. Nothing in specs 00–19 read either value — no rule, CHECK, test row, policy
+> branch or refusal — making it a stored value with no defined behaviour, which
+> `spec/11`'s rule forbids and which `event`/`overlap_policy='allow'` are refused `422`
+> for. Re-adding a value if federation ships is an additive migration.
+
 ```text
 Principal
-  id, kind: human | agent | service | delegated
+  id, kind: human | agent | service
   authenticated_by      how identity was established
   granted               what this principal may do (policy input)
   delegation_chain      on_behalf_of, with depth bounded (AG2's `depth`)

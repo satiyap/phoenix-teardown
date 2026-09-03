@@ -88,7 +88,7 @@ component they land in.
 | Pattern | Source |
 |---|---|
 | Immutable Passport + mutable definition + cache-only runtime | AG2 |
-| `kind: human \| agent \| service \| remote` — one type, discriminated | AG2 |
+| `kind: human \| agent \| service` — one type, discriminated | AG2 |
 | Workload identity; three token variants; `ON_BEHALF_OF_TOKEN_EXCHANGE` named | AgentCore |
 | Exchange and refresh as *separate* interfaces and registries | ADK |
 | Secretless credential proxy: swap on egress, host-bound placeholder, 403 leak guard | Omnigent |

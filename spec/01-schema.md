@@ -43,7 +43,22 @@ CREATE TABLE tenants (
 
 -- Principal: who is acting. Humans and agents are the SAME type with a
 -- discriminator (AG2's PassportKind), so both are addressable and auditable.
-CREATE TYPE principal_kind AS ENUM ('human', 'agent', 'service', 'remote');
+-- Amended 2026-09-03: 'remote' DROPPED. Superseded:
+--   ENUM ('human', 'agent', 'service', 'remote')
+-- It was inherited from AG2's `remote_agent` (an agent on another hub) and had
+-- no referent after 2026-08-27: no foreign agents, ACP unshipped, A2A interop
+-- unshipped, the remote adapter transport retained-but-unshipped. Nothing in
+-- specs 00-19 read it -- no rule, CHECK, test row, policy branch or refusal --
+-- so it was a storable value with no defined behaviour, which §11's rule
+-- ("a stored value with no defined behaviour is a promise nothing keeps")
+-- forbids. Unlike `event` triggers and `overlap_policy='allow'`, which are
+-- reserved AND refused 422, nothing refused it. ADR-0007's decision block named
+-- the fourth kind `delegated`, not `remote`, so the ADR and this schema had
+-- also disagreed since they were written; `delegated` is in any case redundant
+-- with `on_behalf_of` + `delegation_depth` below.
+-- If federation ever ships, re-adding a value to this ENUM is an additive
+-- migration; the FK in `principals_id_kind` is unaffected.
+CREATE TYPE principal_kind AS ENUM ('human', 'agent', 'service');
 
 CREATE TABLE principals (
     tenant_id      BIGINT NOT NULL,
