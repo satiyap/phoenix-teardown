@@ -87,7 +87,18 @@ authorization spec; the API in §06 enforces it.
 | `running` | `indeterminate` | **an effect claim for this run is unsettled** and the adapter is gone | **system only** | never a retry; see below |
 | `running` | `failed` | adapter stream closed abnormally with **no unsettled effect** | worker, system | `error_code = adapter_disconnected` |
 | `queued`/`running` | `incompatible` | pin mismatch on resume | **worker only** | before any adapter call |
+| `queued` | `failed` | a **resume-ladder** rung fails, or the spawn does | worker, system | amended 2026-09-04: the ladder below runs BEFORE any adapter call, so every failure it reports lands on a run that is still `queued` — artifact missing or corrupted, knowledge package missing or corrupted, and the worker failing to start the process at all. The rows were missing, not the behaviour: the failures were always written, and nothing consulted this table, so the undeclared edge went unnoticed until the event log's append path began enforcing it |
+| `cancelling` | `indeterminate` | an effect claim is unsettled and the adapter is gone | **system only** | amended 2026-09-04: a run cancelled with an effect still claimed is not `cancelled` — what happened out in the world is unknown, and claiming either outcome is a claim nobody can support. Without this row, enforcing the table stranded exactly the runs cancellation was built to release |
 | any terminal | — | — | **nobody** | terminal is terminal |
+
+**Enforcement, amended 2026-09-04.** This table is the authorization spec, and §06 enforces
+it on the API — but the API is not the only writer. `runs.state` is a projection of the
+event log, rebuilt by the fold on every append, and that path consulted no table at all: it
+wrote whatever the events implied. So an edge with no row here was reachable in practice,
+and one was taken routinely — a run in `cancelling` whose adapter failed was moved to
+`failed`, which this table has never permitted. The append path now refuses a state change
+with no row. Reads stay permissive: refusing to *fold* a historical log would turn a bad
+write in the past into a run nobody can look at, which is worse than the bad write.
 
 ### Three deliberate asymmetries
 
