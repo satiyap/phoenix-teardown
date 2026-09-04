@@ -2183,6 +2183,19 @@ paths:
       tags: [runs]
       operationId: getRunCost
       summary: Totals for one run; the lower bound and the unpriced count travel together
+      security: [{ adminToken: [] }]
+      description: |
+        Admin only, which is what features/14 already says this is: "cost is currently an
+        operator view. Whether customers see their own spend, and at what granularity, is a
+        product question nobody has answered."
+
+        It had no security requirement, so any authenticated principal could read it --
+        including an AGENT-class token, which is what a run itself holds. That answered the
+        open product question in the permissive direction without anybody choosing, and it
+        let a run read back the accounting about its own execution.
+
+        Making it admin-only does not decide the question. It restores the state the spec
+        describes, so that opening cost to customers stays a deliberate act.
       parameters: [{ $ref: '#/components/parameters/RunId' }]
       responses:
         '200':
