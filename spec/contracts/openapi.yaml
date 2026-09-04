@@ -1502,7 +1502,11 @@ paths:
       tags: [policies]
       operationId: createPolicy
       security: [{ adminToken: [] }]
-      description: Created in `observe` mode. Cedar source is validated before storage.
+      description: |
+        Created in `observe` mode, always. The caller cannot choose otherwise: a new policy
+        that denies on its first evaluation is how a governance layer loses the room.
+
+        Cedar source is validated before storage.
       requestBody:
         required: true
         content:
@@ -1529,6 +1533,41 @@ paths:
         '422':
           description: Cedar source does not validate
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+  /v1/policies/{id}:
+    get:
+      tags: [policies]
+      operationId: getPolicy
+      security: [{ adminToken: [] }]
+      description: |
+        The policy itself, source included. The detail screen shows what a rule WOULD have
+        done; without this it could not also show what the rule SAYS, which leaves somebody
+        deciding whether to promote a policy they cannot read.
+      parameters:
+        - { $ref: '#/components/parameters/RunId' }
+      responses:
+        '200':
+          description: the policy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [policy_id, name, scope, decision, enabled]
+                properties:
+                  policy_id:    { type: string }
+                  name:         { type: string }
+                  scope:        { type: string }
+                  scope_key:    { type: [string, 'null'] }
+                  cedar_source: { type: [string, 'null'] }
+                  decision:     { type: string, enum: [deny, steer, observe] }
+                  enabled:      { type: boolean }
+                  steering_guidance: { type: [string, 'null'] }
+                  platform_rule:
+                    type: boolean
+                    description: |
+                      Enforced in code rather than by Cedar. Such a rule carries a comment
+                      where its source would be, and promoting it would change nothing.
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /v1/policies/{id}/promote:
     post:
       tags: [policies]
@@ -1543,7 +1582,21 @@ paths:
             schema:
               type: object
               required: [to]
-              properties: { to: { type: string, enum: [steer, deny] } }
+              properties:
+                to: { type: string, enum: [steer, deny] }
+                guidance:
+                  type: string
+                  description: |
+                    How to comply. REQUIRED when `to` is `steer`, and refused as invalid
+                    when absent -- a steer that cannot say what to do instead is not a
+                    steer, it is a deny that arrives as advice.
+
+                    This field was missing from the first version of the contract while the
+                    database already required the column, which left observe -> steer
+                    unreachable through the API. The implementation filled the gap by
+                    synthesising "this call is discouraged by policy <name>" -- text that
+                    satisfies NOT NULL and tells nobody how to proceed, which is exactly
+                    the thing the constraint exists to prevent.
       responses:
         '200':
           description: promoted
