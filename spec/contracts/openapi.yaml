@@ -1591,6 +1591,93 @@ paths:
         '422':
           description: a session with no interviewee, or an answer to a question not asked
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+  /v1/onboarding/scans/{id}/quality:
+    get:
+      tags: [onboarding]
+      operationId: getScanQuality
+      security: [{ adminToken: [] }]
+      description: |
+        How much of a scan's proposals survived review.
+
+        features/07 asks "how good a scan has to be before review stops being a rewrite. If a
+        human edits eighty percent of candidates, the agent is generating work rather than
+        saving it -- worth measuring from the first real scan." The THRESHOLD is an open
+        decision. The measurement is not, and it has to exist before the first real scan or
+        the evidence for that decision is gone.
+
+        There is deliberately no score, no grade and no pass mark in this response. The
+        threshold is exactly what nobody has decided, and a summary figure would settle it by
+        accident -- the same reason the completeness bar reports named gaps rather than a
+        percentage.
+
+        Acceptance rate alone cannot answer the question and would answer it wrongly: a scan
+        whose every candidate is accepted after being rewritten from the title down scores
+        100%.
+      parameters:
+        - { $ref: '#/components/parameters/RunId' }
+      responses:
+        '200':
+          description: the measurement
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [run_id, proposed, accepted, rejected, undecided,
+                           accepted_verbatim, accepted_edited, accepted_rewritten,
+                           unmeasured, describe, survivals]
+                properties:
+                  run_id:    { type: string }
+                  proposed:  { type: integer }
+                  accepted:  { type: integer }
+                  rejected:  { type: integer }
+                  undecided:
+                    type: integer
+                    description: |
+                      Neither accepted nor rejected. Reported separately because folding it
+                      into rejected would report a review as finished when it is halfway
+                      through.
+                  accepted_verbatim:
+                    type: integer
+                    description: |
+                      Accepted with nothing changed at all -- not merely with all the
+                      proposal's words still present. A reviewer who adds a paragraph and
+                      deletes nothing has still done the work.
+                  accepted_edited:   { type: integer }
+                  accepted_rewritten:
+                    type: integer
+                    description: |
+                      Accepted after most of the proposed text was replaced. This is the
+                      number features/07's "generating work rather than saving it" is about.
+                  unmeasured:
+                    type: integer
+                    description: |
+                      Accepted with no recorded final text. Named rather than assumed
+                      verbatim, because counting them as unedited would flatter the scan
+                      with rows nobody measured.
+                  describe:
+                    type: string
+                    description: The measurement in a sentence, with no verdict attached.
+                  survivals:
+                    type: array
+                    description: |
+                      Every measured acceptance, worst-kept first -- a distribution, not a
+                      mean. A mean of 0.5 describes both "every candidate half-rewritten" and
+                      "half verbatim, half discarded", and those are different problems.
+                    items:
+                      type: object
+                      required: [candidate_id, kept, rewritten]
+                      properties:
+                        candidate_id: { type: string }
+                        kept:
+                          type: number
+                          description: |
+                            Fraction of the proposal's words still present, 0 to 1. A crude
+                            proxy, and reported beside the raw counts rather than as a
+                            quality figure: a reviewer who reorders two sentences changes
+                            nothing and scores as an edit, and one who inverts a single
+                            "not" changes everything and scores as verbatim.
+                        rewritten: { type: boolean }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
   /v1/onboarding/findings:
     get:
       tags: [onboarding]
