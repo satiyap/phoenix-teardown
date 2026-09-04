@@ -122,7 +122,16 @@ components:
         name:              { type: string }
         schema_digest:     { type: string }
         version:           { type: string }
-        artifact_digest:   { type: string, minLength: 1 }
+        artifact_digest:
+          type: string
+          # A pattern rather than minLength, corrected 2026-09-04. minLength: 1 accepted a
+          # single space, and a whitespace artifact_digest is exactly as useless as an
+          # empty one — it satisfies "required" while naming nothing, which is the precise
+          # failure this field exists to prevent. Deliberately not ^[0-9a-f]{64}$: an
+          # artifact identity is not required to be a sha256 hex string, and narrowing it
+          # here would refuse an OCI digest with its algorithm prefix.
+          pattern: '^\S+$'
+          minLength: 1
         execution_binding: { type: string }
         approval_mode:     { type: string, enum: [never, always, risk_based] }
         credential_ref:    { type: [string, 'null'] }
@@ -209,6 +218,173 @@ components:
       properties:
         digest:        { type: string }
         canon_profile: { type: string, const: "nfc+intjson/v1" }
+    HumanInput:
+      type: object
+      required: [input_id, run_id, question, kind, state, asked_at, expires_at]
+      properties:
+        input_id: { type: string }
+        run_id:   { type: string }
+        question:
+          type: string
+          description: as the AGENT asked it, not a paraphrase.
+        kind:     { type: string, enum: [free_text, choice] }
+        choices:  { type: array, items: { type: string } }
+        state:
+          type: string
+          enum: [pending, answered, expired, superseded]
+          description: |
+            `expired` means nobody answered in time and the agent was told the tool was
+            refused. `superseded` means the run went away — not silently dropped, because
+            somebody half-composing a reply to a dead run deserves to be told.
+        answered_by: { type: string, nullable: true }
+        answer:      { type: string, nullable: true }
+        asked_at:    { type: string, format: date-time }
+        answered_at: { type: string, format: date-time, nullable: true }
+        expires_at:
+          type: string
+          format: date-time
+          description: |
+            A question expires, because an unanswered one otherwise holds a run open
+            indefinitely.
+    Report:
+      type: object
+      required: [report_id, run_id, title, grade, as_of, stale]
+      properties:
+        report_id:  { type: string }
+        run_id:
+          type: string
+          description: |
+            The run that produced it. Never absent — a report with no run is a number with
+            no provenance.
+        routine_id:
+          type: string
+          nullable: true
+          description: the routine that owns it, so "why did this not refresh" is one click.
+        title:      { type: string }
+        visual_template_id: { type: string }
+        archetype:  { type: string }
+        grade:
+          type: string
+          enum: [attested, vetted, reviewed, unverified, stale, failed]
+        as_of:
+          type: string
+          format: date-time
+          description: the DATA's own timestamp, not the render time.
+        refresh_due_at: { type: string, format: date-time, nullable: true }
+        stale:
+          type: boolean
+          description: |
+            Computed against now, and STATED rather than implied by a date the reader has
+            to work out. Never stored: staleness is a fact about the present, and a report
+            becomes stale by the clock moving rather than by anything happening to it.
+    Connection:
+      type: object
+      required: [connection_id, team_id, slug, display_name, kind, state]
+      description: |
+        A customer system a team can reach. `credential_ref` NAMES where the secret lives
+        and never holds one; there is deliberately no field in this schema that could carry
+        material, which is what makes "no route returns a secret" a property of the
+        contract rather than of a handler.
+      properties:
+        connection_id: { type: string }
+        team_id:       { type: string }
+        slug:          { type: string }
+        display_name:  { type: string }
+        kind:          { type: string }
+        state:
+          type: string
+          description: |
+            Whether the connection has been reached successfully. A connection that has
+            never been tested is not the same as one that failed, and neither is the same
+            as one that works.
+        credential_ref:  { type: string, description: where the secret lives. Never the secret. }
+        last_tested_at:  { type: string, format: date-time, nullable: true }
+    Tenant:
+      type: object
+      required: [tenant_id, slug, display_name, region, state]
+      description: |
+        The customer. `slug` and `region` are immutable: a slug appears in URLs and support
+        threads and renaming it breaks links and audit trails; a region decides where the
+        data plane runs and moving it is a migration.
+      properties:
+        tenant_id:    { type: integer, format: int64 }
+        slug:         { type: string }
+        display_name: { type: string }
+        region:       { type: string }
+        state:
+          type: string
+          enum: [pending, active, suspended, offboarded]
+          description: |
+            `pending` means provisioning is incomplete and NOTHING customer-facing works.
+            A tenant only reaches `active` when all five steps complete; anything less
+            stays pending and visibly so.
+        created_at:    { type: string, format: date-time }
+        activated_at:  { type: string, format: date-time, nullable: true }
+        suspended_at:  { type: string, format: date-time, nullable: true }
+        offboarded_at: { type: string, format: date-time, nullable: true }
+    Team:
+      type: object
+      required: [team_id, slug, display_name]
+      properties:
+        team_id:      { type: string }
+        slug:         { type: string }
+        display_name: { type: string }
+        archived_at:  { type: string, format: date-time, nullable: true }
+    Candidate:
+      type: object
+      required: [candidate_id, node_type, title, instrument, confidence]
+      description: |
+        Proposed knowledge. NOT a node: nothing reaches a bundle without a recorded human
+        decision. Every candidate carries provenance, because "where did this definition
+        come from" must be answerable when somebody disputes a number — and by then the
+        scan that produced it is months gone.
+      properties:
+        candidate_id: { type: string }
+        node_type:    { type: string }
+        title:        { type: string }
+        body:         { type: string }
+        instrument:
+          type: string
+          description: which instrument produced it — a scan code (S0-S6) or an interview (I1-I4, Q1-Q2).
+        source_path:  { type: string, nullable: true }
+        source_line:  { type: integer, nullable: true }
+        person:       { type: string, nullable: true, description: who said it, for an interview-sourced candidate }
+        session_id:   { type: string, nullable: true }
+        excerpt:      { type: string }
+        confidence:
+          type: number
+          description: |
+            The extractor's own view. Recorded and never acted on: it orders the review
+            queue and decides nothing. An agent that could auto-accept its own
+            high-confidence output would be disposing as well as proposing.
+        run_id:       { type: string }
+    Policy:
+      type: object
+      required: [policy_id, name, scope, decision, enabled]
+      description: |
+        A rule and the mode it is in. `cedar_source` is deliberately NOT returned by the
+        list route: it is long enough to make a list unreadable, and a caller that wants
+        it asks for the one policy.
+      properties:
+        policy_id: { type: string }
+        name:
+          type: string
+          description: |
+            A `platform:` prefix marks one of the reserved rows seeded per tenant. Those
+            are the floor every tenant sits on rather than a suggestion, and are not
+            editable.
+        scope:     { type: string, enum: [tenant, agent] }
+        scope_key: { type: string }
+        decision:
+          type: string
+          enum: [observe, steer, deny]
+          description: |
+            The mode. `observe` affects NOTHING — it records what it would have done.
+            `steer` changes what the agent is told and refuses nothing. `deny` refuses.
+            This is the field that matters most and the one most often assumed.
+        steering_guidance: { type: string }
+        enabled:   { type: boolean }
+        created_by: { type: string }
     Agent:
       type: object
       required: [agent_id, name, current_digest, declared_version]
@@ -217,6 +393,17 @@ components:
         name:             { type: string }
         current_digest:   { type: string }
         declared_version: { type: integer, description: human-facing; never compared }
+        lifecycle:
+          type: string
+          enum: [active, revoked]
+          readOnly: true
+          description: |
+            Added 2026-09-04 alongside listAgents. Without it a caller listing agents
+            cannot tell a revoked one from a live one, so a UI would offer a choice that
+            then fails with 409 at the moment somebody tries to use it. A revoked agent is
+            still listed — a list that hid them would answer "which agents exist" wrongly
+            during an incident, and a run pinned to a revoked agent still has to be
+            explainable.
     Run:
       type: object
       required: [run_id, state, agent_id, pinned_definition_digest]
@@ -286,6 +473,26 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/Definition' } } }
         '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
   /v1/agents:
+    get:
+      tags: [agents]
+      operationId: listAgents
+      description: |
+        The agents this tenant has registered. Added 2026-09-04: the contract carried
+        createAgent and getAgent but no way to enumerate, so nothing could offer a choice
+        of agent — screen B6 asks the operator to pick one and there was no route to fill
+        the list from. A UI that cannot list is a UI that asks somebody to paste an id.
+      responses:
+        '200':
+          description: the agents this tenant has registered
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Agent' }
     post:
       tags: [agents]
       operationId: createAgent
@@ -541,7 +748,756 @@ paths:
           description: already decided; body carries the existing decision
           content: { application/json: { schema: { $ref: '#/components/schemas/Approval' } } }
         '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
+  /v1/claims/{id}:
+    get:
+      tags: [trust]
+      operationId: getClaim
+      description: |
+        A number an answer asserted, and its grade — computed at READ time from the
+        evidence, never stored. A stored grade is a claim about the past that goes on
+        asserting itself after the evidence under it changes.
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      responses:
+        '200':
+          description: the claim and its assessment
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [claim_id, run_id, metric, value, grade, why]
+                properties:
+                  claim_id: { type: string }
+                  run_id:   { type: string }
+                  metric:   { type: string }
+                  value:    { type: string }
+                  units:    { type: string }
+                  computation_path: { type: string }
+                  grade:
+                    type: string
+                    enum: [attested, vetted, reviewed, unverified, stale, failed]
+                  why:
+                    type: string
+                    description: |
+                      Why the grade is what it is, in a sentence. A badge without its
+                      reason is a colour somebody has to take on faith.
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
+  /v1/claims/{id}/vet:
+    post:
+      tags: [trust]
+      operationId: vetClaim
+      description: |
+        A named person asserts a number is correct. Screen P5.
+
+        Vetting sits ABOVE attested and below a failure: a person saying "I checked this"
+        is worth more than machinery saying nothing, and worth less than machinery saying
+        the number is wrong. A vetting cannot rescue a claim a verifier disagreed with.
+
+        The rationale is required. "Somebody vetted it" is not evidence; "I reconciled this
+        against the month-end pack" is.
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rationale]
+              properties:
+                rationale: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: vetted, with the resulting grade
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [grade, why]
+                properties:
+                  grade: { type: string }
+                  why:   { type: string }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
+        '422':
+          description: a vetting with no rationale
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+  /v1/inputs:
+    get:
+      tags: [inputs]
+      operationId: listInputs
+      security: [{ adminToken: [] }]
+      description: |
+        Questions an agent asked a person mid-run. Screen C4, and
+        design-notes/human-input.md. Added 2026-09-04.
+
+        `ask_user` is a TOOL like any other, which inherits every property the platform
+        already guarantees: the platform executes it, it is ledgered so a resumed run does
+        not ask twice, and the reply is attributed. It cannot be faked — a model cannot
+        answer its own question, because the reply arrives through this authenticated route
+        rather than from inside the run.
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, answered, expired, superseded] }
+      responses:
+        '200':
+          description: the questions, oldest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/HumanInput' }
+  /v1/inputs/{id}/answer:
+    post:
+      tags: [inputs]
+      operationId: answerInput
+      security: [{ adminToken: [] }]
+      description: |
+        Answer one question. Admin class and a human principal, the same rule approvals
+        follows and for the same reason: a reply shapes what the agent does next, so an
+        agent replying to itself is the loop this exists to prevent.
+
+        The answer is DATA, never instruction. It returns to the agent as a tool result —
+        content it reads, not a directive it obeys — because it is untrusted text from a
+        human who may have been socially engineered.
+      parameters:
+        - { $ref: '#/components/parameters/RunId' }
+        - { $ref: '#/components/parameters/IdempotencyKeyRequired' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [answer]
+              properties:
+                answer: { type: string, minLength: 1, maxLength: 4096 }
+      responses:
+        '200':
+          description: answered
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HumanInput' }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
+        '409':
+          description: |
+            Not open. Somebody answered first, or it expired — and the body says which,
+            because "already answered" and "too late" send a person to two different places.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '422':
+          description: an empty answer, or one outside a choice question's options
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+  /v1/effects:
+    get:
+      tags: [effects]
+      operationId: listEffects
+      description: |
+        Effects across runs, filtered by status. Screen C3 reads this with
+        `status=indeterminate`. Added 2026-09-04.
+
+        The indeterminate queue is where this design deliberately spends human attention:
+        everything else in the system exists to keep it short, and something lands here
+        because the platform REFUSES TO GUESS whether an effect happened.
+
+        There is deliberately no retry route. A claimed effect past its lease might have
+        happened, and retrying is the double-charge the whole ledger exists to prevent.
+      parameters:
+        - name: status
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [intended, awaiting_approval, claimed, succeeded, failed, denied, indeterminate, abandoned]
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        '200':
+          description: the effects
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [idempotency_key, run_id, status, kind]
+                      properties:
+                        idempotency_key:
+                          type: string
+                          description: |
+                            Derived from position, never supplied. This is the recovery
+                            handle a human uses to ask the provider what happened.
+                        run_id:      { type: string }
+                        status:      { type: string }
+                        kind:        { type: string }
+                        claim_owner: { type: string, nullable: true }
+                        error_code:  { type: string, nullable: true }
+                        claimed_at:  { type: string, format: date-time, nullable: true }
+  /v1/reports:
+    get:
+      tags: [reports]
+      operationId: listReports
+      description: |
+        Every report, freshest first. Screen P2. Added 2026-09-04.
+
+        A report is an ANALYSIS ALL THE WAY DOWN — a run whose output conformed to a
+        data-template — so everything the run page shows about any other run is true of it.
+        There is no separate reporting pipeline, which is why a wrong number in a report is
+        debuggable with the tools an analyst already uses.
+
+        Every report carries its trust grade. A gallery of ungraded numbers is a dashboard,
+        which is what this product is deliberately not.
+      responses:
+        '200':
+          description: the reports
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Report' }
+  /v1/reports/{id}:
+    get:
+      tags: [reports]
+      operationId: getReport
+      description: |
+        One report, rendered. Screen P3.
+
+        The RESULT is stored and the rendering happens at read time, because restyling a
+        report must change no analysis: the numbers are the fact and the rendering is a
+        view of them.
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      responses:
+        '200':
+          description: the report and its rendered output
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [report, html]
+                properties:
+                  report: { $ref: '#/components/schemas/Report' }
+                  html:
+                    type: string
+                    description: |
+                      The rendered report. Carries the trust badge before any number, its
+                      lineage, and a staleness banner when the refresh was missed.
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
+  /v1/connections:
+    get:
+      tags: [connections]
+      operationId: listConnections
+      description: |
+        The customer systems a team can reach. Screens O2 and G9. Added 2026-09-04.
+
+        No route here returns secret material, and the schema has no field that could carry
+        one: a connection names WHERE a secret lives (`credential_ref`), never the secret.
+        The connection screen is the moment a customer decides whether to trust us, so it
+        states plainly what will and will not be read.
+      parameters:
+        - { name: team_id, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: the connections
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Connection' }
+  /v1/admin-events:
+    get:
+      tags: [audit]
+      operationId: listAdminEvents
+      security: [{ adminToken: [] }]
+      description: |
+        The admin audit trail: who did what, when, to which resource. Screens G4 and G5.
+        Added 2026-09-04 — the table existed and nothing could read it, so the trail was
+        write-only, which is the one property an audit trail must not have.
+
+        Append-only by grant: the table has INSERT and SELECT and no UPDATE or DELETE, on
+        the stated principle that an audit row that can be edited is not an audit row.
+        There is deliberately no route that writes one directly — rows appear as a side
+        effect of the action they record, in the same transaction.
+      parameters:
+        - { name: target_kind, in: query, schema: { type: string } }
+        - { name: target_id,   in: query, schema: { type: string } }
+        - { name: limit,       in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        '200':
+          description: the audit trail, most recent first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [admin_event_id, principal_id, action, target_kind, target_id, at]
+                      properties:
+                        admin_event_id: { type: string }
+                        principal_id:
+                          type: string
+                          description: who acted. The system actor is a principal too — there is no unattributed row.
+                        action:      { type: string }
+                        target_kind: { type: string }
+                        target_id:   { type: string }
+                        detail:      { type: object, additionalProperties: true }
+                        at:          { type: string, format: date-time }
+  /v1/principals:
+    get:
+      tags: [identity]
+      operationId: listPrincipals
+      security: [{ adminToken: [] }]
+      description: |
+        The principals in this tenant — people, agents and services. Screens G1 and G2.
+      responses:
+        '200':
+          description: the principals
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [principal_id, kind]
+                      properties:
+                        principal_id: { type: string }
+                        kind:
+                          type: string
+                          enum: [human, agent, service]
+                          description: |
+                            A credential is never an identity. A principal is who someone
+                            IS; a credential is material they present.
+                        display_name: { type: string }
+                        revoked_at:   { type: string, format: date-time, nullable: true }
+  /v1/tenants:
+    get:
+      tags: [tenants]
+      operationId: listTenants
+      security: [{ adminToken: [] }]
+      description: |
+        The tenants this operator can see. Added 2026-09-04 for screen S1 — the tenant
+        model existed with no route, so "which customers exist and what state are they in"
+        was a database question.
+
+        A tenant that is not `active` is LISTED, with its state. Hiding a pending or
+        suspended tenant would answer "which customers do we have" wrongly at exactly the
+        moment somebody is asking because something is wrong.
+      responses:
+        '200':
+          description: the tenants
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Tenant' }
+  /v1/settings:
+    get:
+      tags: [tenants]
+      operationId: listSettings
+      security: [{ adminToken: [] }]
+      description: |
+        A tenant's settings, DEFAULTS INCLUDED. Screen G6. Added 2026-09-04.
+
+        Defaults are returned rather than left absent: a screen showing only what somebody
+        changed would leave every unset value invisible, and an unmeasured default nobody
+        can see is exactly the one that never gets revisited.
+      responses:
+        '200':
+          description: the settings
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, value, is_default, unmeasured]
+                      properties:
+                        name:  { type: string }
+                        value: { type: string }
+                        is_default:
+                          type: boolean
+                          description: true while the value is whatever the platform shipped.
+                        unmeasured:
+                          type: boolean
+                          description: |
+                            The DEFAULT rests on no evidence. features/02 asks that these
+                            not read as considered choices — several of them are guesses,
+                            and a customer entitled to know that is one who can push back.
+                        updated_by: { type: string }
+    put:
+      tags: [tenants]
+      operationId: setSetting
+      security: [{ adminToken: [] }]
+      description: Record a chosen value, attributed to the token's principal.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, value]
+              properties:
+                name:  { type: string }
+                value: { type: string }
+      responses:
+        '204': { description: recorded }
+        '422':
+          description: an unknown setting
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+  /v1/knowledge-layers:
+    get:
+      tags: [knowledge]
+      operationId: listKnowledgeLayers
+      description: |
+        Which package is active at which layer. Screen E5. Added 2026-09-04.
+
+        Layers resolve NARROWEST FIRST: the highest layer declaring a path wins, an
+        override is a whole-file replacement, and no layer can remove a path — there are no
+        tombstones. A steward looking at this needs to see which layer a given path is
+        actually coming from, because "we changed that" and "the change took effect" are
+        different things.
+      responses:
+        '200':
+          description: the layer stack
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [layer, package_digest]
+                      properties:
+                        layer:
+                          type: string
+                          enum: [bundle, tenant, team, agent]
+                          description: narrowest wins; agent overrides team overrides tenant overrides bundle.
+                        scope_key:      { type: string }
+                        package_digest: { type: string }
+                        registered_by:  { type: string }
+  /v1/tenants/{id}/provisioning:
+    get:
+      tags: [tenants]
+      operationId: listProvisioningSteps
+      security: [{ adminToken: [] }]
+      description: |
+        Which of the five provisioning steps have completed, and which failed. Screen S2.
+        Provisioning spans a database and a Kubernetes cluster, so it WILL fail halfway —
+        an operator needs to see which step, not that "provisioning failed".
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      responses:
+        '200':
+          description: the steps
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [step, state]
+                      properties:
+                        step:  { type: string }
+                        state: { type: string, enum: [pending, running, done, failed] }
+                        detail: { type: string, nullable: true }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
+  /v1/teams:
+    get:
+      tags: [teams]
+      operationId: listTeams
+      description: |
+        The teams in this tenant. Screen G7.
+      responses:
+        '200':
+          description: the teams
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Team' }
+  /v1/teams/{id}/members:
+    get:
+      tags: [teams]
+      operationId: listTeamMembers
+      description: |
+        Who is in a team, and in what role. Screen G8.
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      responses:
+        '200':
+          description: the members
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [principal_id, role]
+                      properties:
+                        principal_id: { type: string }
+                        role:         { type: string }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
+  /v1/onboarding/candidates:
+    get:
+      tags: [onboarding]
+      operationId: listCandidates
+      description: |
+        The review queue: candidates a scan or an interview proposed and nobody has decided
+        on. Added 2026-09-04 — the onboarding engine existed with no HTTP surface, so
+        screens O3 and O5 had nothing to read and the review step could only be performed
+        against the database.
+
+        Ordered by the extractor's confidence, highest first. Confidence orders the queue
+        and decides nothing: every row still needs a person.
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        '200':
+          description: candidates awaiting a decision
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Candidate' }
+  /v1/onboarding/candidates/{id}/decide:
+    post:
+      tags: [onboarding]
+      operationId: decideCandidate
+      description: |
+        Accept or reject one candidate. The agent proposes; humans dispose — nothing
+        reaches a bundle without a decision recorded here, attributed to the token's
+        principal.
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [accepted, rejected] }
+                reason:
+                  type: string
+                  description: |
+                    Required on a rejection. Without it the next scan proposes the same
+                    candidate and the next reviewer cannot tell it was already refused.
+                edited_title: { type: string }
+                edited_body:  { type: string }
+      responses:
+        '204': { description: recorded }
+        '409':
+          description: already decided
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '422':
+          description: a rejection with no reason, or an unknown decision
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+  /v1/onboarding/sessions:
+    post:
+      tags: [onboarding]
+      operationId: recordSession
+      description: |
+        Record an interview and everything it produced. Screen O4. Added 2026-09-04.
+
+        Answers become DRAFT candidates, exactly like a scan's output — being said out loud
+        by a person is not the same as being reviewed. An "I don't know" becomes a FINDING
+        rather than a node: the completeness bar can act on a named gap and cannot act on a
+        confident guess, so an unknown that quietly became a plausible page would be worse
+        than no page at all.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [instrument, person, questions, answers]
+              properties:
+                instrument:
+                  type: string
+                  description: I1-I4 for a live interview, Q1-Q2 for an async questionnaire.
+                person:
+                  type: string
+                  description: |
+                    Who was interviewed. Required — when a definition is disputed six
+                    months on, the answer has to be "your head of analytics said this on
+                    the 14th", and that must be in the data rather than in somebody's
+                    memory.
+                role: { type: string }
+                questions:
+                  type: array
+                  items:
+                    type: object
+                    required: [id, ask, fills, node_type]
+                    properties:
+                      id:        { type: string }
+                      ask:       { type: string }
+                      fills:     { type: string, description: the template section this fills }
+                      node_type: { type: string }
+                      required:
+                        type: boolean
+                        description: |
+                          Asked out loud even when the answer seems obvious. A required
+                          question never put is reported as a gap, and it is worse than one
+                          nobody could answer — an unasked question is a gap nobody knows
+                          exists.
+                answers:
+                  type: array
+                  items:
+                    type: object
+                    required: [question_id]
+                    properties:
+                      question_id: { type: string }
+                      said:        { type: string }
+                      dont_know:
+                        type: boolean
+                        description: |
+                          An explicit unknown. It is an ANSWER, and it becomes a gap rather
+                          than a node.
+      responses:
+        '201':
+          description: recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session_id, candidates, gaps]
+                properties:
+                  session_id: { type: string }
+                  candidates: { type: integer, description: draft nodes awaiting review }
+                  gaps:       { type: integer, description: questions nobody could answer }
+        '422':
+          description: a session with no interviewee, or an answer to a question not asked
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+  /v1/onboarding/findings:
+    get:
+      tags: [onboarding]
+      operationId: listFindings
+      description: |
+        The gap list: questions asked and not answered. What the completeness bar can act
+        on, as opposed to a confident guess it cannot.
+      responses:
+        '200':
+          description: the gaps
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [session_id, question_id, asked, fills, person]
+                      properties:
+                        session_id:  { type: string }
+                        question_id: { type: string }
+                        asked:       { type: string }
+                        fills:       { type: string }
+                        person:      { type: string }
+                        instrument:  { type: string }
+  /v1/onboarding/gaps:
+    get:
+      tags: [onboarding]
+      operationId: listGaps
+      description: |
+        The completeness bar against a bundle: named missing things, never a score. A
+        percentage is actionable by nobody — it says nothing about which question an agent
+        will fail to answer on Monday.
+      parameters:
+        - { name: digest, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: the gaps, and whether the bundle may be signed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ready, gaps]
+                properties:
+                  ready:
+                    type: boolean
+                    description: false when any gap blocks. Only blocking gaps refuse a sign-off.
+                  gaps:
+                    type: array
+                    items:
+                      type: object
+                      required: [rule, subject, want, blocking]
+                      properties:
+                        rule:     { type: string }
+                        subject:  { type: string }
+                        want:     { type: string }
+                        blocking: { type: boolean }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
   /v1/policies:
+    get:
+      tags: [policies]
+      operationId: listPolicies
+      security: [{ adminToken: [] }]
+      description: |
+        Every policy and the mode it is in. Added 2026-09-04 with listAgents and
+        listKnowledgePackages: the contract could create a policy and read one by id, and
+        offered no way to see them all — so screen F1 could not be built, and the CLI read
+        the database directly instead, which is a second authority nobody intended.
+
+        Mode is the column that matters. An `observe` policy affects nothing, and a caller
+        that cannot see the mode at a glance discovers that after an incident.
+      responses:
+        '200':
+          description: the policies this tenant has
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Policy' }
     post:
       tags: [policies]
       operationId: createPolicy
@@ -603,6 +1559,82 @@ paths:
         '409':
           description: cannot skip a mode
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+  /v1/decisions:
+    get:
+      tags: [policies]
+      operationId: listDecisions
+      security: [{ adminToken: [] }]
+      description: |
+        Every evaluation, grouped. One row per policy consulted, several rows per act, and
+        the group is the unit -- because the question this surface answers is "why was this
+        refused", and a refusal is only explained by the policies that produced it together.
+
+        There is deliberately no filter on the verdict. Refusals are as visible as
+        successes; a governance view that can be pointed only at what was allowed cannot
+        answer the question it exists for.
+      parameters:
+        - { name: run_id,       in: query, schema: { type: string } }
+        - { name: principal_id, in: query, schema: { type: string } }
+        - { name: phase,        in: query, schema: { type: string, enum: [request, tool_call, tool_result] } }
+        - name: unenforced
+          in: query
+          description: |
+            Restrict to evaluations where NOTHING was enforced -- the shadow traffic. The
+            filter is on the group, not the row: one shadow policy inside an otherwise
+            enforced evaluation does not make that evaluation a shadow one.
+          schema: { type: boolean }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
+      responses:
+        '200':
+          description: evaluations, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [evaluation_id, run_id, principal_id, phase, verdict, enforced, decided_at, policies]
+                      properties:
+                        evaluation_id: { type: string }
+                        run_id:        { type: string }
+                        principal_id:  { type: string }
+                        phase:         { type: string }
+                        decided_at:    { type: string, format: date-time }
+                        verdict:
+                          type: string
+                          enum: [allow, deny, steer, observe]
+                          description: the strongest ENFORCED verdict in the group
+                        enforced:
+                          type: boolean
+                          description: false when every policy in the group ran in shadow
+                        policies:
+                          type: array
+                          description: |
+                            Every policy consulted, in the order it ran. `deciding` marks the
+                            ones that produced the verdict -- matching is not deciding, and
+                            listing every match as a reason is how "denied by policy"
+                            acquires a long list and stays unanswerable.
+                          items:
+                            type: object
+                            required: [policy_id, decision, enforced, ordinal]
+                            properties:
+                              policy_id: { type: string }
+                              decision:  { type: string, enum: [allow, deny, steer, observe] }
+                              enforced:  { type: boolean }
+                              ordinal:   { type: integer }
+                              latency_ms: { type: integer }
+                              deciding:
+                                type: [boolean, 'null']
+                                description: |
+                                  null for rows written before the grouping existed. It was
+                                  never recorded, so the value is genuinely unknown, and
+                                  defaulting it to false would print "decided nothing" about
+                                  a row where nobody knows.
+        '403': { $ref: '#/components/responses/Forbidden' }
   /v1/policies/{id}/decisions:
     get:
       tags: [policies]
@@ -729,6 +1761,33 @@ paths:
                               value:      { type: string, enum: [VALUE_UNKNOWN, TRUE, FALSE] }
                               confidence: { type: string, enum: [CONFIDENCE_UNKNOWN, ASSERTED, VERIFIED] }
   /v1/knowledge-packages:
+    get:
+      tags: [knowledge]
+      operationId: listKnowledgePackages
+      description: |
+        The compiled packages this tenant has registered. Added 2026-09-04: a package could
+        be registered and fetched by digest, and there was no way to see which ones exist —
+        so screen E3 could not be built, and "which bundle is this tenant on" was
+        unanswerable through the API.
+      responses:
+        '200':
+          description: the packages this tenant has registered
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [digest, bundle_id, node_count]
+                      properties:
+                        digest:      { type: string }
+                        bundle_id:   { type: string }
+                        okf_version: { type: string }
+                        node_count:  { type: integer }
     post:
       tags: [knowledge]
       operationId: registerKnowledgePackage
@@ -782,6 +1841,23 @@ paths:
                       properties:
                         path:   { type: string }
                         digest: { type: string }
+                        type:
+                          type: string
+                          description: |
+                            The CUSTOMER's own word for it. Open, and nothing branches on
+                            it — added 2026-09-04 for screen E4, which shows both this and
+                            the roles so a steward can see which one has consequences.
+                        roles:
+                          type: array
+                          items: { type: string }
+                          description: |
+                            What the platform sees. THESE are what it acts on.
+                        orphan:
+                          type: boolean
+                          description: |
+                            True when nothing in the bundle reaches this node. An orphaned
+                            node is knowledge no agent will ever retrieve, which is
+                            usually a mistake in the bundle rather than a decision.
         '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
   /v1/runs/{id}/cost:
     get:
