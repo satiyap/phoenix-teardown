@@ -26,6 +26,7 @@ import multiprocessing as mp
 import os
 import secrets
 import sys
+import threading
 import time
 
 import psycopg
@@ -174,19 +175,81 @@ def s2_errcode_mapping():
           "NOT fail fast with 23505",
           blocked_code == "57014", f"sqlstate={blocked_code}")
 
-    # now let the winner commit; the loser's retry must surface 23505
+    # Now let the winner commit and observe what the loser gets.
+    #
+    # CORRECTED 2026-09-04. This block previously assigned `dup_code` and never
+    # asserted it -- the check() call the comment promised was never written -- so
+    # spec/02's claim that the loser "raises 23505" rested on a measurement nobody
+    # made. Two things were wrong once it was actually run:
+    #
+    #   1. This APPEND recomputes MAX(seq)+1, so a loser RETRYING after the winner
+    #      commits computes a free seq and SUCCEEDS. There is no error to classify on
+    #      the retry; the error arrives on the attempt that raced, which is the
+    #      blocked one above.
+    #   2. On that racing attempt the epoch trigger's monotonicity check fires before
+    #      the index is consulted, and it raised 22023 -- the code the caller must
+    #      NEVER retry. spec/01 now raises 23505 there, and this asserts it.
     a.commit()
     with b.cursor() as c:
         c.execute("SET statement_timeout = '10s'")
     b.commit()
-    dup_code = None
+
+    retry_ok = None
     try:
         with b.cursor() as c:
-            append(c)
+            retry_ok = append(c)
         b.commit()
     except psycopg.Error as exc:
-        dup_code = exc.sqlstate
+        retry_ok = None
         b.rollback()
+    check("the loser's RETRY recomputes a free seq and succeeds -- there is no "
+          "duplicate to classify once the winner has committed",
+          retry_ok is not None, f"retry returned {retry_ok}")
+
+    # The racing attempt is where the collision surfaces, and observing it needs real
+    # concurrency: the loser blocks on the winner's row lock and only learns it lost once
+    # the winner COMMITS. Committing the winner from this thread after the loser has
+    # already returned would deadlock by construction -- which is what the first version
+    # of this assertion did, and it timed out at 57014 instead of measuring anything.
+    #
+    # It runs on its OWN pair of connections, closed in a finally. Sharing this
+    # scenario's `a` and `b` made a later scenario's fresh() fail intermittently with a
+    # foreign-key violation: a connection left mid-transaction by a racing assertion
+    # blocks the DELETE FROM runs that the next scenario opens with, and the failure
+    # lands nowhere near its cause.
+    w = psycopg.connect(DSN)
+    l = psycopg.connect(DSN)
+    race_code = None
+    try:
+        with l.cursor() as c:
+            c.execute("SET statement_timeout = '10s'")
+        l.commit()
+
+        w.execute("BEGIN")
+        with w.cursor() as c:
+            append(c)                  # holds the next seq, uncommitted
+
+        def commit_winner_shortly() -> None:
+            time.sleep(0.5)            # long enough that the loser is certainly blocked
+            w.commit()
+
+        releaser = threading.Thread(target=commit_winner_shortly)
+        releaser.start()
+        try:
+            with l.cursor() as c:
+                append(c)              # blocks, then loses when the winner commits
+            l.commit()
+        except psycopg.Error as exc:
+            race_code = exc.sqlstate
+            l.rollback()
+        finally:
+            releaser.join()
+    finally:
+        w.close()
+        l.close()
+    check("the losing writer of the seq race raises 23505, so the append path can "
+          "retry it without matching on message text",
+          race_code == "23505", f"sqlstate={race_code}")
 
     # the trigger path must NOT look retryable
     trig_code = None

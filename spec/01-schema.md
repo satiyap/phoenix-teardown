@@ -383,13 +383,19 @@ BEGIN
     END IF;
   END IF;
 
-  -- seq must be strictly increasing per run, regardless of epoch
+  -- seq must be strictly increasing per run, regardless of epoch.
+  --
+  -- This raise is the CONCURRENCY path, not a validation path: the losing writer of
+  -- the seq race arrives here, having computed a MAX(seq)+1 the winner has since
+  -- taken. It therefore carries `unique_violation` (23505) -- the same code the
+  -- primary key would raise for the same condition -- and NOT the 22023 the epoch
+  -- checks above use. Corrected 2026-09-04; see the note below.
   IF EXISTS (SELECT 1 FROM run_events
               WHERE tenant_id = NEW.tenant_id AND run_id = NEW.run_id
                 AND seq >= NEW.seq) THEN
     RAISE EXCEPTION 'seq % is not greater than every existing seq for this run',
                     NEW.seq
-      USING ERRCODE = 'invalid_parameter_value';
+      USING ERRCODE = 'unique_violation';
   END IF;
   RETURN NEW;
 END $$ LANGUAGE plpgsql;
@@ -402,13 +408,43 @@ CREATE TRIGGER run_events_epoch_check
 **`USING ERRCODE` is not cosmetic.** A bare `RAISE EXCEPTION` raises `P0001`
 (`raise_exception`), which is what *every* PL/pgSQL error uses — so a caller cannot tell an
 epoch violation from any other trigger failure, and a retry loop matching broadly would
-retry a bug forever. Spike 03 asserts the code is `22023` and, separately, that it is **not**
-`23505`, because `23505` is the one code the append path *does* retry.
+retry a bug forever.
 
-The `FOR UPDATE` is what makes epoch assignment atomic: two concurrent appends to the
+**Two codes, because this trigger has two jobs** *(corrected 2026-09-04 — the trigger
+previously raised `22023` for all three checks, which made the retryable case
+indistinguishable from a bug; see below)*:
+
+| Raise | Code | Caller's response |
+|---|---|---|
+| a rewind opening the wrong epoch | `22023` invalid_parameter_value | **bug** — never retry |
+| `to_epoch` naming an epoch that does not exist | `22023` | **bug** — never retry |
+| an ordinary event naming any epoch | `22023` | **bug** — never retry |
+| `seq` not above every existing `seq` | `23505` unique_violation | **retry** — this is the losing writer of the seq race |
+
+The last row is not a validation failure at all. The losing writer computed
+`MAX(seq)+1` before the winner committed, and by the time its trigger runs the value is
+taken — the same condition the primary key would catch, so it carries the same code.
+A client sees one code for one condition regardless of which mechanism caught it first.
+
+**Which mechanism does catch it first, and why the distinction is load-bearing.** This
+trigger is `BEFORE INSERT`, so its `SELECT ... FOR UPDATE` on `runs` is what actually
+serialises two concurrent appends — not the primary key's index entry. The loser blocks on
+the *row lock*, and when the winner commits it is the monotonicity check that rejects it;
+the index is never consulted. An implementation retrying only the codes
+[§02](02-consistency.md) named before this correction therefore failed *every* contended
+append, and only under load. That is what the correction below fixes.
+
+The `FOR UPDATE` is also what makes epoch assignment atomic: two concurrent appends to the
 same run serialise on the `runs` row, so they cannot both read `current_epoch = 3` and
 both claim to open epoch 4. This is the same single-writer discipline as the `seq` PK,
 extended to the one column the PK does not cover.
+
+> **Corrected 2026-09-04.** All three raises carried `invalid_parameter_value`, and
+> spike 03 asserted only that an *epoch* violation is `22023` and is not `23505`. It never
+> asserted the seq-race code: `test_postgres.py:182-188` assigns `dup_code` and no `check()`
+> ever reads it, so the claim [§02](02-consistency.md) attributed to that spike was never
+> measured. Found 2026-09-04 while building M2's append path, where a 16-writer test failed
+> on the first run with `SQLSTATE 22023`.
 
 ---
 

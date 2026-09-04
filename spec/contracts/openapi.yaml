@@ -68,6 +68,16 @@ components:
       in: header
       required: false
       schema: { type: string, minLength: 1 }
+    LastEventId:
+      name: Last-Event-ID
+      in: header
+      required: false
+      schema: { type: string }
+      description: |
+        Resume the stream after this event `seq` (spec/06-api.md §Streaming). Added
+        2026-09-04: the route required the behaviour and declared no parameter, so a
+        server generated from this file could not see the header and the stream
+        silently could not resume.
   responses:
     NotFoundOrOtherTenant:
       description: |
@@ -462,7 +472,9 @@ paths:
       tags: [runs]
       operationId: streamRun
       summary: SSE stream of run events
-      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      parameters:
+        - { $ref: '#/components/parameters/RunId' }
+        - { $ref: '#/components/parameters/LastEventId' }
       responses:
         '200':
           description: text/event-stream of RunEvent objects

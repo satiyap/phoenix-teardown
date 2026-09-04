@@ -412,6 +412,12 @@ Events as in §04, replayable via `Last-Event-ID` (mapped to `seq`). The stream 
 projection of the log, never a separate channel — so a client that reconnects and
 replays sees exactly what a client that stayed connected saw.
 
+`Last-Event-ID` is a declared header parameter on the route
+(`contracts/openapi.yaml`, `components/parameters/LastEventId`). *(Added 2026-09-04:
+this section required the behaviour while the contract declared no parameter for it, so
+a server generated from the contract — which is how the Go server is built — could not
+see the header at all, and the resume failed silently.)*
+
 ---
 
 ## Tests, with negative controls

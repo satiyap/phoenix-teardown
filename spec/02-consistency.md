@@ -78,9 +78,19 @@ Two concurrent appends compute the same `MAX(seq)+1` and both attempt the same p
 key. There is no lock service and no advisory lock.
 
 **The loser BLOCKS; it does not fail fast** — measured in spike 03 against Postgres 16.
-It waits on the winner's *uncommitted* index entry and only raises `23505` once the winner
-commits. An earlier version of this paragraph said it "gets a unique violation and rolls
-back", which skipped the blocking phase.
+It waits until the winner commits and only then learns it lost, raising `23505`. An earlier
+version of this paragraph said it "gets a unique violation and rolls back", which skipped
+the blocking phase.
+
+*(Corrected 2026-09-04.)* **What it blocks on is the `runs` row, not the index entry.**
+[§01](01-schema.md#epoch--who-may-set-it-and-to-what)'s epoch trigger is `BEFORE INSERT`
+and takes `SELECT ... FOR UPDATE` on `runs`, so that row lock is the serialising
+mechanism; the loser is then rejected by the trigger's own monotonicity check and the
+primary key is never consulted. The code was `22023` until 2026-09-04, which made the
+retryable case indistinguishable from a writer bug — an implementation retrying only the
+codes this section named failed every contended append, and only under load. The trigger
+now raises `23505` for that check, so the paragraph above and the table in §Error mapping
+are true of what the database actually does.
 
 **`statement_timeout` is therefore MANDATORY on the append path.** Without it a stuck
 writer blocks every competing append on that run indefinitely instead of yielding a
@@ -536,6 +546,7 @@ One table, so retry logic lives in one place rather than in every call site.
 | `40001` serialisation failure | sweeper conflict | retry with backoff |
 | `57014` statement timeout | blocked on a competitor's uncommitted append, or a slow query | **retry** (spike 03: an append blocks *before* it collides, so this is the common contention signal, not an exotic one) |
 | `22023` invalid_parameter_value | the epoch trigger refused the event | **bug** — never retry; the caller named an epoch it may not name |
+| `23505` from the epoch trigger's `seq` check | lost the seq race; the trigger caught it before the index did | **retry**, exactly as the row above |
 
 The `channel_envelopes` row is deliberately **not** `run_events`' semantics. A channel's
 `seq` counter is issued under the `channels` row lock

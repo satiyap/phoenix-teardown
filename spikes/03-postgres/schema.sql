@@ -71,6 +71,19 @@ BEGIN
         USING ERRCODE = 'invalid_parameter_value';
     END IF;
   END IF;
+  -- ADDED 2026-09-04. spec/01-schema.md's trigger has always carried this check and
+  -- this file did not, so scenario 2 was measuring a trigger the spec does not
+  -- describe: with no monotonicity check here, a seq collision fell through to the
+  -- primary key and produced 23505, which is what RESULT.md reported. Against the
+  -- real trigger the check fires first, and until 2026-09-04 it raised 22023 -- the
+  -- code a caller must never retry. That drift is BUG-001 in phoenix-platform.
+  IF EXISTS (SELECT 1 FROM run_events
+              WHERE tenant_id = NEW.tenant_id AND run_id = NEW.run_id
+                AND seq >= NEW.seq) THEN
+    RAISE EXCEPTION 'seq % is not greater than every existing seq for this run',
+                    NEW.seq
+      USING ERRCODE = 'unique_violation';
+  END IF;
   RETURN NEW;
 END $$ LANGUAGE plpgsql;
 
