@@ -1275,6 +1275,60 @@ paths:
                             IS; a credential is material they present.
                         display_name: { type: string }
                         revoked_at:   { type: string, format: date-time, nullable: true }
+  /v1/retention:
+    get:
+      tags: [tenants]
+      operationId: getRetentionReport
+      security: [{ adminToken: [] }]
+      description: |
+        What is past its retention window and still there.
+
+        `run_retention_days` and `transcript_retention_days` are settings the platform does
+        not act on. A customer could set thirty days, watch the value save with their name
+        against it, and believe their transcripts were being removed. They were not, and
+        nothing told them.
+
+        This route does not delete anything and there is no route that does. Deletion needs
+        answers features/02 leaves open — whether it is immediate or after a grace period, and
+        whether any per-run audit survives content deletion — and a data-destruction policy
+        guessed at in code is indistinguishable from a decided one once it has run.
+
+        So this measures, and the response says in words that nothing was removed. A list of
+        overdue records without that sentence reads as the output of a sweep that just ran.
+      responses:
+        '200':
+          description: the position, measured and unacted-on
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [measured_at, anything_overdue, describe, classes]
+                properties:
+                  measured_at: { type: string, format: date-time }
+                  anything_overdue: { type: boolean }
+                  describe:
+                    type: string
+                    description: |
+                      The position in a sentence, including that nothing has been deleted.
+                  classes:
+                    type: array
+                    items:
+                      type: object
+                      required: [class, window_days, rows, describe]
+                      properties:
+                        class:       { type: string, enum: [runs, transcripts] }
+                        window_days:
+                          type: integer
+                          description: the window this was measured against, so a reader is not left to look it up
+                        rows:        { type: integer }
+                        oldest_days:
+                          type: [integer, 'null']
+                          description: |
+                            How far past the window the oldest one is. "1,200 overdue" and
+                            "1,200 overdue, the oldest by two years" are different sentences
+                            and the second is the one that gets acted on.
+                        describe:    { type: string }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /v1/tenants:
     get:
       tags: [tenants]
