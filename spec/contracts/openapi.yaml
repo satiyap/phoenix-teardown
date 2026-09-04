@@ -1329,6 +1329,29 @@ paths:
                             The DEFAULT rests on no evidence. features/02 asks that these
                             not read as considered choices — several of them are guesses,
                             and a customer entitled to know that is one who can push back.
+                        enforced:
+                          type: boolean
+                          description: |
+                            Whether the platform ACTS on this value.
+
+                            Distinct from `unmeasured`, and more serious. Unmeasured means
+                            the number is a guess; not enforced means the number does
+                            nothing. A retention window that does nothing is a customer
+                            believing their data was deleted when it was not, and a control
+                            that looks enforced and is not is worse than an absent one —
+                            the person who sets it stops looking for another way to get the
+                            deletion they need.
+
+                            `run_retention_days` and `transcript_retention_days` are both
+                            false today: nothing sweeps runs or transcripts. Implementing
+                            the deletion runs into features/02's open offboarding decisions,
+                            so the honest answer is to say the control is inert rather than
+                            to guess at the policy.
+
+                            It is a property of the PLATFORM, never of the stored row.
+                            Choosing a retention window does not make the product start
+                            honouring it, and a customer who set one is exactly the person
+                            who must still be told it is inert.
                         updated_by: { type: string }
     put:
       tags: [tenants]
