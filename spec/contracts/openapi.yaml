@@ -325,6 +325,16 @@ components:
             as one that works.
         credential_ref:  { type: string, description: where the secret lives. Never the secret. }
         last_tested_at:  { type: string, format: date-time, nullable: true }
+        last_error:
+          type: [string, 'null']
+          description: |
+            The connector's OWN error, verbatim. This screen's job on a bad day is to tell
+            somebody why their warehouse is unreachable, and "connection failed" does not
+            do that -- the host that could not be resolved, the role that lacked a grant,
+            the certificate that expired are all the same sentence without it.
+
+            It is stored and was previously unreadable through the API, so the only way to
+            find out why a connection failed was to query the database.
     Tenant:
       type: object
       required: [tenant_id, slug, display_name, region, state]
@@ -1113,6 +1123,77 @@ paths:
                   items:
                     type: array
                     items: { $ref: '#/components/schemas/Connection' }
+  /v1/connections/{id}/test:
+    post:
+      tags: [connections]
+      operationId: testConnection
+      security: [{ adminToken: [] }]
+      description: |
+        Reach the customer system and record what happened.
+
+        Three outcomes, and they are three rather than two on purpose: a connection that has
+        never been tested is not the same as one that failed, and neither is the same as one
+        that works. Collapsing untested into failed makes every new connection look broken;
+        collapsing it into connected makes an unproven one look ready.
+
+        If no connector is configured for this deployment the call is REFUSED, never
+        recorded as a pass. A test that cannot run has not succeeded.
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      responses:
+        '200':
+          description: the result, whichever way it went
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Connection' }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
+        '503':
+          description: |
+            No connector is available to run the test. Deliberately not a 200 with
+            `state: failed` -- that would blame the customer's warehouse for our own
+            missing component, and somebody would go and debug their firewall.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+  /v1/connections/{id}/rotate:
+    post:
+      tags: [connections]
+      operationId: rotateConnectionCredential
+      security: [{ adminToken: [] }]
+      description: |
+        Point a connection at different material.
+
+        The body carries a REFERENCE, never a secret. There is no field here that could hold
+        one, which is what makes "no route accepts a secret" a property of the contract
+        rather than of a handler that remembers.
+
+        Rotating resets the connection to `untested` and clears the last error. The previous
+        test proved the PREVIOUS credential; leaving the state at `connected` would report a
+        working connection on the strength of material that is no longer in use, which is
+        the exact moment somebody stops watching.
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [credential_ref]
+              properties:
+                credential_ref:
+                  type: string
+                  description: |
+                    Where the new secret lives. A `kms://` or `devkey://` reference, and
+                    anything else is refused -- a value that is not a reference is somebody
+                    pasting a secret into this field.
+      responses:
+        '200':
+          description: rotated, and back to untested
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Connection' }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
+        '422':
+          description: a credential_ref that is not a reference
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
   /v1/admin-events:
     get:
       tags: [audit]
