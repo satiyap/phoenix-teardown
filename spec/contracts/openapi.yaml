@@ -368,7 +368,7 @@ components:
         archived_at:  { type: string, format: date-time, nullable: true }
     Candidate:
       type: object
-      required: [candidate_id, node_type, title, instrument, confidence]
+      required: [candidate_id, run_id, node_type, title, instrument, confidence]
       description: |
         Proposed knowledge. NOT a node: nothing reaches a bundle without a recorded human
         decision. Every candidate carries provenance, because "where did this definition
@@ -393,7 +393,15 @@ components:
             The extractor's own view. Recorded and never acted on: it orders the review
             queue and decides nothing. An agent that could auto-accept its own
             high-confidence output would be disposing as well as proposing.
-        run_id:       { type: string }
+        run_id:
+          type: string
+          description: |
+            The scan or interview run that proposed it.
+
+            Required, because provenance is not complete without it. `source_path` and
+            `source_line` say where in the customer's documents a definition was found; only
+            this says WHICH PASS found it — the question asked when two scans disagree, or
+            when somebody wants to know whether a batch is worth reviewing at all.
     Policy:
       type: object
       required: [policy_id, name, scope, decision, enabled]
