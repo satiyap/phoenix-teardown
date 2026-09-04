@@ -188,6 +188,32 @@ components:
         timezone:              { type: string, description: IANA; immutable after create }
         overlap_policy:        { type: string, enum: [skip, queue, allow] }
         misfire_grace_seconds: { type: integer, minimum: 0, maximum: 86400 }
+        ceiling_calls:
+          type: [integer, 'null']
+          minimum: 1
+          description: |
+            Outbound model calls ONE firing may make before the egress proxy refuses the
+            rest. `null` is no ceiling on this axis.
+        ceiling_bytes:
+          type: [integer, 'null']
+          minimum: 1
+          description: |
+            Bytes ONE firing may move before the proxy refuses the rest. `null` is no
+            ceiling on this axis.
+
+            Both ceilings are counted in what the PROXY can testify to, and deliberately
+            not in money. Usage is a fact the harness observed and the harness runs inside
+            the sandbox: you cannot limit something using a number the thing being limited
+            reports about itself. A currency figure here would manufacture a precision the
+            mechanism does not have, and would eventually be reconciled against the real
+            bill by somebody — at which point it is the real record that gets doubted.
+
+            0 is refused rather than treated as "no calls": that is what pausing is for,
+            and a 0 reads downstream as no limit at all.
+
+            Per FIRING, not per routine lifetime. A routine runs unattended, on a schedule,
+            forever, so the ceiling that matters is the one that stops a single runaway
+            tick before the next tick is due.
     Credential:
       type: object
       required: [name, kind, flow, egress_host, holder_principal_id]
@@ -265,7 +291,7 @@ components:
         archetype:  { type: string }
         grade:
           type: string
-          enum: [attested, vetted, reviewed, unverified, stale, failed]
+          enum: [attested, vetted, reviewed, unverified, stale, failed, withdrawn]
         as_of:
           type: string
           format: date-time
@@ -774,7 +800,7 @@ paths:
                   computation_path: { type: string }
                   grade:
                     type: string
-                    enum: [attested, vetted, reviewed, unverified, stale, failed]
+                    enum: [attested, vetted, reviewed, unverified, stale, failed, withdrawn]
                   why:
                     type: string
                     description: |
@@ -818,6 +844,78 @@ paths:
         '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
         '422':
           description: a vetting with no rationale
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+  /v1/claims/{id}/withdraw:
+    post:
+      tags: [trust]
+      operationId: withdrawVetting
+      description: |
+        A named person takes back a vetting. Screen P5.
+
+        The vetting is NOT deleted. It happened -- somebody put their name on this number --
+        and removing the record would leave a number that had been vouched for looking like
+        one nobody ever examined, which erases the history an investigation needs and quietly
+        protects the person who vouched.
+
+        The resulting grade is `withdrawn`, deliberately not a return to whatever the claim
+        held before. Reverting to `unverified` would say "nobody has checked this", which is
+        false and is the more dangerous falsehood: unverified invites somebody to go and
+        verify it, while withdrawn tells them it was already examined and the examination was
+        wrong. `withdrawn` outranks even a passing verification, because a number a person
+        has explicitly disowned must not be presented as one the machine stands behind.
+
+        The rationale is required, and it carries more weight than the vetting's did: a
+        reader needs to know whether the NUMBER was wrong or the vetting was misapplied,
+        because those lead to different work.
+
+        The response carries `quoted_by`. Propagation is half free and half impossible, and
+        the split is worth stating. Free: every grade in this product is computed at READ
+        time, so anything that re-reads shows the withdrawal without being told -- there is
+        no cache to invalidate. Impossible: a report downloaded last week, a number pasted
+        into a deck. Nothing here can reach those, so what the API does instead is say where
+        the number went, and a person does the rest.
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rationale]
+              properties:
+                rationale: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: withdrawn, with the resulting grade and where the number went
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [grade, why, quoted_by]
+                properties:
+                  grade: { type: string }
+                  why:   { type: string }
+                  quoted_by:
+                    type: array
+                    description: |
+                      Everywhere this claim was used that the system knows of. Not a
+                      guarantee of completeness -- it cannot see a screenshot -- which is
+                      why the screen says so rather than presenting it as the full list.
+                    items:
+                      type: object
+                      required: [kind, id]
+                      properties:
+                        kind:  { type: string, enum: [run, report] }
+                        id:    { type: string }
+                        title: { type: string }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
+        '409':
+          description: |
+            `already_withdrawn`. A second withdrawal is not a second act, and allowing it
+            would put two rationales on one event with no way to say which is current.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '422':
+          description: no vetting to withdraw, or a withdrawal with no rationale
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
   /v1/inputs:
     get:
