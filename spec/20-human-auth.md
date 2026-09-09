@@ -278,6 +278,30 @@ This package-metadata boundary does not settle node classification, skill resolu
 run materialization or historical-provenance authorization; those need their own
 contract and evidence rather than inheriting a grant from digest possession.
 
+Runtime layer resolution is captured with run creation, in the same transaction as
+run.created. Migration 133 stores a versioned immutable snapshot and a domain-separated
+resolution checksum; run.created records that checksum. The snapshot binds tenant,
+run, team, agent and definition IDs, the effective manifest, and each winning node's
+source package, bundle, scope and registering principal. Its effective package digest
+uses the existing knowledge manifest canonicalisation. This execution snapshot is
+separate from an agent definition's optional knowledge_package_digest assertion.
+Resolve a team layer by the stored team's immutable slug, never its internal ID;
+exclude other teams, other agents, other tenants and unbound persona scopes. Capture
+all selected publications in one database statement. A run with no knowledge still
+gets an explicit empty snapshot, so later publication cannot change its inputs.
+Scheduled runs capture through the same routine. Delegated verification children
+inherit their origin's team and snapshot content, not the current publication stack;
+standalone reconciliation supplies the trusted origin explicitly. Child definition
+and identity remain their own. Layer edits, archive and membership withdrawal do not
+rewrite an admitted run's inputs; live human read/stream authorization remains separate.
+Every worker knowledge consumer uses this snapshot. Computation independence uses the
+winning package's captured publisher, not the latest registration with that bundle ID.
+Materialized content is checked against the stored manifest as well as its local tree
+manifest. Missing or inconsistent snapshots fail rather than reconstructing historical
+knowledge from current layers. A configured worker without a knowledge source cannot
+execute a run with nonempty pinned knowledge. Node classification, persona ownership,
+and the complete definition-declared package/cutover audit remain separate requirements.
+
 ## Human run-creation idempotency
 
 For Ory-authenticated POST /v1/runs, a retry key belongs to the tenant and stable
