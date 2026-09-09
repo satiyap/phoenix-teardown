@@ -261,6 +261,23 @@ delegate tenant-wide knowledge, credential or policy operations as if they were 
 by an arbitrary supplied team ID. Machine/run permissions remain separately authenticated
 and tested. The remaining team mutation, resource and stream matrix is tracked in #109.
 
+Package catalogue and direct package metadata reads must agree on publication
+visibility. Ordinary Ory humans may read a package published in a current,
+non-archived team only through their current membership. Resolve a team layer's
+immutable slug to the internal team ID used by membership; string equality between
+those two identifiers is not authority. An explicit non-team layer publication is
+tenant-visible, matching the non-team layer catalogue; publishing the same digest
+in both a team layer and a non-team layer therefore grants shared visibility.
+Unpublished and other-team-only packages are absent from the ordinary-human list
+and return the same 404 as an unknown digest. A known digest or historical run
+reference is not a permanent grant to this tenant-level endpoint. Membership
+withdrawal, team archive and publication rebinding affect subsequent reads without
+requiring sign-out. Failed authority/publication lookup must not fall back to an
+unfiltered list. Existing tenant-admin and machine read policy remains separate.
+This package-metadata boundary does not settle node classification, skill resolution,
+run materialization or historical-provenance authorization; those need their own
+contract and evidence rather than inheriting a grant from digest possession.
+
 ## Human run-creation idempotency
 
 For Ory-authenticated POST /v1/runs, a retry key belongs to the tenant and stable
