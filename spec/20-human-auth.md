@@ -1,5 +1,10 @@
 # 20 - Ory-managed local human accounts
 
+**Forward amendment, 2026-09-10:** this specification adopts the Phoenix document
+`docs/ORY-PLATFORM-RESET-PLAN.md`. The lifecycle/profile design below is not yet
+implemented. Existing migrations and generated contracts remain current artifacts
+until source-owned forward changes and normal generation implement this contract.
+
 This amendment supersedes customer-token exchange and independently minted human
 bearers in the initial API specification. Customer identity federation is deferred.
 Kratos owns credentials, verification, MFA, recovery and browser sessions. Phoenix
@@ -12,7 +17,9 @@ An operator-controlled exact browser-origin registry selects a Kratos realm. Eac
 self-hosted tenant realm has its own Kratos database and stable keys; the platform
 operator realm is separate. Host selection is not authorization. Only a valid Ory
 session plus an enabled (realm_id, identity_id) binding to an unrevoked human in an
-active tenant grants access. Email and request tenant fields never supply authority.
+active tenant grants access, and then only to the operations its current membership
+authorizes and whose capability requirements are separately satisfied. Email and
+request tenant fields never supply authority.
 A configured realm must agree with the binding's tenant. Unknown, disabled, revoked
 or suspended membership grants nothing.
 
@@ -102,9 +109,11 @@ delivery, offboarding reconciliation or full browser acceptance are complete.
 ### Deployment-owned customer realm registration
 
 `tools/ory-realm` is an offline deployment job, not a browser endpoint. It requires
-an existing active customer tenant, its expected slug, a complete current realm
+an already-active customer tenant, its expected slug, a complete current realm
 registry, a dedicated browser cookie hostname and Kratos public upstream, and a
-stable request ID with deployment actor and reason. It creates no identities,
+stable request ID with deployment actor and reason. Attaching a realm to a tenant
+that is already active is a narrower operation than preparing a pending one, and it
+is not the canonical provisioning workflow described below. It creates no identities,
 principal links, invitations, memberships, or operator grants. Realm metadata and
 the provisioning receipt commit atomically; configuration publication and plane
 restart remain explicit subsequent deployment steps.
@@ -127,31 +136,73 @@ contract is introduced by this provisioning job.
 
 ### Fresh-tenant Ory preparation and activation
 
-`phoenix onboard-ory` is the explicit fresh-tenant deployment operation. It requires
-configured database and complete realm-registry inputs, an explicit tenant identity,
-region, browser origin, trusted Kratos upstream, deployment actor, stable request ID,
-and audit reason. It does not run migrations or issue a human credential. The legacy
-`onboard`/`login` commands are not an alternative proof of Ory enrollment and remain
-pending the separately gated human-auth cutover.
+The canonical deployed plane workflow owns plan, apply and status. Existing developer
+commands must wrap that policy or retire; neither the service nor the database may
+maintain a second interpretation of activation. Exact command/wire shapes are pending
+source-contract implementation, not a claim that profile flags already ship.
 
-Identity preparation may register a realm for a pending tenant only after policy,
-adapter, KMS, and data-plane prerequisites are satisfied. KMS/data-plane
-not-applicable statuses are accepted only for explicit local development. Migration
-129 persists the pending-setup intent in the deployment receipt; retries cannot
-change that intent or overwrite an incompatible realm registration.
+Persist desired `control-plane` or `execution-enabled` profile independently from
+observed credential-storage and execution capabilities. Observed states distinguish
+not configured, pending, ready, failed and disabled, with configuration revision,
+verifier version, timestamp and sanitized reason. Profile intent and historical
+`not_applicable` receipts never prove readiness.
 
-The tenant must remain pending during preparation. Before activation, including a
-retry after previously successful identity preparation, the deployment operation
-must recheck the configured Kratos readiness endpoint and recorded realm agreement.
-A readiness failure leaves a pending tenant pending. Suspended and offboarded
-tenants must not be reactivated by onboarding. Readiness is bounded dependency
-readiness, not evidence of working SMTP, ingress, or browser acceptance.
+The stored tenant states remain `pending`, `active`, `suspended`, `offboarded`.
+`active` means policy/identity control-plane prerequisites agree and authorized
+members can use supported operations. It does not require an adapter, data key or
+worker pool. Genuine adapter metadata, protected credentials and isolated placement
+are prerequisites for dependent execution, not all human sign-in.
 
-The successful receipt supplies registry configuration and directs the deployer to
-publish it, then request first-admin enrollment from a verified, MFA-authenticated
-operator. No human identity link, local invitation redemption, or human bearer is
-created by the deployment operation. Real browser enrollment remains the boundary
-that establishes the invited user's authority.
+Pending tenants grant no ordinary tenant data access. Only a valid explicitly scoped
+setup/enrollment continuation or bound setup authority permits its narrow setup
+operations; an arbitrary Ory identity receives no tenant existence or status details.
+Operators inspect/retry an authorized customer using separate current operator grants,
+not by becoming customer administrators. Suspension/offboarding override valid Ory
+sessions and cannot be reversed by provisioning retries. Machine read policy remains
+separately enumerated and tested.
+
+Prepare the operator realm and consume its deployment-issued one-time bootstrap with
+verified email and MFA. Then record customer identity/profile and versioned intent;
+prepare its policy and dedicated Kratos realm/runtime; reconcile registry publication;
+activate the control plane under the common transaction. The authenticated operator
+can now issue first-admin enrollment. Activation grants no principal link or membership;
+first-admin delivery and explicit verified-email/AAL2 acceptance are separate receipts.
+An active empty customer is not onboarding complete. This ordering avoids requiring
+an enrolled customer administrator before an offer can be issued to that administrator.
+
+The workflow requires explicit database/registry inputs, immutable tenant ID/slug/region,
+realm/origin/upstream, actor, stable request ID and reason. HTTPS and cookie-host
+isolation are not relaxed by a limited profile. Plan is non-mutating. Apply uses locked
+persisted lifecycle/authority, structured versioned intent and configuration-bound
+bounded readiness results. Do not hold database locks while waiting for remote work.
+Status distinguishes activation, capabilities, registry publication and enrollment.
+
+Identical retries recover the committed receipt without duplicate grants or restoring
+later-withdrawn authority. Conflicting intent requires explicit reconciliation. Audit
+reason text is not a machine protocol. Crash after remote success, database commit,
+output or registry publication must be resumable without direct SQL activation.
+Do not change existing migration 129 to reinterpret old receipts; use forward migration
+and explicit reconciliation for new profile/intent semantics.
+
+Missing execution or protected credential storage refuses dependent operations while
+supported control-plane access remains available. A configured mandatory provider
+failure remains a hard error, not a silent dev-sealer/environment fallback. Installing
+OpenBao is not proof of spec/14 storage. Admission rechecks current capabilities;
+queued work becomes explicitly blocked and workers recheck before dispatch. Already
+external effects follow bounded reconciliation, not blind retries. Authorized historical
+reads do not require a running worker.
+
+Typed bootstrap/status errors must distinguish missing authentication, verification,
+MFA, no membership, setup, suspension, capability unavailability and dependency outage.
+One operation matrix declares credential class, roles, lifecycle and capabilities;
+new routes without a row fail the check. Shared realm validation must use exact origins
+and port-independent normalized cookie hosts at all entry points.
+
+Milestone A is real HTTPS/image acceptance for operator plus two independent customer
+realms, without a customer IdP, development relaxations or seeded identity links.
+It includes safe absence/refusal, retries, permissions, session lifecycle, mail,
+private admin isolation, replicas and restore. Actual protected workload completion
+is the separate harness release, not a prerequisite for initial human identity.
 
 ### Recovery and password-change session withdrawal
 

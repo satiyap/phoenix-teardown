@@ -417,7 +417,21 @@ No `DELETE`, following §01's grants discipline (`01-schema.md` §Grants require
 a state, so a row recording what a credential could reach is never removable by the
 application role.
 
-Which KMS, the envelope format, and whether the key is per tenant are **unknown — OQ**.
+**Forward amendment, 2026-09-10:** credential protection is an independently admitted
+capability under `20-human-auth.md`, not a prerequisite for all human sign-in.
+A control-plane-only tenant refuses secret-bearing writes and dependent operations
+until this capability is implemented and verified; it does not substitute a dev key.
+A configured mandatory secret provider failing remains a hard error.
+
+The preferred shared-deployment backing is OpenBao; a dedicated customer's KMS is
+a separate backing decision, not required for the local-account release. Preserve
+tenant-scoped key isolation, authenticated encryption, versioned material references,
+limited decrypt authority, rotation and recovery. The concrete resolver/envelope and
+provider privileges must be specified and demonstrated before admitting a workload.
+Neither an OpenBao address nor successful plane signing-key retrieval proves that
+implementation. Ory cookie/cipher secrets, Phoenix machine signing keys, tenant
+credentials and workload injection have separate ownership and recovery requirements.
+This amendment changes no grants, stored data or generated schema by itself.
 
 ## Revocation
 

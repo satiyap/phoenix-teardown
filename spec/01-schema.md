@@ -1,4 +1,14 @@
 # 01 — Schema
+
+**Lifecycle amendment, 2026-09-10 (design, not an applied migration):**
+`20-human-auth.md` separates active control-plane availability from credential and
+execution readiness. Planned source-owned forward migrations must persist desired
+profile, observed capability/configuration proof and versioned provisioning intent.
+Do not edit existing numbered migrations or infer ready from old `not_applicable`
+receipts. Policy/identity prerequisites govern control-plane activation; genuine
+adapter metadata is required when enabling execution, not to admit every human login.
+Generated SQL stays unchanged during this documentation-only reset.
+
 <!-- status: final -->
 
 PostgreSQL 16+. Every table is tenant-scoped in its **primary key**, and every
@@ -182,7 +192,7 @@ argument for `native_tui` — adapting a third-party agent (superseded 2026-08-2
 that offers no API by driving its terminal.
 
 **Amended 2026-08-30 (OQ-109):** the deploy pipeline writes one `adapter_contracts` row
-**per tenant** at provisioning time, derived from the driver image manifest — not a single
+**per tenant** at execution enablement, derived from the driver image manifest — not a single
 platform-wide row every tenant reads. `(tenant_id, identity, digest)` is already the primary
 key, so the row shape does not change; what was open was who writes it and how many rows
 exist, and the answer is one insert per tenant, done by the deploy pipeline rather than the
