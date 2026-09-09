@@ -32,6 +32,7 @@ matrix:
 check:
 	@git diff --check || (echo "trailing whitespace or conflict markers — see git diff --check"; exit 1)
 	@$(PY) tools/test_validate_spec.py
+	@$(PY) tools/test_ory_contract.py
 	@$(MAKE) --no-print-directory spike06
 	@cd tools && ../$(PY) validate_facts.py --strict && ../$(PY) validate_spec.py && ../$(PY) build_matrix.py && ../$(PY) check_exit_criteria.py
 
@@ -42,6 +43,7 @@ llm:
 	@$(PY) tools/llm.py
 
 spec:
+	@$(PY) tools/test_ory_contract.py
 	@cd tools && ../$(PY) validate_spec.py
 
 gate-tests:

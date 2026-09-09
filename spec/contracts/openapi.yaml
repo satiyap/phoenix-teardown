@@ -17,6 +17,8 @@ servers:
   - url: https://api.example.internal
 security:
   - agentToken: []
+  - adminToken: []
+  - orySession: []
 tags:
   - name: definitions
   - name: agents
@@ -32,6 +34,15 @@ tags:
     description: admin only
 components:
   securitySchemes:
+    orySession:
+      type: apiKey
+      in: cookie
+      name: ory_kratos_session
+      description: |
+        Ory browser session. Phoenix resolves realm-scoped tenant membership on every
+        request. Human administrator access requires aal2; global operator authority
+        requires a separate explicit grant. Mutations also require the exact Origin
+        and the session-bound X-Phoenix-CSRF value from GET /v1/auth/session.
     agentToken:
       type: http
       scheme: bearer
@@ -45,12 +56,11 @@ components:
       type: http
       scheme: bearer
       description: |
-        Class **admin**: everything the API exposes, including policy and adapter
-        registration. It is NOT sufficient on its own for one operation: deciding an
-        approval additionally requires a principal of kind `human`, pinned by a composite
-        foreign key in spec/01-schema.md, so an admin token held by a `service` principal
-        is rejected by the database (ADR-0015). Amended 2026-08-27: this said "everything",
-        which contradicted the decideApproval description below.
+        Machine admin credential for permitted tenant-scoped service operations.
+        It does not authenticate a human, grant Phoenix operator authority, or
+        authorize Ory-only team and identity administration. Approval decisions
+        additionally require an eligible, explicitly authorized actor kind; agent
+        principals cannot decide approvals. Humans use orySession instead.
   parameters:
     RunId:
       name: id
@@ -169,6 +179,37 @@ components:
           type: object
           additionalProperties: true
           description: Optional; participates in the definition digest when declared.
+    McpServer:
+      type: object
+      required: [server_id, name, endpoint, state, admitted_by, admitted_at, pinned_digest]
+      additionalProperties: false
+      description: |
+        An admitted MCP endpoint. The customer operates the server; this platform holds a
+        reference to it, a pinned catalogue, and no code.
+      properties:
+        server_id:   { type: string }
+        name:        { type: string }
+        endpoint:    { type: string }
+        egress_host: { type: string }
+        state:       { type: string, enum: [admitted, revoked] }
+        admitted_by: { type: string }
+        admitted_at: { type: string, format: date-time }
+        revoked_at:  { type: [string, 'null'], format: date-time }
+        credential_ref:
+          type: string
+          description: a reference, never material
+        pinned_digest:
+          type: string
+          description: the catalogue this server was admitted with
+        pinned_tools:
+          type: array
+          items:
+            type: object
+            required: [name, schema_digest]
+            properties:
+              name:          { type: string }
+              description:   { type: string }
+              schema_digest: { type: string }
     Task:
       type: object
       required: [name, agent_id, trigger_kind]
@@ -188,6 +229,17 @@ components:
         timezone:              { type: string, description: IANA; immutable after create }
         overlap_policy:        { type: string, enum: [skip, queue, allow] }
         misfire_grace_seconds: { type: integer, minimum: 0, maximum: 86400 }
+        fire_key:
+          type: string
+          readOnly: true
+          description: |
+            A webhook routine's own key, returned ONCE on creation and never again. Added
+            2026-09-05. The platform stores only its digest, so a database read does not
+            yield a key that fires anybody's routine — which also means a lost key is
+            replaced rather than recovered.
+
+            Absent on every other trigger kind: a routine with two ways to fire has two
+            firing keys and loses idempotency at the moment it matters most.
         ceiling_calls:
           type: [integer, 'null']
           minimum: 1
@@ -358,6 +410,12 @@ components:
         activated_at:  { type: string, format: date-time, nullable: true }
         suspended_at:  { type: string, format: date-time, nullable: true }
         offboarded_at: { type: string, format: date-time, nullable: true }
+    TeamMemberGrant:
+      type: object
+      required: [principal_id, role]
+      properties:
+        principal_id: {type: string}
+        role: {type: string}
     Team:
       type: object
       required: [team_id, slug, display_name]
@@ -453,6 +511,7 @@ components:
       required: [run_id, state, agent_id, pinned_definition_digest]
       properties:
         run_id:                   { type: string }
+        team_id: { type: string, nullable: true, description: 'Immutable team binding; absent for unreconciled historical or unscoped machine runs.' }
         state:                    { $ref: '#/components/schemas/RunState' }
         agent_id:                 { type: string }
         pinned_definition_digest: { type: string }
@@ -483,6 +542,63 @@ components:
         rationale:   { type: [string, 'null'] }
         expires_at:  { type: string, format: date-time }
 paths:
+  /v1/teams/{id}/members/{principal_id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, minLength: 1}}
+      - {name: principal_id, in: path, required: true, schema: {type: string, minLength: 1}}
+    put:
+      operationId: putTeamMember
+      summary: Assign or change a team membership
+      description: Current Ory tenant administrator only. The target must be an active enrolled human in this realm and tenant. Another active steward is required before demoting a steward. Unchanged grants are idempotent and do not repeat audit events.
+      security: [{ orySession: [] }]
+      x-phoenix-authority: tenant-admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [role, reason]
+              properties:
+                role: {type: string, enum: [member, steward]}
+                reason: {type: string, minLength: 1, maxLength: 2000}
+      responses:
+        '200':
+          description: Current team membership
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TeamMemberGrant'}
+        '403': {description: Current Ory tenant administrator required}
+        '404': {description: Team or enrolled human not found in this tenant and realm}
+        '409': {description: Archived team or last active steward refusal}
+        '422': {description: Invalid role or audit reason}
+  /v1/teams/{id}/members/{principal_id}/remove:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, minLength: 1}}
+      - {name: principal_id, in: path, required: true, schema: {type: string, minLength: 1}}
+    post:
+      operationId: removeTeamMember
+      summary: Withdraw a team membership without deleting the historical actor
+      description: Current Ory tenant administrator only. Requires another active steward before removing a steward. Missing memberships are idempotent. Team access ends on the next request or stream permission check; unrelated memberships and Ory sessions remain intact.
+      security: [{ orySession: [] }]
+      x-phoenix-authority: tenant-admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: {type: string, minLength: 1, maxLength: 2000}
+      responses:
+        '204': {description: Membership withdrawn or already absent}
+        '403': {description: Current Ory tenant administrator required}
+        '404': {description: Team not found in this tenant}
+        '409': {description: Another active steward is required}
+        '422': {description: Invalid audit reason}
   /v1/definitions:
     post:
       tags: [definitions]
@@ -538,6 +654,7 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/Agent' }
     post:
+      security: [{ adminToken: [] }, { orySession: [] }]
       tags: [agents]
       operationId: createAgent
       requestBody:
@@ -566,6 +683,7 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/Agent' } } }
         '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
     patch:
+      security: [{ adminToken: [] }, { orySession: [] }]
       tags: [agents]
       operationId: repointAgent
       summary: Repoint the agent at a different definition digest
@@ -604,6 +722,7 @@ paths:
               required: [agent_id]
               properties:
                 agent_id: { type: string }
+                team_id: { type: string, description: 'Required for new human runs; explicit tenant-scoped team ownership.' }
                 input:    { type: object, additionalProperties: true }
       responses:
         '201':
@@ -757,7 +876,7 @@ paths:
       tags: [approvals]
       operationId: decideApproval
       summary: Decide an approval
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       description: |
         Requires an ADMIN credential, and additionally a principal of kind `human`:
         `approvals.decided_by` is pinned to a human by a composite foreign key in
@@ -792,6 +911,77 @@ paths:
           description: already decided; body carries the existing decision
           content: { application/json: { schema: { $ref: '#/components/schemas/Approval' } } }
         '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
+  /v1/trust/findings:
+    get:
+      tags: [trust]
+      operationId: listTrustFindings
+      description: |
+        Numbers a verifier DISAGREED with, freshest first. Screen P5. Added 2026-09-05.
+
+        Under /v1/trust because `/v1/onboarding/findings` is a different thing with the same
+        word — gaps in a scan, not numbers that failed a check — and two resources called
+        "findings" at the same level would leave a reader guessing which one they have.
+
+        features/10 acceptance: a failed verification is visible to a person, not only in a
+        log. Without this route a failing check reached a vetting screen only if somebody
+        already knew the claim id — which means the most valuable thing the trust pipeline
+        produces was findable only by whoever did not need to find it.
+
+        A finding carries what the answer said AND what the governed source said, because
+        "this number is wrong" sends somebody looking and "the source says 100957500 where
+        the answer said 1009575" tells them where to look. It names the verification's own
+        run, which is inspectable like any other: a badge whose evidence cannot be read is
+        an assertion.
+
+        `unverified` claims are deliberately NOT here. Nobody checked them, which is a
+        different situation calling for different work, and mixing the two would bury the
+        checks that ran and disagreed among the ones that never ran.
+      responses:
+        '200':
+          description: the findings
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [claim_id, run_id, metric, claimed, observed, detail,
+                                 verified_at]
+                      properties:
+                        claim_id: { type: string }
+                        run_id:
+                          type: string
+                          description: the analysis that asserted the number
+                        metric:   { type: string }
+                        claimed:
+                          type: string
+                          description: |
+                            What the answer said, as a string. Integers in the metric's own
+                            units, and a string because a claim may exceed what a JSON
+                            number survives intact.
+                        observed:
+                          type: string
+                          description: what the governed source said, same units
+                        units:    { type: string }
+                        computation_path:
+                          type: string
+                          description: the sanctioned computation that was re-run
+                        detail:   { type: string }
+                        verifier_publisher:
+                          type: string
+                          description: |
+                            Who published the verifier. Independence is structural, so who
+                            checked is part of what the finding means.
+                        verification_run_id:
+                          type: string
+                          description: |
+                            The run that did the grading. Nullable only for a verification
+                            recorded before delegation existed.
+                        verified_at: { type: string, format: date-time }
   /v1/claims/{id}:
     get:
       tags: [trust]
@@ -824,6 +1014,21 @@ paths:
                     description: |
                       Why the grade is what it is, in a sentence. A badge without its
                       reason is a colour somebody has to take on faith.
+                  verification_run_id:
+                    type: string
+                    description: |
+                      The run that graded this number. Added 2026-09-05.
+
+                      P5's rule: a verification is itself a run, and getting from a badge to
+                      the run that produced it is ONE CLICK — that is what makes a grade
+                      defensible rather than decorative. Absent when nothing has checked the
+                      claim, and absent on a verification recorded before delegation existed.
+                  observed:
+                    type: string
+                    description: |
+                      What the governed source said, in the metric's own units. A string for
+                      the same reason `value` is: an exact integer a customer may dispute has
+                      to survive the wire. Absent when no check reached an observation.
         '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
   /v1/claims/{id}/vet:
     post:
@@ -939,7 +1144,7 @@ paths:
     get:
       tags: [inputs]
       operationId: listInputs
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       description: |
         Questions an agent asked a person mid-run. Screen C4, and
         design-notes/human-input.md. Added 2026-09-04.
@@ -969,7 +1174,7 @@ paths:
     post:
       tags: [inputs]
       operationId: answerInput
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       description: |
         Answer one question. Admin class and a human principal, the same rule approvals
         follows and for the same reason: a reply shapes what the agent does next, so an
@@ -1089,6 +1294,26 @@ paths:
         The RESULT is stored and the rendering happens at read time, because restyling a
         report must change no analysis: the numbers are the fact and the rendering is a
         view of them.
+
+        **Sharing, decided 2026-09-04.** A report is shareable, and viewing one requires
+        signing in. The link is this route — a LIVE link, not an export — and everyone in
+        the tenant may open it; there are no per-report grants.
+
+        Live rather than frozen is the whole of the decision. A rendered file emailed on to
+        a board is a claim about the past presented without one: a number withdrawn after it
+        was sent goes on being read as current, and nothing can reach the copy to say
+        otherwise. Because this is a read, a withdrawal reaches every reader the moment they
+        open it, and a missed refresh renders the last good numbers marked stale rather than
+        a blank.
+
+        So there is no export, no download and no embedding, and this is not an omission
+        waiting to be filled in: a frozen artefact would make the product laxer with the
+        document a customer's board reads than with its own screens, which decline to store
+        a grade for exactly this reason.
+
+        The tenant boundary is unchanged. "Anyone signed in" means anyone signed in to THIS
+        tenant; a principal of another tenant gets the same 404 as for a report that does
+        not exist.
       parameters: [{ $ref: '#/components/parameters/RunId' }]
       responses:
         '200':
@@ -1135,7 +1360,7 @@ paths:
     post:
       tags: [connections]
       operationId: testConnection
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       description: |
         Reach the customer system and record what happened.
 
@@ -1164,7 +1389,7 @@ paths:
     post:
       tags: [connections]
       operationId: rotateConnectionCredential
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       description: |
         Point a connection at different material.
 
@@ -1206,7 +1431,7 @@ paths:
     get:
       tags: [audit]
       operationId: listAdminEvents
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       description: |
         The admin audit trail: who did what, when, to which resource. Screens G4 and G5.
         Added 2026-09-04 — the table existed and nothing could read it, so the trail was
@@ -1244,11 +1469,53 @@ paths:
                         target_id:   { type: string }
                         detail:      { type: object, additionalProperties: true }
                         at:          { type: string, format: date-time }
+  /v1/auth/session:
+    get:
+      tags: [identity]
+      operationId: getBrowserSession
+      security: [{ orySession: [] }]
+      x-phoenix-authority: authenticated-human
+      description: |
+        Bootstrap the current Ory browser session without issuing a Phoenix human
+        bearer. Identity and tenant authority come from the configured realm and
+        active Phoenix binding, never browser fields or email-domain discovery.
+        A linked account awaiting verification or administrator MFA receives an
+        empty permissions array and the corresponding required flag. Other API
+        access is refused until that requirement is satisfied. The response is
+        private and no-store. The CSRF value is not an authentication credential.
+      responses:
+        '200':
+          description: the bound account and its currently available permissions
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [tenant_id, tenant_slug, principal_id, display_name, role, permissions, expires_at, csrf_token, mfa_required, verification_required]
+                properties:
+                  tenant_id: {type: integer, format: int64}
+                  tenant_slug: {type: string}
+                  principal_id: {type: string}
+                  display_name: {type: string}
+                  role: {type: string}
+                  permissions:
+                    type: array
+                    items: {type: string}
+                  expires_at: {type: string, format: date-time}
+                  csrf_token: {type: string}
+                  mfa_required: {type: boolean}
+                  verification_required: {type: boolean}
+        '401':
+          description: no valid Ory browser session
+        '403':
+          description: no active tenant membership or Ory requires MFA step-up
+        '503':
+          description: Ory or the membership store is unavailable; no fallback
   /v1/principals:
     get:
       tags: [identity]
       operationId: listPrincipals
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       description: |
         The principals in this tenant — people, agents and services. Screens G1 and G2.
       responses:
@@ -1275,11 +1542,142 @@ paths:
                             IS; a credential is material they present.
                         display_name: { type: string }
                         revoked_at:   { type: string, format: date-time, nullable: true }
+                        revocation_reason:
+                          type: string
+                          nullable: true
+                          enum: [offboarded, paused, compromised]
+                          description: |
+                            Why the identity was withdrawn, and whether it can come back.
+                            The reason carries a rule rather than a note: `compromised` is
+                            not restorable, because the answer to a disclosed credential is
+                            a new identity rather than the old one switched back on.
+  /v1/principals/{id}/revoke:
+    post:
+      tags: [identity]
+      operationId: revokePrincipal
+      security: [{adminToken: []}, {orySession: []}]
+      description: |
+        Withdraw an identity, and cancel what it had in flight. Screen G1.
+
+        Any tenant admin, deliberately: the person who needs to stop an agent at 2am is the
+        customer's own admin, and routing that through us makes an incident worse.
+
+        **Idempotent.** Revoking an identity that is already revoked succeeds and keeps the
+        FIRST timestamp, because the first one is when access actually ended. This is the
+        control someone reaches for during an incident, and one that errors when a colleague
+        already pressed it is one that has to be interpreted at 2am. The reason may only get
+        STRICTER: re-revoking a paused identity as `compromised` escalates it and makes it
+        unrestorable; the reverse is ignored, because downgrading a compromise would hand
+        back the ability to switch a disclosed credential on again.
+
+        **Reversible, except when it is not.** Revocation is a circuit breaker — stop this
+        thing now, work out why afterwards — so `offboarded` and `paused` can be lifted by
+        `/restore`. `compromised` cannot: switching a disclosed credential back on hands an
+        attacker their access back with one careless click.
+
+        **In-flight runs are stopped, not stranded.** A run stopped mid-effect leaves an
+        effect `claimed`, which becomes `indeterminate` — the state this platform works
+        hardest to avoid producing. So the revocation lands first and the stops follow it,
+        which means the run does nothing new while it stops. They are performed by the plane
+        under the CALLER's principal, because the run's own identity is now refused.
+
+        **How a run is stopped depends on whether it started.** A run still `draft` or
+        `queued` is DISCARDED: nothing has executed, so there is nothing to wind down and
+        `cancelling` is a state it has no transition into. A run that is `running` or
+        `waiting_input` is CANCELLED, which is a request rather than a fact — it passes
+        through `cancelling` on its way to `cancelled` when its worker acknowledges.
+
+        So the response says what was asked for, per run, and is not a promise that any of
+        them has stopped yet.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  enum: [offboarded, paused, compromised]
+                detail:
+                  type: string
+                  description: what happened, in the admin's words, for the audit trail.
+      responses:
+        '200':
+          description: the identity is withdrawn
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [principal_id, reason, reversible, stopped_runs]
+                properties:
+                  principal_id: { type: string }
+                  reason:       { type: string, enum: [offboarded, paused, compromised] }
+                  reversible:   { type: boolean }
+                  stopped_runs:
+                    type: array
+                    description: |
+                      The runs this principal had in flight, and what was asked of each.
+                      Read inside the same transaction as the revocation, so the set cannot
+                      grow between withdrawing the identity and reading it.
+                    items:
+                      type: object
+                      required: [run_id, action]
+                      properties:
+                        run_id: { type: string }
+                        action:
+                          type: string
+                          enum: [cancelled, discarded, failed]
+                          description: |
+                            `discarded` for a run that had not started, `cancelled` for one
+                            that had, and `failed` where the platform could not stop it —
+                            which does not hold up the revocation, because the identity is
+                            already withdrawn and that is the part that matters.
+        '404': { description: no such principal }
+  /v1/principals/{id}/restore:
+    post:
+      tags: [identity]
+      operationId: restorePrincipal
+      security: [{adminToken: []}, {orySession: []}]
+      description: |
+        Lift a revocation. Its own audited act, not an undo.
+
+        The trail then reads "revoked at 02:14 by X because Y, restored at 09:30 by Z
+        because W", which is the sentence an incident review needs. A one-way door produces
+        "revoked at 02:14" and a new principal at 09:30 with no visible relationship to it —
+        the same information with the connection removed.
+
+        Refused for an identity revoked as `compromised`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                detail:
+                  type: string
+                  description: why it is being restored, for the audit trail.
+      responses:
+        '204': { description: the identity is restored }
+        '404': { description: no such principal }
+        '409': { description: not revoked, or revoked for a reason that cannot be undone }
   /v1/retention:
     get:
       tags: [tenants]
       operationId: getRetentionReport
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       description: |
         What is past its retention window and still there.
 
@@ -1333,7 +1731,8 @@ paths:
     get:
       tags: [tenants]
       operationId: listTenants
-      security: [{ adminToken: [] }]
+      security: [{ orySession: [] }]
+      x-phoenix-authority: platform-operator
       description: |
         The tenants this operator can see. Added 2026-09-04 for screen S1 — the tenant
         model existed with no route, so "which customers exist and what state are they in"
@@ -1358,7 +1757,7 @@ paths:
     get:
       tags: [tenants]
       operationId: listSettings
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       description: |
         A tenant's settings, DEFAULTS INCLUDED. Screen G6. Added 2026-09-04.
 
@@ -1418,7 +1817,7 @@ paths:
     put:
       tags: [tenants]
       operationId: setSetting
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       description: Record a chosen value, attributed to the token's principal.
       requestBody:
         required: true
@@ -1473,7 +1872,8 @@ paths:
     get:
       tags: [tenants]
       operationId: listProvisioningSteps
-      security: [{ adminToken: [] }]
+      security: [{ orySession: [] }]
+      x-phoenix-authority: platform-operator
       description: |
         Which of the five provisioning steps have completed, and which failed. Screen S2.
         Provisioning spans a database and a Kubernetes cluster, so it WILL fail halfway —
@@ -1499,6 +1899,35 @@ paths:
                         detail: { type: string, nullable: true }
         '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
   /v1/teams:
+    post:
+      operationId: createTeam
+      summary: Create a team with its first steward
+      description: Requires a current Ory tenant administrator. Creates the team, initial steward grant, and attributable audit event atomically; no customer IdP is required.
+      security: [{ orySession: [] }]
+      x-phoenix-authority: tenant-admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [slug, display_name, steward_principal_id, reason]
+              properties:
+                slug: {type: string, minLength: 1, maxLength: 80, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'}
+                display_name: {type: string, minLength: 1, maxLength: 200}
+                steward_principal_id: {type: string, minLength: 1, maxLength: 200}
+                reason: {type: string, minLength: 1, maxLength: 2000}
+      responses:
+        '201':
+          description: Team and initial steward created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Team'}
+        '403': {description: Current Ory tenant administrator required}
+        '404': {description: Initial steward unavailable in this tenant and realm}
+        '409': {description: Team key already exists}
+        '422': {description: Invalid team or audit reason}
     get:
       tags: [teams]
       operationId: listTeams
@@ -1600,6 +2029,78 @@ paths:
         '422':
           description: a rejection with no reason, or an unknown decision
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+  /v1/onboarding/rescan:
+    get:
+      tags: [onboarding]
+      operationId: rescanDiff
+      security: [{adminToken: []}, {orySession: []}]
+      description: |
+        A later scan as CHANGES against what this customer already decided. Screen O3.
+
+        The alternative — start again — re-asks every question already answered, and a
+        customer who spent an afternoon on 133 candidates will not spend another one. A
+        re-scan nobody runs means the bundle drifts away from the documentation it came
+        from, which is the product's whole claim about where an answer comes from.
+
+        Four answers, and only three of them need a person:
+
+        - `new` — nothing in the bundle or the decision history matches this.
+        - `revised` — the definition itself moved. A candidate's identity is the extractor,
+          the file and a digest of the matched text, so a rewritten definition gets a new
+          identity by construction; this pairs it with the old one and carries the previous
+          text, because a revision presented without it is a request to approve a change
+          nobody can see.
+        - `withdrawn` — accepted before, and the source no longer says it. Proposed, never
+          applied: a file that failed to parse and a definition somebody deliberately
+          removed look identical from here, and one of those is a customer's knowledge
+          quietly disappearing.
+        - `unchanged` / `redecided` — suppressed. Re-proposing a rejection unchanged reads
+          as the platform arguing with the reviewer, which is how a review queue stops
+          being read.
+      parameters:
+        - name: run_id
+          in: query
+          required: true
+          description: the scan run whose candidates are being compared
+          schema: { type: string }
+      responses:
+        '200':
+          description: the changes a person has to look at
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, needs_review]
+                properties:
+                  needs_review:
+                    type: integer
+                    description: |
+                      How many of the items a person has to decide. Zero for a re-scan of
+                      documentation that has not changed, which is the measure of whether
+                      the diff earned its keep.
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [change, needs_review]
+                      properties:
+                        change:
+                          type: string
+                          enum: [new, revised, withdrawn, unchanged, redecided]
+                        needs_review: { type: boolean }
+                        candidate_id: { type: string }
+                        title:        { type: string }
+                        body:         { type: string }
+                        source_path:  { type: string }
+                        previous_candidate_id: { type: string }
+                        previous_body:
+                          type: string
+                          description: |
+                            What the bundle holds today, for a revision or a withdrawal.
+                            A change presented without it cannot be judged.
+                        previous_decision:
+                          type: string
+                          enum: [accepted, rejected]
   /v1/onboarding/sessions:
     post:
       tags: [onboarding]
@@ -1680,7 +2181,7 @@ paths:
     get:
       tags: [onboarding]
       operationId: getScanQuality
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       description: |
         How much of a scan's proposals survived review.
 
@@ -1791,6 +2292,74 @@ paths:
                         fills:       { type: string }
                         person:      { type: string }
                         instrument:  { type: string }
+  /v1/onboarding/sign-off:
+    post:
+      tags: [onboarding]
+      operationId: signOff
+      security: [{adminToken: []}, {orySession: []}]
+      description: |
+        Publish revision 1 from the accepted candidate set. Screen O5. Added 2026-09-05.
+
+        SIGN-OFF IS A CUSTOMER ACT. What is signed becomes the definition of that customer's
+        numbers for everyone who asks a question afterwards, so the caller is recorded by
+        name and can be held to it. `onboarding.Assemble` and `onboarding.Sign` existed with
+        no caller and the screen had a button that did nothing, so onboarding could gather,
+        review and check a bundle and never publish one.
+
+        The nominated VERIFIER PUBLISHER is required and must differ from the bundle's own
+        publisher. A verification is only worth anything if the verifier is independent of
+        whoever published the bundle, and refusing here catches it while a person is present
+        rather than at the first verification months later.
+
+        Refused when any blocking gap remains, and the gaps are named — a bundle that does
+        not meet the completeness bar is one whose agent will fail a question on Monday.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bundle_id, verifier_publisher]
+              properties:
+                bundle_id:
+                  type: string
+                  description: what this customer calls their bundle
+                verifier_publisher:
+                  type: string
+                  description: |
+                    Who the customer nominates to check their numbers. A name rather than a
+                    principal: they may name an organisation that has no account here yet,
+                    and a foreign key would imply the platform had checked.
+                agent_id:
+                  type: string
+                  description: |
+                    Bind the published bundle to one agent. Omitted binds it at the bundle
+                    layer, which every agent resolves — a published bundle bound to nothing
+                    is knowledge that reaches nobody.
+      responses:
+        '201':
+          description: the published revision
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [bundle_id, revision, digest, node_count, signed_by, signed_at]
+                properties:
+                  bundle_id: { type: string }
+                  revision:  { type: integer }
+                  digest:
+                    type: string
+                    description: the package digest, over the bytes each reviewer accepted
+                  node_count: { type: integer }
+                  signed_by:  { type: string }
+                  signed_at:  { type: string, format: date-time }
+                  verifier_publisher: { type: string }
+        '422':
+          description: |
+            The bundle cannot be signed: a blocking gap remains, no candidate has been
+            accepted, or the nominated verifier is the bundle's own publisher. The reason
+            names what to fix.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
   /v1/onboarding/gaps:
     get:
       tags: [onboarding]
@@ -1828,7 +2397,7 @@ paths:
     get:
       tags: [policies]
       operationId: listPolicies
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       description: |
         Every policy and the mode it is in. Added 2026-09-04 with listAgents and
         listKnowledgePackages: the contract could create a policy and read one by id, and
@@ -1852,7 +2421,7 @@ paths:
     post:
       tags: [policies]
       operationId: createPolicy
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       description: |
         Created in `observe` mode, always. The caller cannot choose otherwise: a new policy
         that denies on its first evaluation is how a governance layer loses the room.
@@ -1888,7 +2457,7 @@ paths:
     get:
       tags: [policies]
       operationId: getPolicy
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       description: |
         The policy itself, source included. The detail screen shows what a rule WOULD have
         done; without this it could not also show what the rule SAYS, which leaves somebody
@@ -1923,7 +2492,7 @@ paths:
     post:
       tags: [policies]
       operationId: promotePolicy
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       summary: observe -> steer -> deny, one step at a time
       parameters: [{ $ref: '#/components/parameters/RunId' }]
       requestBody:
@@ -1967,7 +2536,7 @@ paths:
     get:
       tags: [policies]
       operationId: listDecisions
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       description: |
         Every evaluation, grouped. One row per policy consulted, several rows per act, and
         the group is the unit -- because the question this surface answers is "why was this
@@ -2043,7 +2612,7 @@ paths:
     get:
       tags: [policies]
       operationId: listPolicyDecisions
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       description: With `enforced=false`, the shadow decisions used for empirical comparison.
       parameters:
         - { $ref: '#/components/parameters/RunId' }
@@ -2074,7 +2643,7 @@ paths:
     get:
       tags: [policies]
       operationId: getPolicyStats
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       description: |
         Would-deny counts over a window. This is the EMPIRICAL shadow comparison v0.1
         ships, because static permissiveness comparison is not exposed by cedarpy.
@@ -2099,7 +2668,7 @@ paths:
     post:
       tags: [adapters]
       operationId: registerAdapter
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       description: |
         The digest is DERIVED from the contract, never client-supplied. A remote adapter
         must present an mTLS certificate whose subject matches `identity` (spec/07).
@@ -2195,7 +2764,7 @@ paths:
     post:
       tags: [knowledge]
       operationId: registerKnowledgePackage
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       summary: Compile-and-register; the digest is DERIVED, never client-supplied
       requestBody:
         required: true
@@ -2268,7 +2837,7 @@ paths:
       tags: [runs]
       operationId: getRunCost
       summary: Totals for one run; the lower bound and the unpriced count travel together
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       description: |
         Admin only, which is what features/14 already says this is: "cost is currently an
         operator view. Whether customers see their own spend, and at what granularity, is a
@@ -2302,11 +2871,350 @@ paths:
                   input_tokens:             { type: integer }
                   output_tokens:            { type: integer }
         '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
+  /v1/skills:
+    get:
+      tags: [knowledge]
+      operationId: listSkills
+      description: |
+        What the agents in this tenant CAN DO, named. features/08 increment 6. Added
+        2026-09-05.
+
+        A skill is assembled from bundle nodes — a procedure carries the instructions, an
+        executable carries sanctioned code, an executor names what runs it, a template shapes
+        the output — and the name is what binds them into one unit a person can reason about.
+        Four nodes are not four things a customer wants to switch on individually.
+
+        Knowledge is never a skill, even when it contains instructions: knowledge is what an
+        agent KNOWS, reference rather than capability, and the distinction is what keeps the
+        controls apart.
+      parameters:
+        - name: agent_id
+          in: query
+          required: false
+          description: whose resolved knowledge to read; omitted reads the tenant's layers
+          schema: { type: string }
+      responses:
+        '200':
+          description: the skills
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, nodes, roles, active]
+                      properties:
+                        name:  { type: string }
+                        nodes: { type: array, items: { type: string } }
+                        roles: { type: array, items: { type: string } }
+                        active:
+                          type: boolean
+                          description: |
+                            Whether this agent's current definition names it. Only meaningful
+                            with agent_id.
+  /v1/agents/{id}/skills:
+    post:
+      tags: [knowledge]
+      operationId: activateSkill
+      security: [{adminToken: []}, {orySession: []}]
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      description: |
+        Turn a skill on or off for an agent. features/08 increment 6.
+
+        Activation REGISTERS A NEW DEFINITION and repoints the agent at it. The definition is
+        content-addressed, so the digest changes and the change is reviewable: the response
+        carries the digest before and after and the nodes the skill contributes.
+
+        AN IN-FLIGHT RUN KEEPS ITS OLD PIN. A run pins its definition digest when it is
+        created and compares it on every resume; repointing the agent changes what the NEXT
+        run pins and nothing about one already running. That is the whole reason the pin
+        exists.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [skill, active]
+              properties:
+                skill:  { type: string }
+                active: { type: boolean }
+      responses:
+        '200':
+          description: the agent, repointed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agent_id, skill, active, digest_before, digest_after, nodes]
+                properties:
+                  agent_id:      { type: string }
+                  skill:         { type: string }
+                  active:        { type: boolean }
+                  digest_before: { type: string }
+                  digest_after:
+                    type: string
+                    description: |
+                      Equal to digest_before when the request changed nothing — activating a
+                      skill that is already on is not an error and does not mint a
+                      definition nobody asked for.
+                  nodes:
+                    type: array
+                    description: what this skill contributes, so the change is reviewable
+                    items: { type: string }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
+        '422':
+          description: no such skill in this agent's resolved knowledge
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+  /v1/mcp-servers:
+    get:
+      tags: [connections]
+      operationId: listMcpServers
+      description: |
+        Every MCP endpoint this customer has admitted. Added 2026-09-05.
+
+        REVOKED SERVERS ARE INCLUDED, with their state. A list that hid them would answer
+        "what has this customer admitted" wrongly during an incident, which is the moment
+        somebody asks.
+      responses:
+        '200':
+          description: the admitted endpoints
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/McpServer' }
+    post:
+      tags: [connections]
+      operationId: admitMcpServer
+      security: [{adminToken: []}, {orySession: []}]
+      description: |
+        Admit an endpoint and PIN what it advertises. features/05 increment 5, and
+        design-notes/connector-trust.md.
+
+        The customer operates the server; we never hold their code, never build it, never
+        patch it and never inherit its vulnerabilities. Nothing about admitting an endpoint
+        trusts its behaviour: a server advertising a hundred tools grants access to none of
+        them, because a tool is callable only when a pinned agent definition names it.
+
+        The catalogue is pinned in the same transaction as the admission. A server admitted
+        with no pinned catalogue is one whose drift can never be detected, and it would look
+        identical to one that had been checked.
+
+        A host on a blocked range is REFUSED. Whether a customer's internal MCP server may be
+        reached from a data plane at all is an open decision — it needs a narrow, explicit
+        allowance for an admitted server's host and nothing else, and it is the one hole
+        punched in an otherwise absolute rule. Admitting one now would settle that by writing
+        it into code.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, endpoint, tools]
+              properties:
+                name:     { type: string }
+                endpoint: { type: string, description: "https URL of the MCP server" }
+                credential_ref:
+                  type: string
+                  description: |
+                    A reference, never material. Keyed on the egress host rather than the
+                    server, so a credential cannot travel to a different host with the
+                    endpoint.
+                tools:
+                  type: array
+                  minItems: 1
+                  description: |
+                    The catalogue as advertised NOW, captured by whoever is admitting it. A
+                    server with no tools is nothing to admit.
+                  items:
+                    type: object
+                    required: [name, schema_digest]
+                    properties:
+                      name:          { type: string }
+                      description:   { type: string }
+                      schema_digest:
+                        type: string
+                        description: |
+                          Over the tool's declared input schema. The schema itself is not
+                          kept: what matters is whether it changed, and holding a customer's
+                          schemas invites this platform to depend on their shape.
+      responses:
+        '201':
+          description: admitted, with its pinned catalogue
+          content: { application/json: { schema: { $ref: '#/components/schemas/McpServer' } } }
+        '422':
+          description: |
+            Refused: a blocked host, an endpoint already admitted, or a catalogue with no
+            tools. The reason names which.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+  /v1/mcp-servers/{id}/revoke:
+    post:
+      tags: [connections]
+      operationId: revokeMcpServer
+      security: [{adminToken: []}, {orySession: []}]
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      description: |
+        Withdraw an admission. A STATE, never a delete: a deleted server is one whose past
+        calls nobody can explain, and "what was this thing allowed to do" is the question
+        asked after an incident. Revoking twice is not an error.
+      responses:
+        '200':
+          description: revoked
+          content: { application/json: { schema: { $ref: '#/components/schemas/McpServer' } } }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
+  /v1/mcp-servers/{id}/drift:
+    post:
+      tags: [connections]
+      operationId: checkMcpDrift
+      security: [{adminToken: []}, {orySession: []}]
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      description: |
+        Compare the pinned catalogue with what the server advertises now. features/05
+        increment 6.
+
+        The three cases are not symmetric, and the answers differ by direction
+        (design-notes/connector-trust.md): a pinned tool whose SCHEMA CHANGED refuses the
+        call — same name, different behaviour, exactly what a digest exists to prevent; a
+        tool that DISAPPEARED refuses, with a clearer error than the transport would give; a
+        tool that APPEARED alarms only, because no pinned definition names it and refusing
+        would break working systems for a change that grants nothing.
+
+        Never fails the whole run. A run may have completed ten correct effects before
+        touching a drifted tool.
+
+        `readmit` moves the pin, and is an explicit administrative act: automatic
+        re-admission means the pin protects nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tools]
+              properties:
+                readmit:
+                  type: boolean
+                  description: pin what the server advertises now, having seen the diff
+                tools:
+                  type: array
+                  items:
+                    type: object
+                    required: [name, schema_digest]
+                    properties:
+                      name:          { type: string }
+                      description:   { type: string }
+                      schema_digest: { type: string }
+      responses:
+        '200':
+          description: the diff between the pinned catalogue and the live one
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pinned_digest, live_digest, drifted, changes]
+                properties:
+                  pinned_digest: { type: string }
+                  live_digest:   { type: string }
+                  drifted:       { type: boolean }
+                  readmitted:    { type: boolean }
+                  changes:
+                    type: array
+                    items:
+                      type: object
+                      required: [tool, kind, refuses_calls]
+                      properties:
+                        tool: { type: string }
+                        kind: { type: string, enum: [schema_changed, removed, added] }
+                        refuses_calls:
+                          type: boolean
+                          description: |
+                            Whether a call to this tool is refused. False for `added`: no
+                            pinned definition names it, so nothing can call it anyway.
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
+  /v1/cost:
+    get:
+      tags: [cost]
+      operationId: getTenantCost
+      description: |
+        What this customer costs over a window. Screen B5's roll-up. Added 2026-09-05.
+
+        A LOWER BOUND, never a total, and the field is named for what it is. An unpriced
+        model still runs — the tokens are already spent, so refusing to record would destroy
+        evidence — and any aggregate spanning an unpriced record is a lower bound published
+        with its unpriced count. There is deliberately no plain "total" to quote.
+
+        Aggregated over EVERY EPOCH, including superseded ones. A rewind does not un-spend:
+        this is the one place the log's default live-events reading is wrong, and reusing the
+        state fold here is the natural mistake.
+
+        Broken down by model, because "what does this customer cost" is nearly always
+        followed by "and what is driving it".
+      parameters:
+        - name: since
+          in: query
+          required: false
+          description: |
+            RFC3339. Defaults to the start of the current month, because "what does this
+            customer cost this month" is the question that gets asked.
+          schema: { type: string, format: date-time }
+        - name: until
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: the roll-up
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [since, until, priced_nanos_lower_bound, currency, calls,
+                           unpriced_calls, runs, by_model]
+                properties:
+                  since: { type: string, format: date-time }
+                  until: { type: string, format: date-time }
+                  priced_nanos_lower_bound:
+                    type: integer
+                    description: |
+                      The sum of what IS priced. A lower bound whenever unpriced_calls is
+                      above zero, and named so it cannot be quoted as a total.
+                  currency: { type: string }
+                  calls:    { type: integer }
+                  unpriced_calls:
+                    type: integer
+                    description: |
+                      How many calls carry no price. Travels WITH the amount, always: an
+                      amount without it is a number somebody will read as complete.
+                  runs:  { type: integer }
+                  input_tokens:  { type: integer }
+                  output_tokens: { type: integer }
+                  by_model:
+                    type: array
+                    description: what is driving it, heaviest first
+                    items:
+                      type: object
+                      required: [model_ref, priced_nanos_lower_bound, calls, unpriced_calls]
+                      properties:
+                        model_ref: { type: string }
+                        provider:  { type: string }
+                        priced_nanos_lower_bound: { type: integer }
+                        calls: { type: integer }
+                        unpriced_calls: { type: integer }
   /v1/tasks:
     post:
       tags: [tasks]
       operationId: createTask
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       parameters: [{ $ref: '#/components/parameters/IdempotencyKeyRequired' }]
       requestBody:
         required: true
@@ -2343,7 +3251,7 @@ paths:
     patch:
       tags: [tasks]
       operationId: updateTask
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       parameters: [{ $ref: '#/components/parameters/RunId' }]
       description: |
         `prompt`, `overlap_policy` and `misfire_grace_seconds` only. `cron_expression`
@@ -2360,6 +3268,17 @@ paths:
                 prompt:                { type: string }
                 overlap_policy:        { type: string, enum: [skip, queue] }
                 misfire_grace_seconds: { type: integer, minimum: 0, maximum: 86400 }
+        fire_key:
+          type: string
+          readOnly: true
+          description: |
+            A webhook routine's own key, returned ONCE on creation and never again. Added
+            2026-09-05. The platform stores only its digest, so a database read does not
+            yield a key that fires anybody's routine — which also means a lost key is
+            replaced rather than recovered.
+
+            Absent on every other trigger kind: a routine with two ways to fire has two
+            firing keys and loses idempotency at the moment it matters most.
       responses:
         '200':
           description: updated
@@ -2381,7 +3300,7 @@ paths:
     post:
       tags: [tasks]
       operationId: pauseTask
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       parameters: [{ $ref: '#/components/parameters/RunId' }]
       responses:
         '200':
@@ -2392,7 +3311,7 @@ paths:
     post:
       tags: [tasks]
       operationId: resumeTask
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       parameters: [{ $ref: '#/components/parameters/RunId' }]
       responses:
         '200':
@@ -2403,7 +3322,7 @@ paths:
     post:
       tags: [tasks]
       operationId: disableTask
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       parameters: [{ $ref: '#/components/parameters/RunId' }]
       responses:
         '200':
@@ -2414,7 +3333,7 @@ paths:
     post:
       tags: [tasks]
       operationId: fireTask
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       description: |
         The Idempotency-Key is ALSO the firing key's `value` (source `manual`), and the
         task_firings record outlives the 24h idempotency retention. Past that window a
@@ -2425,10 +3344,26 @@ paths:
         Amended 2026-08-30 (OQ-099): the `security` block above is the admin-caller case
         only. A `webhook` task instead authenticates this route with the per-task key held
         at `tasks.fire_key_ref` (spec/11-routines.md, spec/14-credentials.md) rather than
-        the admin bearer token; that key scheme is not yet modeled in `components` here.
+        the admin bearer token.
+
+        Modeled 2026-09-05. A webhook caller presents `X-Phoenix-Fire-Key`, the value shown
+        ONCE when the routine was created; the platform stores only its digest, so a database
+        read does not yield a key that fires anybody's routine. The fire runs as the
+        ROUTINE'S OWNER rather than as the caller: a webhook is a trigger, not an identity,
+        and a routine must not outlive the authority it stands on.
+
+        A wrong key and an unknown routine are refused identically. Distinguishing them
+        would turn this route into an oracle for which routine ids exist.
       parameters:
         - { $ref: '#/components/parameters/RunId' }
         - { $ref: '#/components/parameters/IdempotencyKeyRequired' }
+        - name: X-Phoenix-Fire-Key
+          in: header
+          required: false
+          description: |
+            A webhook routine's own key, instead of an admin bearer token. Ignored when the
+            caller presents an admin token.
+          schema: { type: string }
       responses:
         '201':
           description: fired; a Run was created in the same transaction as the firing row
@@ -2481,7 +3416,7 @@ paths:
     post:
       tags: [credentials]
       operationId: createCredential
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       description: |
         REFUSES a row whose `egress_host` names a control-plane host
         (422 `credential_targets_control_plane`). That refusal is the mechanism behind
@@ -2504,7 +3439,7 @@ paths:
     get:
       tags: [credentials]
       operationId: listCredentials
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       responses:
         '200':
           description: credentials, without any pointer to material
@@ -2522,7 +3457,7 @@ paths:
     get:
       tags: [credentials]
       operationId: getCredential
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       parameters: [{ $ref: '#/components/parameters/RunId' }]
       responses:
         '200':
@@ -2534,7 +3469,7 @@ paths:
     post:
       tags: [credentials]
       operationId: revokeCredential
-      security: [{ adminToken: [] }]
+      security: [{adminToken: []}, {orySession: []}]
       description: |
         Revocation is a STATE, never a delete (spec/01-schema.md:52): issuances stay
         readable, which is what makes "what did this reach, and when did it stop"

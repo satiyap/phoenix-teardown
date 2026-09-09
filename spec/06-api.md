@@ -6,6 +6,24 @@ table from §05 enforced at the edge.
 
 ---
 
+## Ory human authentication amendment
+
+The human authentication rules in [20-human-auth.md](20-human-auth.md) supersede
+references below to exchanging customer tokens or minting Phoenix human bearers.
+The two capability classes remain for machine callers and internal authorization;
+they are not a second authority for Ory browser sessions.
+
+```http
+GET /v1/auth/session
+Cookie: ory_kratos_session=...
+```
+
+Returns the realm-bound tenant/principal, role, effective permissions, session expiry,
+a session-bound CSRF value, and verification/MFA requirements. No password, Ory
+administrative metadata, or Phoenix human bearer is returned. Unknown membership is
+403, missing/invalid session is 401, and unavailable identity dependencies are 503.
+Cookie-authenticated mutations require the exact Origin and `X-Phoenix-CSRF`.
+
 ## Two credential classes — the governed cannot edit the governor
 
 The only project in the study that separates these is Agent Control, and it is the
@@ -14,7 +32,7 @@ whole point of a control plane.
 | Class | May | May not |
 |---|---|---|
 | **agent** | create/submit runs it owns, read them, and **read** approvals on them | **decide any approval**; touch policies, adapters, tenants, or other principals' runs |
-| **admin** | everything the API exposes, including policy and adapter registration | — |
+| **admin** | permitted tenant-scoped machine administration, including policy and adapter registration | human sign-in; Ory-only administration; Phoenix operator authority |
 
 Separate header, separate key material: `Authorization: Bearer <token>` where the token
 carries its class. An agent token presented to a policy endpoint is `403`, not `401` —
@@ -28,16 +46,16 @@ paragraph made it:
 
 - **Credential class** (`agent` | `admin`) says what a *token* may do. There are two, and
   adding a third for approvals would have been wrong.
-- **Principal kind** (`human` | `agent` | `service`) says what the *actor* is.
-  `approvals.decided_by` must reference a principal of kind **`human`** — enforced in the
-  schema by a composite foreign key (§01), not merely by this route. *(Amended
-  2026-09-03: this read `human | agent | service | remote`; `remote` was dropped from
-  `principal_kind` — see [§01](01-schema.md) for the reasoning.)*
+- **Principal kind** (`human` | `agent` | `service`) records who acted. An Ory
+  session binds a human principal; a governed external approval system uses its
+  own service principal. The approval composite foreign key rejects agent actors.
 
-**Deciding an approval requires an admin credential AND a principal of kind `human`.** The
-credential class is checked by the route; the kind is pinned by a composite foreign key in
-§01, so an admin token held by a `service` principal is rejected **by the database** rather
-than by convention. That is the whole point of ADR-0015.
+**A human approval decision requires a current Ory-authenticated tenant admin.**
+Verification, MFA and current Phoenix authority are checked independently of the
+cookie's existence; authority is rechecked in the decision transaction after any
+wait behind identity withdrawal. An explicitly authorized external service may
+instead use the separate machine-admin path. It decides as itself, not as a human
+named in the request. See ADR-0015 and the approval-authority section below.
 
 > **Retracted 2026-08-27 (redo 3).** Two wordings stood here in turn, and both are gone.
 > The first (superseded 2026-08-27) let an agent answer approvals on its own runs, which reads
@@ -49,9 +67,17 @@ than by convention. That is the whole point of ADR-0015.
 > the same reason: it needs a real organisational policy to answer, not a schema guess. See
 > [§09](09-decisions.md) 7.
 
-**Every request resolves to a `Principal`.** There is no anonymous path. `tenant_id` is
-derived from the token and **never** read from the body or a path parameter, so
-cross-tenant access is not expressible in a request.
+**Every protected data request resolves to a validated principal.** Tenant scope
+comes from the Ory realm/membership resolution or the separate machine credential,
+never a caller-selected body field. Tenant resources stay within that scope.
+Explicit cross-tenant operator operations require an independent Phoenix operator
+grant, not merely tenant administration or a machine admin token.
+
+The old `/v1/auth/discover`, `/v1/auth/exchange`, and `/v1/identity-providers` operations are removed from the
+router and generated clients. There are no deployed customer clients to preserve,
+so no compatibility handlers or anonymous exceptions remain. Phoenix no longer
+wires customer-ID-token verification into sign-in or exposes a human bearer-minting HTTP handler. Optional
+federation must be implemented through Ory in a later release.
 
 ---
 
@@ -126,7 +152,7 @@ does not ship**; until then the way to stop a run is `POST /v1/runs/{id}/cancel`
 ```http
 POST /v1/runs
 Idempotency-Key: <client-supplied>
-{ "agent_id": "ag_1", "prompt": "review the diff" }
+{ "agent_id": "ag_1", "team_id": "tem_1", "input": { "prompt": "review the diff" } }
 
 201 { "run_id": "01J8...", "state": "draft",
       "pin": { "definition_digest": "...", "adapter_identity": "...",
@@ -135,7 +161,9 @@ Idempotency-Key: <client-supplied>
 ```
 
 The pin is **computed and returned at creation**, so a client can see exactly what its
-run is bound to.
+run is bound to. An Ory human must select an authorized active team. The binding is
+immutable; historical unassigned runs are not silently attributed to a team.
+Machine-created runs may retain their separate, documented unassigned behavior.
 
 ```http
 POST /v1/runs/{id}/submit        → 202, state=queued
@@ -173,7 +201,7 @@ POST /v1/approvals/{id}/decide
       "decided_by": "pr_bob", "decided_at": "..." }
 ```
 
-`decided_by` comes from the **token**, never the body — an approver cannot be
+`decided_by` comes from the **validated actor**, never the body — an approver cannot be
 impersonated by a request field. The `409` returns the *existing* decision, following
 HumanLayer's `AlreadyDecidedError`: a retrying UI learns what the decision already was
 rather than getting an opaque conflict.
@@ -315,10 +343,10 @@ Two constraints bind whatever fills it, and both come from rules already stated:
 | Registration is **admin class**; an agent credential may not register what governs it | §Two credential classes — the governed cannot edit the governor |
 | Admitting a thing is not activating it — a registered server, bundle or source is reachable by nothing until a **pinned definition** binds it | `01-schema.md` §Agent definition (`tools`/`extensions` are bindings carrying `artifact_digest`), `07-adapter-protocol.md` handshake step 1 |
 
-The registry that the MCP half of this needs does not exist in [`01-schema.md`](01-schema.md)
-at all — ADR-0005's Implications require a server/tool registry distinct from a capability
-registry and neither table was built (OQ-153). So this section is owed a route set *and* the
-resource it would operate on.
+MCP registry and admission operations are now declared in the resource inventory
+below. That does not fill the separate bundle, verifier, resource or knowledge-source
+registration gaps above. A compiled package endpoint is not source onboarding,
+and a declared route is not evidence that its complete authorization matrix ships.
 
 ---
 
@@ -328,23 +356,18 @@ resource it would operate on.
 quorum, no m-of-n, and no separation-of-duties enforcement**. There is also **no self-approval
 prohibition in v0.1**: §09 7 defers it with the multi-party question.
 
-The single rule that *is* enforced is the approver's identity — an admin credential carrying a
-principal of kind `human`, pinned by a composite foreign key in §01. That is a deliberate
-refusal on the evidence, recorded 2026-08-27 — see
-[§09](09-decisions.md) 7 — and workloads requiring more must delegate authorization to an
-external governed system. **Amended 2026-08-30 (OQ-044, ADR-0015 amendment 4):** binding an
-external approval system as the approver does not need a quorum engine — `decided_by` may
-now also name a `service` principal, standing for the external system itself, with the
-ticket reference it decided against carried in `decision_rationale`
-([§01](01-schema.md) §Approval, `decided_by_kind` widened to `human | service`). No
-"first among many" and no m-of-n: one attributable decision, exactly as for a human approver,
-just made by a governed external system instead of a person at a keyboard. Trigger for
-building a real quorum engine: the first finance/legal pack.
+The decision must identify an authorized human or governed external service,
+pinned by the composite actor-kind foreign key. Ory establishes a human identity;
+Phoenix establishes current tenant-admin authority. A service acts as its own
+principal through the machine boundary. Neither path accepts a request-body
+approver identity. This preserves ADR-0015 amendment 4's external-system model,
+including an external ticket reference in the rationale, without creating quorum
+or separation-of-duties semantics that are not implemented.
 
 ## Idempotency
 
 `Idempotency-Key` is **required** on POST /v1/runs and POST /v1/approvals/{id}/decide and
-POST /v1/tasks/{id}/fire. It is optional elsewhere. Keys are scoped `(tenant_id, endpoint, key)` and retained 24h.
+POST /v1/tasks/{id}/fire. It is optional elsewhere. Machine keys are scoped `(tenant_id, endpoint, key)` and retained 24h. Human run creation additionally namespaces the endpoint by the stable Phoenix principal, so another human cannot replay its response. Replays still require current run access; a rotating Ory session does not create a new idempotency owner.
 
 A replay returns the original response with `Idempotency-Replayed: true`. A key reused
 with a *different* body is `422` — silently returning the first response would hide a
@@ -364,7 +387,7 @@ apart, and refusing would strand a legitimate retry.
 `traceparent` and `tracestate` are read on **every** route as W3C Trace Context, and the
 value is the full header — a bare trace id does not propagate
 ([`19-telemetry.md`](19-telemetry.md) §Propagation hop 1). Neither is ever an
-authorization input: `tenant_id` comes from the token and nothing else, so a forged
+authorization input: `tenant_id` comes from the validated Ory membership or machine credential and nothing else, so a forged
 `traceparent` joins a trace and buys nothing.
 
 ---
@@ -431,3 +454,154 @@ see the header at all, and the resume failed silently.)*
 | Idempotent replay returns the original | same key twice | ignore the key ⇒ two runs |
 | Same key, different body ⇒ 422 | change the body | return the first ⇒ hides a client bug |
 | Cross-tenant read is `404` not `403` | read another tenant's run | return 403 ⇒ existence leak |
+
+## Ory-only team administration
+
+These operations require a current Ory-authenticated tenant administrator with
+MFA, the configured exact browser origin, and Phoenix's session-bound CSRF token.
+A machine `admin` credential is not a substitute. Actor tenant, realm and
+principal come from the authenticated session, never from request fields.
+
+```
+POST /v1/teams
+  { "slug": "delivery", "display_name": "Delivery", "steward_principal_id": "pri_...", "reason": "..." }
+  -> 201, Team
+PUT /v1/teams/{id}/members/{principal_id}
+  { "role": "member|steward", "reason": "..." }
+  -> 200, { "principal_id": "pri_...", "role": "member|steward" }
+POST /v1/teams/{id}/members/{principal_id}/remove
+  { "reason": "..." }
+  -> 204
+```
+
+Creation requires an active Ory-enrolled human in the same tenant and realm as
+initial steward. The lowercase, hyphen-separated key is immutable. Membership
+grants accept only `member` or `steward`, never tenant administration or a new
+historical `owner` grant. Invite and enroll an unavailable person first.
+
+Each effective change commits with an attributed administrator audit event.
+Repeated identical membership grants and already-absent removals are no-ops,
+not duplicate audit events. Removing or demoting a steward requires another
+active enrolled human steward; concurrent requests must preserve that invariant.
+Archived teams cannot receive new or changed membership grants.
+
+Refusals distinguish `403` authority failure, `404` tenant-scoped unavailable
+team or human, `409` immutable-key/last-steward/archive conflict, and `422` invalid
+input. Storage and audit failures fail closed. Team removal withdraws only that
+team's access on subsequent request/stream checks; it does not log the person out
+of Ory, remove other memberships, or erase historical actor identity. Account-wide
+security offboarding remains a separate operation.
+
+## Additional declared resource operations
+
+These operations supplement the detailed resource contracts above. The OpenAPI
+schemas define request and response shapes; `20-human-auth.md` defines the human
+boundary. Authentication alternatives are not grants: an Ory session still needs
+current Phoenix authority, and a machine admin is not a platform operator. The
+complete per-resource authorization matrix remains a release gate, not something
+this inventory alone proves.
+
+### Inventory and team reads
+
+```http
+GET /v1/agents
+GET /v1/teams
+GET /v1/teams/{id}/members
+GET /v1/knowledge-layers
+GET /v1/knowledge-packages
+GET /v1/skills
+GET /v1/mcp-servers
+GET /v1/cost
+```
+
+Team and membership reads apply current human membership scope; an ungranted team
+is indistinguishable from a missing team. Catalogue entries, compiled artifacts
+and cost projections do not themselves confer permission to execute an agent or
+use a connection. Tenant cost reports retain the priced-lower-bound/unpriced pair.
+
+### Governance and run-linked projections
+
+```http
+GET /v1/policies
+GET /v1/policies/{id}
+GET /v1/decisions
+GET /v1/trust/findings
+GET /v1/claims/{id}
+POST /v1/claims/{id}/vet
+POST /v1/claims/{id}/withdraw
+GET /v1/inputs
+POST /v1/inputs/{id}/answer
+GET /v1/effects
+GET /v1/reports
+GET /v1/reports/{id}
+```
+
+Vetting, answering input and deciding an approval are distinct attributed acts,
+not interchangeable status edits. Human approval/effect/report lists filter by
+current run access before limiting results; report rendering checks the linked
+run before loading a private visual. An empty list is an array, never `null`.
+
+### Connections, people and tenant administration
+
+```http
+GET /v1/connections
+POST /v1/connections/{id}/test
+POST /v1/connections/{id}/rotate
+GET /v1/admin-events
+GET /v1/principals
+POST /v1/principals/{id}/revoke
+POST /v1/principals/{id}/restore
+GET /v1/retention
+GET /v1/settings
+PUT /v1/settings
+```
+
+A connection test is not a credential rotation. Human steward testing is limited
+to the granted, active team; rotating a shared credential remains administrative.
+Principal offboarding is separate from team removal: it withdraws tenant-wide
+access and requires durable Ory session cleanup. Restoration must not reactivate
+old sessions. Settings and administrative events retain actor attribution, and
+retention reports do not silently perform deletions.
+
+### Phoenix operator operations
+
+```http
+GET /v1/tenants
+GET /v1/tenants/{id}/provisioning
+```
+
+These require an explicit live Phoenix operator grant in the operator realm.
+A customer tenant administrator cannot enumerate the platform directory or use
+the provisioning path to cross the tenant boundary. An admin bearer alone is
+not operator authority; the contract declares the Ory credential and the distinct
+`platform-operator` requirement.
+
+### Onboarding evidence
+
+```http
+GET /v1/onboarding/candidates
+POST /v1/onboarding/candidates/{id}/decide
+GET /v1/onboarding/rescan
+POST /v1/onboarding/sessions
+GET /v1/onboarding/scans/{id}/quality
+GET /v1/onboarding/findings
+POST /v1/onboarding/sign-off
+GET /v1/onboarding/gaps
+```
+
+Candidate decisions, scan quality, attributed work sessions and sign-off are
+separate evidence records. Accepting a candidate or signing off a scan does not
+establish a human login, link an Ory identity, or grant team membership.
+
+### Governed skill and MCP mutations
+
+```http
+POST /v1/agents/{id}/skills
+POST /v1/mcp-servers
+POST /v1/mcp-servers/{id}/revoke
+POST /v1/mcp-servers/{id}/drift
+```
+
+Admission is not activation. A registered server or skill becomes executable only
+through the appropriate pinned agent binding. Revocation and drift retain the
+historical identity needed to explain previous execution.

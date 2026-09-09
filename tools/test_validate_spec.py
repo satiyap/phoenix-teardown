@@ -219,11 +219,15 @@ def main() -> int:
 
         oa = base / "spec" / "contracts" / "openapi.yaml"
         saved_oa = oa.read_text()
-        oa.write_text(saved_oa.replace("      security: [{ adminToken: [] }]\n"
-                                       "      description: |\n"
-                                       "        Requires an ADMIN credential",
-                                       "      description: |\n"
-                                       "        Requires an ADMIN credential"))
+        # Ory added a second authentication alternative. Matching the old literal
+        # adminToken-only line stopped mutating anything, so a supposed negative
+        # control was just running the baseline again.
+        import yaml
+        unsigned = yaml.safe_load(saved_oa)
+        removed = unsigned["paths"]["/v1/approvals/{id}/decide"]["post"].pop("security", None)
+        check("the approval-security control actually removes a requirement", bool(removed),
+              "no explicit requirement was available to remove")
+        oa.write_text(yaml.safe_dump(unsigned, sort_keys=False))
         out = run_full(base)
         check("removing /decide security fails the openapi check",
               "/v1/approvals/{id}/decide" in out and "agentToken" in out,

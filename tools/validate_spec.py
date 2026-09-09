@@ -230,6 +230,48 @@ def check_proto_compiles() -> list[str]:
                                "(run: make spec, read protoc output above)"]
 
 
+def check_ory_auth_contract(doc: dict) -> list[str]:
+    """Pin credential separation rather than accepting any syntactically valid scheme.
+
+    The contract once duplicated the Ory alternative, omitted machine admins from
+    shared reads, and still generated a successful human bearer-exchange client.
+    """
+    errs: list[str] = []
+    paths = doc.get("paths", {})
+    for path in ("/v1/auth/discover", "/v1/auth/exchange", "/v1/identity-providers"):
+        if path in paths:
+            errs.append(f"{path} is retired and must not be an active OpenAPI operation")
+    expected = [{"agentToken": []}, {"adminToken": []}, {"orySession": []}]
+    security = doc.get("security", [])
+    if len(security) != len(expected) or any(item not in security for item in expected):
+        errs.append("global security must declare agentToken, adminToken and orySession once each")
+    cookie = doc.get("components", {}).get("securitySchemes", {}).get("orySession", {})
+    if (cookie.get("type"), cookie.get("in"), cookie.get("name")) != (
+            "apiKey", "cookie", "ory_kratos_session"):
+        errs.append("orySession must describe the Ory browser session cookie, not a bearer")
+    human_only = {
+        ("get", "/v1/auth/session"): "authenticated-human",
+        ("get", "/v1/tenants"): "platform-operator",
+        ("get", "/v1/tenants/{id}/provisioning"): "platform-operator",
+        ("post", "/v1/teams"): "tenant-admin",
+        ("put", "/v1/teams/{id}/members/{principal_id}"): "tenant-admin",
+        ("post", "/v1/teams/{id}/members/{principal_id}/remove"): "tenant-admin",
+    }
+    for (method, path), authority in human_only.items():
+        operation = paths.get(path, {}).get(method, {})
+        if operation.get("security") != [{"orySession": []}]:
+            errs.append(f"{method.upper()} {path} must require only orySession credentials")
+        if operation.get("x-phoenix-authority") != authority:
+            errs.append(f"{method.upper()} {path} must declare {authority} authority separately from authentication")
+    for path, item in paths.items():
+        for method, operation in item.items():
+            if method not in ("get", "post", "put", "patch", "delete", "head", "options", "trace"):
+                continue
+            if operation.get("security") == []:
+                errs.append(f"{method.upper()} {path} cannot introduce an anonymous northbound operation")
+    return errs
+
+
 def check_openapi() -> list[str]:
     """Compare OPERATIONS, security, states and schemas — not just path strings.
 
@@ -250,7 +292,7 @@ def check_openapi() -> list[str]:
     except Exception as exc:                                    # noqa: BLE001
         return [f"openapi.yaml does not parse: {exc}"]
 
-    errs: list[str] = []
+    errs = check_ory_auth_contract(doc)
     md = (SPEC / "06-api.md").read_text()
     VERBS = ("get", "post", "patch", "put", "delete")
 
