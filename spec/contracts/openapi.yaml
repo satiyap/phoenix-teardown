@@ -1898,6 +1898,75 @@ paths:
                         state: { type: string, enum: [pending, running, done, failed] }
                         detail: { type: string, nullable: true }
         '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
+  /v1/tenants/{id}/capabilities:
+    get:
+      tags: [tenants]
+      operationId: listTenantCapabilities
+      security: [{ orySession: [] }]
+      x-phoenix-authority: platform-operator
+      description: |
+        What this tenant was meant to have, and what was actually observed. Screen S1/S2.
+
+        The two are separate records and must stay separate on the way out: a profile is a
+        decision somebody made, a capability is a thing somebody checked, and reading one
+        off the other is the mistake this lifecycle exists to remove. An execution-enabled
+        tenant whose worker never came up has the intent and not the capability.
+
+        `admitted` is the answer admission itself computes — ready, unexpired, and taken
+        against the configuration in force. It is reported rather than left to the client,
+        because a screen that re-derives it will disagree with the boundary the first time
+        one of the three rules changes.
+
+        A kind with no observation is `unobserved`, which is not `not_configured`: nobody
+        having looked and somebody having looked and found nothing are different facts, and
+        only the second is evidence.
+      parameters: [{ $ref: '#/components/parameters/RunId' }]
+      responses:
+        '200':
+          description: the desired profile and every observed capability
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [desired_profile, items]
+                properties:
+                  desired_profile: { type: string, enum: [control-plane, execution-enabled] }
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [kind, status, admitted, expired]
+                      properties:
+                        kind:   { type: string, enum: [execution, credential_storage] }
+                        status: { type: string, enum: [unobserved, not_configured, pending, ready, failed, disabled] }
+                        admitted:
+                          description: whether this observation currently admits dependent work
+                          type: boolean
+                        expired:
+                          description: |
+                            whether the observation is past its expiry. Reported separately
+                            from status, because an expired ready is still a record of what
+                            was once true and reads differently from a failure.
+                          type: boolean
+                        reason:
+                          description: sanitized prose for an operator; never secret material
+                          type: string
+                        observed_at:            { type: string, format: date-time, nullable: true }
+                        expires_at:             { type: string, format: date-time, nullable: true }
+                        configuration_revision:
+                          description: what the observation was taken against
+                          type: string
+                        configuration_in_force:
+                          description: |
+                            what the tenant is configured to run now. Per capability, not
+                            per tenant: execution is the registered adapter contracts and
+                            credential storage is the configured provider. A ready
+                            observation whose revision differs from this one does not
+                            admit, and showing both is how a screen says why.
+                          type: string
+                        verifier_version:       { type: string }
+                        evidence_ref:           { type: string }
+        '404': { $ref: '#/components/responses/NotFoundOrOtherTenant' }
   /v1/teams:
     post:
       operationId: createTeam
