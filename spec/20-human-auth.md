@@ -14,20 +14,116 @@ separate, revocable path and may name only an actual agent or service principal.
 ## Tenant authority
 
 An operator-controlled exact browser-origin registry selects a Kratos realm. Each
-self-hosted tenant realm has its own Kratos database and stable keys; the platform
-operator realm is separate. Host selection is not authorization. Only a valid Ory
+self-hosted tenant realm has its own Kratos database and stable keys. The platform
+operator may hold a realm of its own, and may instead be bootstrapped into an existing
+shared customer realm by an explicit, audited request; the realm is reused as declared and
+is never relabelled, and an operator realm still cannot become a customer realm. Sharing a
+realm shares one Kratos and therefore one browser cookie host, which is the whole of what
+that choice gives up: operator authority is an explicit grant and is not conferred,
+qualified or bounded by any realm. Host selection is not authorization. Only a valid Ory
 session plus an enabled (realm_id, identity_id) binding to an unrevoked human in an
 active tenant grants access, and then only to the operations its current membership
 authorizes and whose capability requirements are separately satisfied. Email and
 request tenant fields never supply authority.
-A configured realm must agree with the binding's tenant. Unknown, disabled, revoked
-or suspended membership grants nothing.
+A configured realm names the organization that OWNS it, and a shared realm serves
+organizations that are not its owner, so the registry entry is not compared against the
+binding's organization. What bounds the caller is the record: the membership is keyed to
+the realm, and the organization it names must be associated with that realm. Withdrawing
+an association that live memberships depend on is refused, so the authorization query may
+rely on it rather than restate it. Unknown, disabled, revoked or suspended membership
+grants nothing.
+
+A realm is dedicated until explicitly declared shared, and the declaration is refused when
+a realm's existing associations contradict it. Adding an organization to a shared realm is
+an audited association naming who authorized it and why; it does not change the realm, its
+owner or the published registry, and it writes no second deployment receipt. Re-running the
+same request changes nothing and a different one for the same pairing is a conflict.
+
+An invitation's organization is derived from the issuer's membership, which names exactly
+one. An operator holds no membership and must name the organization explicitly; nobody but
+an operator may name an organization other than their own. An invitee is not yet signed in,
+so the organization an offer belongs to is read from the offer rather than from the realm,
+and a digest issued in one realm is not found in another.
+
+Organization-scoped operations require an organization. An account with an operator grant
+and no membership is refused them with its own code rather than answered for an empty
+tenant, and reaches only the operations declared as operator or account surfaces.
+
+Administering an organization never confers operator authority, including in a realm that
+serves the operator's own organization: only the bootstrap and grant commands write a
+grant, each with audit, and the installation-wide bootstrap fuse is unaffected by which
+realm the bootstrap names. Bootstrap records an organization-admin membership alongside the
+grant, in the operator's own organization, which is associated with its realm like any
+other.
+
+Provisioning a customer realm requires that this installation has issued an operator
+bootstrap or holds a live grant. It does not require a realm of any particular kind to
+exist.
+
+After the first operator, additional operators are invited rather than bootstrapped. An
+operator enrollment offer may be issued only by an account holding a live grant — never by
+administering the organization that grant lives in — and only for the organization this
+installation's redeemed bootstrap named, so an invitation cannot create an operator
+organization. It is an administrator offer, so acceptance requires a verified address and
+the second factor, and it writes an explicit audited grant in the same transaction as the
+membership. A redeemed offer replayed returns a receipt and grants nothing, including after
+the grant it created has been revoked.
 
 A member receives the existing own-run capability class. A tenant administrator
 receives administrator capabilities only after email verification and aal2. Global
-tenant listing additionally requires an explicit, live platform-operator grant in
-the operator realm. Tenant administrators cannot create that grant. Fine-grained
-team membership remains an additional resource-level authorization requirement.
+tenant listing additionally requires an explicit, live platform-operator grant.
+Tenant administrators cannot create that grant. Fine-grained team membership remains
+an additional resource-level authorization requirement.
+
+### One realm, many organizations, one organization per account
+
+A realm may serve several organizations, and which ones is an explicit association
+rather than an implication of ownership: an organization the realm is not associated
+with cannot be joined through it at all. A realm declared `dedicated` serves exactly
+one — its owner — and cannot be associated with a second or be re-declared dedicated
+while it already serves several.
+
+Four things stay separate, because collapsing any pair of them is how authority leaks:
+
+- the **account**, one per identity per realm, is what authenticates. Everything
+  recording which identity acted names it, including the installation-wide
+  first-operator fuse.
+- the **association** says which organizations a realm may serve.
+- the **membership** binds an account to one stable principal and role within one
+  organization.
+- the **operator grant** is explicit and revocable, and its subject is the account.
+
+**An account holds at most one membership.** That is why there is no organization
+selector: an authenticated account's organization is derived from its sole membership
+rather than chosen, so there is no selection to validate and no ambiguous context to
+fail safely on. A disabled membership still occupies the account's one slot —
+re-enabling it restores access, rather than a second organization taking the place of
+one somebody withdrew. Relaxing this is a possible future change and is not promised;
+#184 adds independent organization authentication and does not itself lift it.
+
+Resolution therefore has exactly three outcomes:
+
+- **no membership** — no ordinary organization access.
+- **one enabled membership** — its organization is derived, and the existing tenant,
+  principal, role, verification and capability checks apply unchanged.
+- **an operator grant with no usable membership** — only explicitly authorized
+  operator operations, still subject to a valid account, realm and session, email
+  verification, aal2, and the grant not being revoked.
+
+Operator authority does not depend on organization membership. Withdrawing a
+membership, disabling it, or losing an administrator role in an organization does not
+revoke an independently granted operator role; a disabled account or realm, an
+invalidated session, or a revoked grant denies it. Organization membership never
+creates or implies an operator grant, and no path writes one except the bootstrap and
+grant commands with their audit.
+
+### What a shared account means, stated rather than implied
+
+One account is one Ory identity, so its password, second factor, recovery and browser
+sessions are **account-wide by construction**. Recovering or signing out affects the
+account, not one organization. This is a real limitation of a shared realm rather than
+an oversight, it must be visible in the product rather than left to be inferred, and
+making organization credentials independent is #184.
 
 ## Browser request boundary
 

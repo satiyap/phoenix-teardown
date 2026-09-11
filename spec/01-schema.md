@@ -1071,8 +1071,43 @@ Each table `spec/10`-`spec/18` creates issues its own grants beside its own
 `CREATE TABLE`, which is the only order in which they apply; this section states the
 discipline they follow, not the statements.
 
+## Identity, association, membership and grant
+
+Migration 138 separates what migration 125 had combined. A realm may serve several
+organizations; an account is one identity in a realm; an association says which
+organizations a realm may serve; a membership binds an account to one principal and role
+within one organization; and the operator grant's subject is the account.
+
+Every foreign key is classified by what it means. Those recording **which identity acted**
+— the enrollment and bootstrap event logs, and the operator grant — name the account, which
+is why the account key is never widened: doing so would turn an attributable actor into
+"some membership of this identity", and would break the installation-wide first-operator
+fuse that is keyed the same way. Those recording **which identity was bound to which
+principal in which organization** name the membership. Those tying an offer to a realm and
+an organization name the association.
+
+An account holds at most one membership, enforced by `UNIQUE (realm_id, identity_id)` and
+deliberately not made partial on `enabled`: a disabled membership keeps the slot, so
+re-enabling it is what restores access. The composite key permits several rows so that
+relaxing this later is a constraint change rather than a reshaping; nothing promises it will
+be relaxed.
+
+The operator grant references the account and nothing else. Its `tenant_id` and
+`principal_id` are immutable historical attribution — validated when recorded, not
+prerequisites for continuing to hold the grant. The schema is not what makes operator
+authority independent of organization administration: a foreign key constrains deletion and
+key changes, not a membership being disabled, so independence is established in the
+authorization query.
+
 ## Migration discipline
 
 Numbered, forward-only, each guarded by an existence check so re-running is safe
 (HumanLayer's pattern). Every migration gets its own test asserting the post-state,
 per ADK and Agent Control.
+
+**One exception, dated 2026-09-11 and scoped to migration 138.** Database reset is an
+accepted recovery option for the shared-realm transition, so 138 is not required to stay
+readable by a previously deployed binary and drops the membership columns from the account
+record rather than carrying them through a compatibility window. Migrations stay numbered
+and forward-only; every unrelated promotion and rollback requirement is unchanged; and this
+is not licence to erase application data unrelated to the identity schema.
